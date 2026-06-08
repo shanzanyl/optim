@@ -1,5 +1,5 @@
 # =============================================
-# OptiM Backend - Production Safe Requirements
+# OptiM Backend - Complete Requirements
 # =============================================
 
 # Web Framework
@@ -13,9 +13,6 @@ sqlalchemy==2.0.36
 asyncpg==0.29.0
 aiosqlite==0.20.0
 greenlet==3.0.3
-
-#SUPABASE
-supabase==2.6.0
 
 # Authentication
 python-jose[cryptography]==3.3.0
