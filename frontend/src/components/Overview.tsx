@@ -28,7 +28,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
         ? { email, password } 
         : { email, password, name };
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}${endpoint}`, {
+      const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net${endpoint}`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

@@ -21,13 +21,13 @@ const Adminpage: React.FC = () => {
     try {
       const token = localStorage.getItem('token');
       
-      const pendingRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/admin/users`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const pendingRes = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/users`, {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
       const pendingData = await pendingRes.json();
       setPendingUsers(pendingData.users || []);
       
-      const allRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/admin/users/all`, {
+      const allRes = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/users/all`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const allData = await allRes.json();
@@ -51,7 +51,7 @@ const Adminpage: React.FC = () => {
   const handleApprove = async (userId: number, email: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/admin/approve/${userId}`, {
+      const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/approve/${userId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -72,7 +72,7 @@ const Adminpage: React.FC = () => {
     if (confirm(`Hapus user ${email}?`)) {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/admin/reject/${userId}`, {
+        const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/reject/${userId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -94,7 +94,7 @@ const Adminpage: React.FC = () => {
     if (confirm(`Jadikan ${email} sebagai admin?`)) {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/admin/make-admin/${userId}`, {
+        const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/make-admin/${userId}`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` }
         });

@@ -1,6 +1,6 @@
 // src/services/api.ts
 
-export const API_BASE = (import.meta as any).env?.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000';
+export const API_BASE = 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
 export const API_URL = `${API_BASE}/api`;
 
 // ============ FUNGSI AUTH ============
