@@ -179,7 +179,6 @@ google-cloud-speech==2.39.0
 google-cloud-storage==3.10.1
 google-cloud-trace==1.19.0
 google-cloud-translate==3.26.0
-google-colab @ file:///colabtools/dist/google_colab-1.0.0.tar.gz
 google-crc32c==1.8.0
 google-genai==1.68.0
 google-generativeai==0.8.6
@@ -271,7 +270,6 @@ jupyter-events==0.12.1
 jupyter-leaflet==0.20.0
 jupyter_client==7.4.9
 jupyter_core==5.9.1
-jupyter_kernel_gateway @ git+https://github.com/googlecolab/kernel_gateway@b134e9945df25c2dcb98ade9129399be10788671
 jupyter_server==2.14.0
 jupyter_server_terminals==0.5.4
 jupyterlab_pygments==0.3.0
