@@ -130,7 +130,7 @@ future==1.0.0
 gast==0.7.0
 gcsfs==2025.3.0
 gdown==5.2.2
-geemap==0.37.3
+geemap==0.37.2
 geocoder==1.38.1
 geographiclib==2.1
 geopandas==1.1.3
