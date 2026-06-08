@@ -1,0 +1,33 @@
+# Environment
+.env
+.env.*
+
+# Python
+venv/
+venv_backup/
+env/
+.venv/
+__pycache__/
+*.pyc
+
+# React / Node
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+server.log
+
+# Database lokal
+*.sqlite
+*.db
+
+# macOS
+.DS_Store
+
+# Uploads
+uploads/

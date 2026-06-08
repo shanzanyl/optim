@@ -1,0 +1,106 @@
+/* frontend/src/styles/responsive.css */
+
+/* ============================================
+   RESPONSIVE UTILITY CLASSES
+   ============================================ */
+
+/* Hide on specific breakpoints */
+.hide-on-mobile {
+  @media (max-width: 640px) {
+    display: none !important;
+  }
+}
+
+.hide-on-tablet {
+  @media (max-width: 768px) and (min-width: 641px) {
+    display: none !important;
+  }
+}
+
+.hide-on-desktop {
+  @media (min-width: 1024px) {
+    display: none !important;
+  }
+}
+
+/* Stack layouts on mobile */
+.stack-on-mobile {
+  @media (max-width: 640px) {
+    flex-direction: column !important;
+  }
+}
+
+/* Full width on mobile */
+.full-width-on-mobile {
+  @media (max-width: 640px) {
+    width: 100% !important;
+  }
+}
+
+/* Responsive text sizes */
+.text-responsive-sm {
+  font-size: clamp(0.75rem, 3vw, 0.875rem);
+}
+
+.text-responsive-base {
+  font-size: clamp(0.875rem, 4vw, 1rem);
+}
+
+.text-responsive-lg {
+  font-size: clamp(1rem, 5vw, 1.125rem);
+}
+
+.text-responsive-xl {
+  font-size: clamp(1.125rem, 6vw, 1.25rem);
+}
+
+.text-responsive-2xl {
+  font-size: clamp(1.25rem, 7vw, 1.5rem);
+}
+
+.text-responsive-3xl {
+  font-size: clamp(1.5rem, 8vw, 1.875rem);
+}
+
+/* Responsive spacing */
+.p-responsive {
+  padding: clamp(0.75rem, 4vw, 1.5rem);
+}
+
+.m-responsive {
+  margin: clamp(0.75rem, 4vw, 1.5rem);
+}
+
+.gap-responsive {
+  gap: clamp(0.5rem, 2vw, 1rem);
+}
+
+/* Chart containers - prevent overflow */
+.chart-container {
+  width: 100%;
+  min-height: 250px;
+}
+
+@media (max-width: 640px) {
+  .chart-container {
+    min-height: 200px;
+  }
+}
+
+/* Table responsive wrapper */
+.table-responsive-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+/* Card responsive padding */
+.card-responsive {
+  padding: clamp(1rem, 5vw, 2rem);
+  border-radius: clamp(1rem, 3vw, 1.5rem);
+}
+
+/* Grid gap responsive */
+.grid-gap-responsive {
+  gap: clamp(0.75rem, 3vw, 1.5rem);
+}

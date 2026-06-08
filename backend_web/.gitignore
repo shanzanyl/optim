@@ -1,0 +1,21 @@
+# Environment variables
+.env
+.env.*
+
+# Python environments
+venv/
+venv_backup/
+env/
+.venv/
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+
+# Uploads and data
+uploads/
+*.log
+*.sqlite
+*.db
