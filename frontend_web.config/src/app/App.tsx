@@ -53,7 +53,7 @@ export default function App() {
     const savedIsAdmin = localStorage.getItem('isAdmin') === 'true';
     
     if (token && savedUser) {
-      fetch('http://localhost:8000/api/me', {
+      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => {

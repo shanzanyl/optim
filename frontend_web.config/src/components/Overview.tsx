@@ -28,7 +28,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
         ? { email, password } 
         : { email, password, name };
 
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}${endpoint}`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -70,7 +70,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
     }
     setCheckingStatus(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/check-status?email=${encodeURIComponent(email)}`);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/check-status?email=${encodeURIComponent(email)}`);
       const data = await response.json();
       if (data.is_approved) {
         setError("✅ AKUN ANDA SUDAH DISETUJUI! Silakan login.");

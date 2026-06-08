@@ -104,7 +104,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await fetch('http://localhost:8000/api/dashboard?limit=5000', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/dashboard?limit=5000`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const dashboard = await response.json();
