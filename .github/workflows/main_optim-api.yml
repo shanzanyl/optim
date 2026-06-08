@@ -83,5 +83,5 @@ jobs:
         with:
           app-name: 'optim-api'
           slot-name: 'Production'
-          startup-command: 'cd /home/site/wwwroot && pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000'
+          startup-command: 'gunicorn -w 1 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000'
 
