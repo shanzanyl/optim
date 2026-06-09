@@ -114,6 +114,8 @@ async def lifespan(app: FastAPI):
     
     # 🔥 Auto sync background task (every 6 hours)
     async def auto_sync_sheets():
+        # 🔥 FIX: Sync langsung saat startup, tidak perlu tunggu 6 jam
+        await asyncio.sleep(10)
         while True:
             try:
                 logger.info("🔄 Auto-sync from Google Sheets...")
@@ -738,39 +740,42 @@ async def detect_ocr(
         return ocr_space_extract(content)
     
     try:
-        easyocr_task = asyncio.create_task(run_easyocr())
-        tesseract_task = asyncio.create_task(run_tesseract())
-        ocrspace_task = asyncio.create_task(run_ocrspace())
-        
-        done, pending = await asyncio.wait(
-            [easyocr_task, tesseract_task, ocrspace_task],
-            timeout=20.0,
-            return_when=asyncio.ALL_COMPLETED
-        )
-        
-        best_text = ""
-        best_score = 0
-        
-        for task in done:
+        # 🔥 FIX: Timeout per-method agar tidak 504 di Azure
+        results = {}
+
+        try:
+            results['tesseract'] = await asyncio.wait_for(
+                asyncio.to_thread(tesseract_extract, content), timeout=25.0)
+        except asyncio.TimeoutError:
+            logger.warning("Tesseract timed out")
+            results['tesseract'] = ""
+
+        try:
+            results['ocr.space'] = await asyncio.wait_for(
+                asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
+        except asyncio.TimeoutError:
+            logger.warning("OCR.space timed out")
+            results['ocr.space'] = ""
+
+        if easyocr_reader is not None:
             try:
-                text = task.result()
-                if text:
-                    score = len(re.findall(r'\d+\.\d{3,}', text))
-                    if score > best_score:
-                        best_score = score
-                        best_text = text
-                        if task == easyocr_task:
-                            ocr_method = "easyocr"
-                        elif task == tesseract_task:
-                            ocr_method = "tesseract"
-                        else:
-                            ocr_method = "ocr.space"
-            except Exception as e:
-                logger.error(f"OCR task error: {e}")
-        
-        raw_text = best_text
+                results['easyocr'] = await asyncio.wait_for(
+                    asyncio.to_thread(easyocr_extract_simple, content), timeout=20.0)
+            except asyncio.TimeoutError:
+                logger.warning("EasyOCR timed out")
+                results['easyocr'] = ""
+
+        best_score = 0
+        for method, text in results.items():
+            if text:
+                score = len(re.findall(r'\d+\.\d{3,}', text))
+                if score > best_score:
+                    best_score = score
+                    raw_text = text
+                    ocr_method = method
+
         logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
-        
+
     except Exception as e:
         logger.error(f"OCR error: {e}")
     
