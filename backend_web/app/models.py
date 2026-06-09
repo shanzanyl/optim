@@ -52,7 +52,8 @@ class OtdrResult(Base):
     avg_l_1     = Column(Float, nullable=True)
     avg_l_2     = Column(Float, nullable=True)
     avg_l_3     = Column(Float, nullable=True)
-    avg_l_4     = Column(Float, nullable=True)
+    avg_total     = Column(Float, nullable=True)
+    # Avg Total across all KM
 
     # Return Loss per KM
     return_1    = Column(Float, nullable=True)

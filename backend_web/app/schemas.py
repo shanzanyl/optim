@@ -91,7 +91,6 @@ class ManualClassifyRequest(BaseModel):
     loss_1: float
     loss_2: float
     loss_3: float
-    loss_4: float
     total_l_1: float
     total_l_2: float
     total_l_3: float
