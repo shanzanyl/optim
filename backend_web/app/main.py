@@ -379,6 +379,7 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
         }
         rows.append(row_data)
     
+    
     # 5. Ekstrak Avg-Total
     avg_total = 0.0
     m_avg = re.search(r'(\d+\.\d{2,3})\s*(?:dB/km|db/km)', text)
