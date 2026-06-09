@@ -916,6 +916,7 @@ async def get_dashboard(
             "return_3": r.return_3, "return_4": r.return_4,
             "distance_1": r.distance_1, "distance_2": r.distance_2,
             "distance_3": r.distance_3, "distance_4": r.distance_4,
+            "prx": r.prx,
             "klasifikasi": r.klasifikasi,
             "status": r.status,
             "confidence": r.confidence,
@@ -958,6 +959,7 @@ async def get_history(
             "total_l_4": r.total_l_4,
             "return_1": r.return_1, "return_2": r.return_2,
             "return_3": r.return_3, "return_4": r.return_4,
+            "prx": r.prx,
             "klasifikasi": r.klasifikasi,
             "status": r.status,
             "timestamp": r.timestamp.isoformat() if r.timestamp else None,
@@ -990,7 +992,10 @@ async def get_slide_data(
 ):
     result = await db.execute(
         select(OtdrResult)
-        .where(OtdrResult.user_id == current_user.id)
+        .where(
+            (OtdrResult.source == "sheets") |
+            (OtdrResult.user_id == current_user.id)
+        )
         .order_by(OtdrResult.timestamp.asc())
         .offset(index)
         .limit(1)
@@ -1000,7 +1005,7 @@ async def get_slide_data(
         return await get_slide_data(0, db, current_user)
     
     total_result = await db.execute(
-        select(func.count(OtdrResult.id)).where(OtdrResult.user_id == current_user.id)
+        select(func.count(OtdrResult.id)).where((OtdrResult.user_id == current_user.id) | (OtdrResult.source == "sheets"))
     )
     total = total_result.scalar() or 0
     
