@@ -99,6 +99,7 @@ class ManualClassifyRequest(BaseModel):
     avg_l_2: float
     avg_l_3: float
     avg_l_4: float
+    loss_4: float = 0.0
     avg_total: float
     return_1: float
     return_2: float

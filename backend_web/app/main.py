@@ -70,9 +70,48 @@ easyocr_loading = False
 async def lifespan(app: FastAPI):
     global easyocr_reader, easyocr_loading
     
-    # Create tables
+    # Create tables (safe: only creates if not exists, never drops)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    # Safe migration: add missing columns without dropping data
+    safe_columns_sql = [
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_4 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_1 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_2 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_3 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_4 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_total FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS temperature FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS wavelength FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS pulse_width FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_1 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_2 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_3 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_4 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_1 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_2 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_3 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_4 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_1 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_2 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_3 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_4 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_1 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_2 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_3 FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS prx FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS confidence FLOAT",
+        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS raw_text TEXT",
+    ]
+    from sqlalchemy import text as sa_text
+    async with engine.begin() as conn:
+        for sql in safe_columns_sql:
+            try:
+                await conn.execute(sa_text(sql))
+            except Exception as col_err:
+                logger.warning(f"Column migration skipped: {col_err}")
+    logger.info("✅ Safe column migration complete")
     
     # Create admin user
     async with AsyncSessionLocal() as db:
@@ -181,6 +220,7 @@ async def lifespan(app: FastAPI):
                                             total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
                                             avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
                                             avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
+                                            avg_total=g('Avg-Total'),
                                             return_1=g('Return 1'), return_2=g('Return 2'),
                                             return_3=g('Return 3'), return_4=g('Return 4'),
                                             klasifikasi=pred.get("prediction"),
@@ -1188,7 +1228,7 @@ async def sync_from_sheets(
                 pulse_width=g('Pulse Width (ns)'),
                 distance_1=g('Distance 1'), distance_2=g('Distance 2'),
                 distance_3=g('Distance 3'), distance_4=g('Distance 4'),
-                loss_1=g('Loss 1'), loss_2=g('Loss 2'), loss_3=g('Loss 3'), loss_4=g('Loss 4'),
+                loss_1=g('Loss 1'), loss_2=g('Loss 2'), loss_3=g('Loss 3'), loss_4=None if g('Loss 4') == 0 else g('Loss 4'),
                 total_l_1=g('Total-L 1'), total_l_2=g('Total-L 2'),
                 total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
                 avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
