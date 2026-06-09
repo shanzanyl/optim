@@ -70,7 +70,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
     }
     setCheckingStatus(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/check-status?email=${encodeURIComponent(email)}`);
+      const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/check-status?email=${encodeURIComponent(email)}`);
       const data = await response.json();
       if (data.is_approved) {
         setError("✅ AKUN ANDA SUDAH DISETUJUI! Silakan login.");

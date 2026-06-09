@@ -9,7 +9,7 @@ interface ChatMessage {
 }
 
 // 🔥 AMBIL API BASE DARI ENVIRONMENT VARIABLE
-const API_BASE = ((import.meta as any).env?.VITE_API_URL as string | undefined)?.replace('/api', '') || 'http://localhost:8000';
+const API_BASE = 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
 
 const Chatbot: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
