@@ -898,7 +898,10 @@ async def get_dashboard(
 ):
     result = await db.execute(
         select(OtdrResult)
-        .where(OtdrResult.user_id == current_user.id)
+        .where(
+            (OtdrResult.source == "sheets") |
+            (OtdrResult.user_id == current_user.id)
+        )
         .order_by(OtdrResult.timestamp.desc())
         .limit(limit)
     )
@@ -912,6 +915,7 @@ async def get_dashboard(
             "prx": r.prx,
             "loss_1": r.loss_1, "loss_2": r.loss_2,
             "loss_3": r.loss_3, "loss_4": r.loss_4,
+            "total_l_4": r.total_l_4, 
             "return_1": r.return_1, "return_2": r.return_2,
             "return_3": r.return_3, "return_4": r.return_4,
             "distance_1": r.distance_1, "distance_2": r.distance_2,
@@ -938,7 +942,10 @@ async def get_history(
     if current_user:
         result = await db.execute(
             select(OtdrResult)
-            .where(OtdrResult.user_id == current_user.id)
+            .where(
+                (OtdrResult.user_id == current_user.id) |
+                (OtdrResult.source == "sheets")
+            )
             .order_by(OtdrResult.timestamp.desc())
             .offset(skip)
             .limit(limit)
@@ -946,6 +953,7 @@ async def get_history(
     else:
         result = await db.execute(
             select(OtdrResult)
+            .where(OtdrResult.source == "sheets")
             .order_by(OtdrResult.timestamp.desc())
             .offset(skip)
             .limit(limit)
