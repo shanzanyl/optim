@@ -65,6 +65,120 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 easyocr_reader = None
 easyocr_loading = False
 
+# ═══════════════════════════════════════════════════════════════════
+# 🔥 FUNGSI MAPPING KOLOM - SESUAI DENGAN FEATURE_ORDER.JSON
+# ═══════════════════════════════════════════════════════════════════
+
+# Daftar fitur yang dibutuhkan model (dari feature_order.json)
+REQUIRED_FEATURES = [
+    "Prx (dBm)", "Distance 1", "Distance 2", "Distance 3", "Distance 4",
+    "Loss 1", "Loss 2", "Loss 3", "Total-L 1", "Total-L 2", "Total-L 3", "Total-L 4",
+    "Avg-L 1", "Avg-L 2", "Avg-L 3", "Avg-L 4", "Avg-Total",
+    "Return 1", "Return 2", "Return 3", "Return 4"
+]
+
+def create_column_mapping(df_columns: list) -> dict:
+    """
+    Membuat mapping dari nama kolom di CSV ke format yang dibutuhkan model.
+    Mapping ini FLEKSIBEL dan bisa membaca berbagai variasi nama kolom.
+    """
+    # Ubah semua ke lowercase untuk pencarian case-insensitive
+    col_lower = {c.lower().strip(): c for c in df_columns}
+    
+    # Keyword mapping untuk setiap fitur yang dibutuhkan
+    keyword_mapping = {
+        'Prx (dBm)': ['prx (dbm)', 'prx', 'rx power', 'received power', 'prx(dbm)', 'prx_dbm'],
+        
+        'Distance 1': ['distance 1', 'dist 1', 'jarak 1', 'distance_1', 'distancias 1'],
+        'Distance 2': ['distance 2', 'dist 2', 'jarak 2', 'distance_2', 'distancias 2'],
+        'Distance 3': ['distance 3', 'dist 3', 'jarak 3', 'distance_3', 'distancias 3'],
+        'Distance 4': ['distance 4', 'dist 4', 'jarak 4', 'distance_4', 'distancias 4'],
+        
+        'Loss 1': ['loss 1', 'redaman 1', 'attenuation 1', 'loss_1', 'perdida 1'],
+        'Loss 2': ['loss 2', 'redaman 2', 'attenuation 2', 'loss_2', 'perdida 2'],
+        'Loss 3': ['loss 3', 'redaman 3', 'attenuation 3', 'loss_3', 'perdida 3'],
+        
+        'Total-L 1': ['total-l 1', 'total loss 1', 'total_l_1', 'totalloss1', 'total l 1', 'total_l1'],
+        'Total-L 2': ['total-l 2', 'total loss 2', 'total_l_2', 'totalloss2', 'total l 2', 'total_l2'],
+        'Total-L 3': ['total-l 3', 'total loss 3', 'total_l_3', 'totalloss3', 'total l 3', 'total_l3'],
+        'Total-L 4': ['total-l 4', 'total loss 4', 'total_l_4', 'totalloss4', 'total l 4', 'total_l4'],
+        
+        'Avg-L 1': ['avg-l 1', 'average loss 1', 'avg_l_1', 'avg loss 1', 'rata-rata loss 1', 'avg_l1'],
+        'Avg-L 2': ['avg-l 2', 'average loss 2', 'avg_l_2', 'avg loss 2', 'rata-rata loss 2', 'avg_l2'],
+        'Avg-L 3': ['avg-l 3', 'average loss 3', 'avg_l_3', 'avg loss 3', 'rata-rata loss 3', 'avg_l3'],
+        'Avg-L 4': ['avg-l 4', 'average loss 4', 'avg_l_4', 'avg loss 4', 'rata-rata loss 4', 'avg_l4'],
+        
+        'Avg-Total': ['avg-total', 'total average', 'avg_total', 'rata-rata total', 'average total', 'avg total'],
+        
+        'Return 1': ['return 1', 'orl 1', 'return loss 1', 'return_1', 'retorno 1'],
+        'Return 2': ['return 2', 'orl 2', 'return loss 2', 'return_2', 'retorno 2'],
+        'Return 3': ['return 3', 'orl 3', 'return loss 3', 'return_3', 'retorno 3'],
+        'Return 4': ['return 4', 'orl 4', 'return loss 4', 'return_4', 'retorno 4'],
+    }
+    
+    mapping = {}
+    for needed_field, keywords in keyword_mapping.items():
+        for keyword in keywords:
+            if keyword in col_lower:
+                mapping[needed_field] = col_lower[keyword]
+                logger.info(f"✅ Mapped '{needed_field}' → '{col_lower[keyword]}'")
+                break
+        if needed_field not in mapping:
+            logger.warning(f"⚠️ Column '{needed_field}' not found in CSV, will try to calculate")
+    
+    return mapping
+
+
+def get_value_from_row(row, field_name: str, mapping: dict, default=0.0):
+    """Ambil nilai dari row berdasarkan mapping yang sudah dibuat"""
+    if field_name in mapping:
+        col_name = mapping[field_name]
+        if col_name in row.index:
+            val = row[col_name]
+            try:
+                if pd.isna(val) or val == '' or val == '-':
+                    return default
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+    return default
+
+
+def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) -> dict:
+    """Hitung nilai yang tidak tersedia di CSV"""
+    result = {}
+    
+    # Hitung Avg-L dari Total-L / Distance jika tidak ada
+    for i in range(1, 5):
+        avg_key = f'Avg-L {i}'
+        total_key = f'Total-L {i}'
+        dist_key = f'Distance {i}'
+        
+        avg_val = get_value_from_row(row, avg_key, mapping, 0)
+        total_val = get_value_from_row(row, total_key, mapping, 0)
+        dist_val = distance.get(dist_key, 0)
+        
+        if avg_val == 0 and total_val > 0 and dist_val > 0:
+            avg_val = total_val / dist_val
+            logger.info(f"📐 Calculated {avg_key} = {total_val}/{dist_val} = {avg_val:.4f}")
+        
+        result[avg_key] = avg_val
+    
+    # Hitung Avg-Total jika tidak ada
+    avg_total = get_value_from_row(row, 'Avg-Total', mapping, 0)
+    if avg_total == 0:
+        avg_total = result.get('Avg-L 4', 0)
+        if avg_total == 0:
+            total_l_4 = get_value_from_row(row, 'Total-L 4', mapping, 0)
+            dist_4 = distance.get('Distance 4', 0)
+            if total_l_4 > 0 and dist_4 > 0:
+                avg_total = total_l_4 / dist_4
+        logger.info(f"📐 Calculated Avg-Total = {avg_total:.4f}")
+    
+    result['Avg-Total'] = avg_total
+    
+    return result
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,45 +187,6 @@ async def lifespan(app: FastAPI):
     # Create tables (safe: only creates if not exists, never drops)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    # Safe migration: add missing columns without dropping data
-    safe_columns_sql = [
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_4 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_1 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_2 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_3 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_l_4 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS avg_total FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS temperature FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS wavelength FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS pulse_width FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_1 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_2 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_3 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS total_l_4 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_1 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_2 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_3 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS distance_4 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_1 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_2 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_3 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS return_4 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_1 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_2 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS loss_3 FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS prx FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS confidence FLOAT",
-        "ALTER TABLE otdr_results ADD COLUMN IF NOT EXISTS raw_text TEXT",
-    ]
-    from sqlalchemy import text as sa_text
-    async with engine.begin() as conn:
-        for sql in safe_columns_sql:
-            try:
-                await conn.execute(sa_text(sql))
-            except Exception as col_err:
-                logger.warning(f"Column migration skipped: {col_err}")
-    logger.info("✅ Safe column migration complete")
     
     # Create admin user
     async with AsyncSessionLocal() as db:
@@ -153,23 +228,28 @@ async def lifespan(app: FastAPI):
     
     # 🔥 Auto sync background task (every 6 hours)
     async def auto_sync_sheets():
-        # 🔥 FIX: Sync langsung saat startup, tidak perlu tunggu 6 jam
         await asyncio.sleep(10)
         while True:
             try:
                 logger.info("🔄 Auto-sync from Google Sheets...")
                 async with AsyncSessionLocal() as db_sync:
-                    # Get all users
                     result = await db_sync.execute(select(User))
                     users = result.scalars().all()
                     
                     for user in users:
                         try:
-                            async with httpx.AsyncClient() as client:
-                                resp = await client.get(SHEET_URL, timeout=30)
+                            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+                                resp = await client.get(SHEET_URL, headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                                })
                                 if resp.status_code == 200:
                                     df = pd.read_csv(io.StringIO(resp.text))
-                                    df.columns = [c.strip() for c in df.columns]
+                                    df.columns = [str(c).strip() for c in df.columns]
+                                    
+                                    logger.info(f"📊 Found columns in CSV: {df.columns.tolist()}")
+                                    
+                                    # 🔥 BUAT MAPPING KOLOM
+                                    column_mapping = create_column_mapping(df.columns.tolist())
                                     
                                     # Delete old sheets data
                                     existing = await db_sync.execute(
@@ -182,56 +262,121 @@ async def lifespan(app: FastAPI):
                                         await db_sync.delete(rec)
                                     await db_sync.flush()
                                     
-                                    # Insert new data
+                                    saved = 0
                                     for _, row in df.iterrows():
-                                        def g(col, default=0.0):
-                                            try:
-                                                val = row.get(col, default)
-                                                return float(val) if pd.notna(val) else default
-                                            except Exception:
-                                                return default
+                                        # Ambil nilai dasar
+                                        prx_val = get_value_from_row(row, 'Prx (dBm)', column_mapping)
+                                        temp_val = get_value_from_row(row, 'Temperature (C)', column_mapping)
+                                        wavelength_val = get_value_from_row(row, 'Wavelength', column_mapping)
+                                        pulse_width_val = get_value_from_row(row, 'Pulse Width (ns)', column_mapping)
                                         
-                                        otdr_values = {
-                                            'Distance 1': g('Distance 1'), 'Distance 2': g('Distance 2'),
-                                            'Distance 3': g('Distance 3'), 'Distance 4': g('Distance 4'),
-                                            'Loss 1': g('Loss 1'), 'Loss 2': g('Loss 2'), 'Loss 3': g('Loss 3'),
-                                            'Total-L 1': g('Total-L 1'), 'Total-L 2': g('Total-L 2'),
-                                            'Total-L 3': g('Total-L 3'), 'Total-L 4': g('Total-L 4'),
-                                            'Avg-L 1': g('Avg-L 1'), 'Avg-L 2': g('Avg-L 2'),
-                                            'Avg-L 3': g('Avg-L 3'), 'Avg-L 4': g('Avg-L 4'),
-                                            'Avg-Total': g('Avg-Total'),
-                                            'Return 1': g('Return 1'), 'Return 2': g('Return 2'),
-                                            'Return 3': g('Return 3'), 'Return 4': g('Return 4'),
+                                        # Distance values
+                                        distance = {
+                                            'Distance 1': get_value_from_row(row, 'Distance 1', column_mapping),
+                                            'Distance 2': get_value_from_row(row, 'Distance 2', column_mapping),
+                                            'Distance 3': get_value_from_row(row, 'Distance 3', column_mapping),
+                                            'Distance 4': get_value_from_row(row, 'Distance 4', column_mapping),
                                         }
                                         
-                                        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+                                        # Loss values
+                                        loss = {
+                                            'Loss 1': get_value_from_row(row, 'Loss 1', column_mapping),
+                                            'Loss 2': get_value_from_row(row, 'Loss 2', column_mapping),
+                                            'Loss 3': get_value_from_row(row, 'Loss 3', column_mapping),
+                                        }
                                         
+                                        # Total-L values
+                                        total_l = {
+                                            'Total-L 1': get_value_from_row(row, 'Total-L 1', column_mapping),
+                                            'Total-L 2': get_value_from_row(row, 'Total-L 2', column_mapping),
+                                            'Total-L 3': get_value_from_row(row, 'Total-L 3', column_mapping),
+                                            'Total-L 4': get_value_from_row(row, 'Total-L 4', column_mapping),
+                                        }
+                                        
+                                        # Return values
+                                        return_vals = {
+                                            'Return 1': get_value_from_row(row, 'Return 1', column_mapping),
+                                            'Return 2': get_value_from_row(row, 'Return 2', column_mapping),
+                                            'Return 3': get_value_from_row(row, 'Return 3', column_mapping),
+                                            'Return 4': get_value_from_row(row, 'Return 4', column_mapping),
+                                        }
+                                        
+                                        # Hitung nilai yang hilang (Avg-L dan Avg-Total)
+                                        calculated = calculate_missing_values(row, column_mapping, distance, total_l)
+                                        
+                                        # Siapkan values untuk ML
+                                        otdr_values = {
+                                                'Prx (dBm)': prx_val,
+                                            'Distance 1': distance['Distance 1'],
+                                            'Distance 2': distance['Distance 2'],
+                                            'Distance 3': distance['Distance 3'],
+                                            'Distance 4': distance['Distance 4'],
+                                            'Loss 1': loss['Loss 1'],
+                                            'Loss 2': loss['Loss 2'],
+                                            'Loss 3': loss['Loss 3'],
+                                            'Total-L 1': total_l['Total-L 1'],
+                                            'Total-L 2': total_l['Total-L 2'],
+                                            'Total-L 3': total_l['Total-L 3'],
+                                            'Total-L 4': total_l['Total-L 4'],
+                                            'Avg-L 1': calculated.get('Avg-L 1', 0),
+                                            'Avg-L 2': calculated.get('Avg-L 2', 0),
+                                            'Avg-L 3': calculated.get('Avg-L 3', 0),
+                                            'Avg-L 4': calculated.get('Avg-L 4', 0),
+                                            'Avg-Total': calculated.get('Avg-Total', 0),
+                                            'Return 1': return_vals['Return 1'],
+                                            'Return 2': return_vals['Return 2'],
+                                            'Return 3': return_vals['Return 3'],
+                                            'Return 4': return_vals['Return 4'],
+    }
+                                        
+                                        # Prediksi ML
+                                        try:
+                                            pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+                                        except Exception as e:
+                                            logger.error(f"ML prediction error: {e}")
+                                            pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+                                        
+                                        # Simpan ke database
                                         record = OtdrResult(
                                             user_id=user.id,
                                             timestamp=datetime.now(),
-                                            prx=g('Prx (dBm)'),
-                                            temperature=g('Temperature (C)'),
-                                            wavelength=g('Wavelength'),
-                                            pulse_width=g('Pulse Width (ns)'),
-                                            distance_1=g('Distance 1'), distance_2=g('Distance 2'),
-                                            distance_3=g('Distance 3'), distance_4=g('Distance 4'),
-                                            loss_1=g('Loss 1'), loss_2=g('Loss 2'), loss_3=g('Loss 3'), loss_4=None,
-                                            total_l_1=g('Total-L 1'), total_l_2=g('Total-L 2'),
-                                            total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
-                                            avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
-                                            avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
-                                            avg_total=g('Avg-Total'),
-                                            return_1=g('Return 1'), return_2=g('Return 2'),
-                                            return_3=g('Return 3'), return_4=g('Return 4'),
+                                            prx=prx_val,
+                                            temperature=temp_val,
+                                            wavelength=wavelength_val,
+                                            pulse_width=pulse_width_val,
+                                            distance_1=distance['Distance 1'],
+                                            distance_2=distance['Distance 2'],
+                                            distance_3=distance['Distance 3'],
+                                            distance_4=distance['Distance 4'],
+                                            loss_1=loss['Loss 1'],
+                                            loss_2=loss['Loss 2'],
+                                            loss_3=loss['Loss 3'],
+                                            loss_4=None,
+                                            total_l_1=total_l['Total-L 1'],
+                                            total_l_2=total_l['Total-L 2'],
+                                            total_l_3=total_l['Total-L 3'],
+                                            total_l_4=total_l['Total-L 4'],
+                                            avg_l_1=calculated.get('Avg-L 1', 0),
+                                            avg_l_2=calculated.get('Avg-L 2', 0),
+                                            avg_l_3=calculated.get('Avg-L 3', 0),
+                                            avg_l_4=calculated.get('Avg-L 4', 0),
+                                            avg_total=calculated.get('Avg-Total', 0),
+                                            return_1=return_vals['Return 1'],
+                                            return_2=return_vals['Return 2'],
+                                            return_3=return_vals['Return 3'],
+                                            return_4=return_vals['Return 4'],
                                             klasifikasi=pred.get("prediction"),
                                             status=pred.get("status"),
                                             confidence=pred.get("confidence"),
                                             source="sheets",
                                         )
                                         db_sync.add(record)
+                                        saved += 1
                                     
                                     await db_sync.commit()
-                                    logger.info(f"Auto-sync success for {user.email}")
+                                    logger.info(f"✅ Auto-sync success for {user.email}: {saved} records saved")
+                                else:
+                                    logger.error(f"Failed to fetch sheet: {resp.status_code}")
                         except Exception as e:
                             logger.error(f"Auto-sync error for {user.email}: {e}")
                 
