@@ -37,12 +37,19 @@ FEATURE_ORDER_PATHS = [
     BASE_DIR / "feature_order.json",
 ]
 
+SCALER_PATHS = [
+    BASE_DIR.parent / "robust_scaler.joblib",
+    Path.cwd() / "robust_scaler.joblib",
+    BASE_DIR / "robust_scaler.joblib",
+]
+
 # ══════════════════════════════════════════════════════════════════
 # LOAD MODEL
 # ══════════════════════════════════════════════════════════════════
 
 lgbm_model = None
 label_encoder = None
+robust_scaler = None
 feature_columns = None
 
 # Load model
@@ -73,6 +80,16 @@ for path in FEATURE_ORDER_PATHS:
                 feature_columns = json.load(f)
                 feature_columns = [col.strip() for col in feature_columns]
             logger.info(f"✅ Feature order loaded: {path} ({len(feature_columns)} features)")
+            break
+        except Exception as e:
+            logger.warning(f"Failed to load {path}: {e}")
+
+# Load robust scaler
+for path in SCALER_PATHS:
+    if path.exists():
+        try:
+            robust_scaler = joblib.load(path)
+            logger.info(f"✅ Robust scaler loaded: {path}")
             break
         except Exception as e:
             logger.warning(f"Failed to load {path}: {e}")
@@ -153,6 +170,10 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         
         # Select and order features
         X = row[feature_columns].fillna(0.0).astype(np.float32)
+        
+        # Scale features
+        if robust_scaler is not None:
+            X = robust_scaler.transform(X)
         
         # Predict
         pred_encoded = lgbm_model.predict(X)[0]

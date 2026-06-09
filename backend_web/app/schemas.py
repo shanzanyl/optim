@@ -79,3 +79,29 @@ class OcrResponse(BaseModel):
     extracted: dict
     prediction: Optional[str] = None
     status: Optional[str] = None
+
+
+# ── Manual Classification ──────────────────────────────
+class ManualClassifyRequest(BaseModel):
+    prx: float
+    distance_1: float
+    distance_2: float
+    distance_3: float
+    distance_4: float
+    loss_1: float
+    loss_2: float
+    loss_3: float
+    loss_4: float
+    total_l_1: float
+    total_l_2: float
+    total_l_3: float
+    total_l_4: float
+    avg_l_1: float
+    avg_l_2: float
+    avg_l_3: float
+    avg_l_4: float
+    avg_total: float
+    return_1: float
+    return_2: float
+    return_3: float
+    return_4: float

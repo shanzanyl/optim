@@ -27,7 +27,7 @@ import tempfile
 
 from app.database import Base, engine, get_db, AsyncSessionLocal
 from app.models import User, OtdrResult
-from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut
+from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest
 from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_optional_user, get_current_admin
@@ -537,6 +537,45 @@ async def chat(
             select(OtdrResult).order_by(OtdrResult.timestamp.desc()).limit(1)
         )
         latest = result_latest.scalar_one_or_none()
+
+        # Database Stats queries for frequency of issues
+        from datetime import timedelta
+        now_time = datetime.now()
+        seven_days_ago = now_time - timedelta(days=7)
+        thirty_days_ago = now_time - timedelta(days=30)
+
+        # 1. Stats last 7 days
+        q_7d = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
+            .where(OtdrResult.klasifikasi != "Normal", OtdrResult.timestamp >= seven_days_ago)\
+            .group_by(OtdrResult.klasifikasi)\
+            .order_by(func.count(OtdrResult.id).desc())
+        r_7d = await db.execute(q_7d)
+        stats_7d = r_7d.all()
+
+        # 2. Stats last 30 days
+        q_30d = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
+            .where(OtdrResult.klasifikasi != "Normal", OtdrResult.timestamp >= thirty_days_ago)\
+            .group_by(OtdrResult.klasifikasi)\
+            .order_by(func.count(OtdrResult.id).desc())
+        r_30d = await db.execute(q_30d)
+        stats_30d = r_30d.all()
+
+        # 3. Overall Stats
+        q_all = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
+            .where(OtdrResult.klasifikasi != "Normal")\
+            .group_by(OtdrResult.klasifikasi)\
+            .order_by(func.count(OtdrResult.id).desc())
+        r_all = await db.execute(q_all)
+        stats_all = r_all.all()
+
+        def format_stats_list(stats_list):
+            if not stats_list:
+                return "Tidak ada gangguan terdeteksi"
+            return "<br>".join([f"• {row[0]}: <strong>{row[1]} kali</strong>" for row in stats_list])
+
+        stats_7d_str = format_stats_list(stats_7d)
+        stats_30d_str = format_stats_list(stats_30d)
+        stats_all_str = format_stats_list(stats_all)
         
         prompt = f"""Anda adalah asisten AI untuk aplikasi OptiM.
 
@@ -546,6 +585,12 @@ async def chat(
 - Status terakhir: {latest.status if latest else 'Belum ada'}
 - Loss terakhir: KM1={latest.loss_1 if latest else 0} dB, KM2={latest.loss_2 if latest else 0} dB, KM3={latest.loss_3 if latest else 0} dB, KM4={latest.loss_4 if latest else 0} dB
 - Prx: {latest.prx if latest else 0} dBm
+- Statistik gangguan 7 hari terakhir:
+{stats_7d_str}
+- Statistik gangguan 30 hari terakhir:
+{stats_30d_str}
+- Statistik gangguan keseluruhan (all-time):
+{stats_all_str}
 
 [PERTANYAAN PENGGUNA]
 {user_message}
@@ -556,19 +601,62 @@ Jawab dengan bahasa Indonesia yang ramah dan profesional. Format output dengan H
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=30)
+        response = None
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, json=payload, timeout=15)
+                    if response.status_code == 200:
+                        break
+                    elif response.status_code == 429:
+                        logger.warning(f"Gemini API rate limited (429), retrying in {1.5 * (attempt + 1)}s...")
+                        await asyncio.sleep(1.5 * (attempt + 1))
+                    else:
+                        break
+            except Exception as e:
+                logger.error(f"Gemini request attempt {attempt} failed: {e}")
+                if attempt == 1:
+                    break
+
+        if response and response.status_code == 200:
             data = response.json()
-            
-            if response.status_code == 200:
-                reply = data["candidates"][0]["content"]["parts"][0]["text"]
-                return {"response": format_markdown_to_html(reply), "source": "gemini_api"}
+            reply = data["candidates"][0]["content"]["parts"][0]["text"]
+            return {"response": format_markdown_to_html(reply), "source": "gemini_api"}
+        else:
+            # Smart rule-based fallback based on DB values if API fails/gets rate-limited
+            msg_lower = user_message.lower()
+            if any(x in msg_lower for x in ["sering", "terbanyak", "dominan", "minggu", "bulan", "mingguan", "bulanan"]):
+                if "minggu" in msg_lower or "7 hari" in msg_lower:
+                    reply_html = f"Berikut adalah statistik gangguan dalam 1 minggu terakhir (7 hari):<br>{stats_7d_str}"
+                elif "bulan" in msg_lower or "30 hari" in msg_lower:
+                    reply_html = f"Berikut adalah statistik gangguan dalam 1 bulan terakhir (30 hari):<br>{stats_30d_str}"
+                else:
+                    reply_html = f"Gangguan yang paling sering terjadi (keseluruhan data):<br>{stats_all_str}<br><br>Statistik 7 hari terakhir:<br>{stats_7d_str}"
+            elif any(x in msg_lower for x in ["loss", "rugi", "db"]):
+                if latest:
+                    reply_html = f"Berdasarkan data terakhir di database:<br>• Loss KM 1: <strong>{latest.loss_1 or 0} dB</strong><br>• Loss KM 2: <strong>{latest.loss_2 or 0} dB</strong><br>• Loss KM 3: <strong>{latest.loss_3 or 0} dB</strong><br>• Loss KM 4: <strong>{latest.loss_4 or 0} dB</strong>"
+                else:
+                    reply_html = "Belum ada data pengukuran OTDR di database."
+            elif any(x in msg_lower for x in ["gangguan", "anomali", "masalah", "klasifikasi", "status", "rusak", "putus"]):
+                if latest:
+                    reply_html = f"Hasil deteksi terakhir menunjukkan klasifikasi: <strong>{latest.klasifikasi or 'Normal'}</strong> dengan status: <strong>{latest.status or 'Normal'}</strong>."
+                else:
+                    reply_html = "Belum ada data riwayat pengukuran di database."
+            elif any(x in msg_lower for x in ["prx", "daya", "signal", "sinyal"]):
+                if latest:
+                    reply_html = f"Nilai daya sinyal penerimaan terakhir (Prx) adalah: <strong>{latest.prx or 0} dBm</strong>."
+                else:
+                    reply_html = "Belum ada data daya sinyal penerimaan di database."
+            elif any(x in msg_lower for x in ["total", "jumlah", "banyak", "data", "riwayat"]):
+                reply_html = f"Total data pengukuran OTDR yang tersimpan saat ini sebanyak <strong>{total_data}</strong> data."
             else:
-                return {"response": f"Maaf, terjadi kesalahan.", "source": "error"}
+                status_str = f"klasifikasi terakhir: <strong>{latest.klasifikasi}</strong> ({latest.status})" if latest else "belum ada data"
+                reply_html = f"Maaf, saat ini kuota layanan AI sedang penuh (Rate Limit 429).<br><br><strong>Informasi dari Database:</strong><br>• Total data: {total_data}<br>• Status terakhir: {status_str}"
+                
+            return {"response": reply_html, "source": "local_fallback"}
     except Exception as e:
         logger.error(f"Chat exception: {e}")
         return {"response": f"Maaf, terjadi kesalahan: {str(e)[:200]}", "source": "error"}
-
 
 # ═══════════════════════════════════════════════════════════════════
 # AUTH ENDPOINTS
@@ -808,6 +896,7 @@ async def detect_ocr(
     logger.info("Starting ML Prediction...")
     
     otdr_values = {
+        'Prx (dBm)': final_prx,
         'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
         'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
         'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
@@ -1074,6 +1163,7 @@ async def sync_from_sheets(
                     return default
             
             otdr_values = {
+                'Prx (dBm)': g('Prx (dBm)'),
                 'Distance 1': g('Distance 1'), 'Distance 2': g('Distance 2'),
                 'Distance 3': g('Distance 3'), 'Distance 4': g('Distance 4'),
                 'Loss 1': g('Loss 1'), 'Loss 2': g('Loss 2'), 'Loss 3': g('Loss 3'),
@@ -1132,4 +1222,91 @@ async def health_check():
         "version": "2.0.1",
         "model": "loaded" if ml.lgbm_model else "not found",
         "easyocr": "loaded" if easyocr_reader else ("loading" if easyocr_loading else "not loaded"),
+    }
+
+
+@app.post("/api/classify-manual")
+async def classify_manual(
+    payload: ManualClassifyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_user),
+):
+    logger.info("=" * 70)
+    logger.info("🔄 Starting Manual Classification...")
+    
+    otdr_values = {
+        'Prx (dBm)': payload.prx,
+        'Distance 1': payload.distance_1, 'Distance 2': payload.distance_2,
+        'Distance 3': payload.distance_3, 'Distance 4': payload.distance_4,
+        'Loss 1': payload.loss_1, 'Loss 2': payload.loss_2, 'Loss 3': payload.loss_3,
+        'Total-L 1': payload.total_l_1, 'Total-L 2': payload.total_l_2,
+        'Total-L 3': payload.total_l_3, 'Total-L 4': payload.total_l_4,
+        'Avg-L 1': payload.avg_l_1, 'Avg-L 2': payload.avg_l_2,
+        'Avg-L 3': payload.avg_l_3, 'Avg-L 4': payload.avg_l_4,
+        'Avg-Total': payload.avg_total,
+        'Return 1': payload.return_1, 'Return 2': payload.return_2,
+        'Return 3': payload.return_3, 'Return 4': payload.return_4,
+    }
+    
+    try:
+        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+        logger.info(f"🤖 ML manual prediction SUCCESS: {pred.get('prediction')} (confidence: {pred.get('confidence')}%)")
+    except Exception as e:
+        logger.error(f"❌ ML manual prediction FAILED: {e}")
+        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+        
+    user_id = current_user.id if current_user else 1
+    
+    try:
+        record = OtdrResult(
+            user_id=user_id,
+            timestamp=datetime.now(),
+            prx=payload.prx,
+            loss_1=payload.loss_1, loss_2=payload.loss_2,
+            loss_3=payload.loss_3, loss_4=payload.loss_4,
+            return_1=payload.return_1, return_2=payload.return_2,
+            return_3=payload.return_3, return_4=payload.return_4,
+            distance_1=payload.distance_1, distance_2=payload.distance_2,
+            distance_3=payload.distance_3, distance_4=payload.distance_4,
+            total_l_1=payload.total_l_1, total_l_2=payload.total_l_2,
+            total_l_3=payload.total_l_3, total_l_4=payload.total_l_4,
+            avg_l_1=payload.avg_l_1, avg_l_2=payload.avg_l_2,
+            avg_l_3=payload.avg_l_3, avg_l_4=payload.avg_l_4,
+            klasifikasi=pred.get("prediction"),
+            status=pred.get("status"),
+            confidence=pred.get("confidence"),
+            source="manual",
+            raw_text="Manual Input Classification",
+        )
+        
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+        logger.info(f"✅ Saved manual entry to DB: ID={record.id}")
+        
+    except Exception as e:
+        logger.error(f"❌ DATABASE ERROR: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+    return {
+        "message": "Klasifikasi manual berhasil disimpan",
+        "extracted": {
+            "distances": [payload.distance_1, payload.distance_2, payload.distance_3, payload.distance_4],
+            "losses": [payload.loss_1, payload.loss_2, payload.loss_3, payload.loss_4],
+            "total_ls": [payload.total_l_1, payload.total_l_2, payload.total_l_3, payload.total_l_4],
+            "avg_ls": [payload.avg_l_1, payload.avg_l_2, payload.avg_l_3, payload.avg_l_4],
+            "returns": [payload.return_1, payload.return_2, payload.return_3, payload.return_4],
+        },
+        "per_km": {
+            "km1": {"distance": payload.distance_1, "loss": payload.loss_1, "total_l": payload.total_l_1, "avg_l": payload.avg_l_1, "return": payload.return_1},
+            "km2": {"distance": payload.distance_2, "loss": payload.loss_2, "total_l": payload.total_l_2, "avg_l": payload.avg_l_2, "return": payload.return_2},
+            "km3": {"distance": payload.distance_3, "loss": payload.loss_3, "total_l": payload.total_l_3, "avg_l": payload.avg_l_3, "return": payload.return_3},
+            "km4": {"distance": payload.distance_4, "loss": payload.loss_4, "total_l": payload.total_l_4, "avg_l": payload.avg_l_4, "return": payload.return_4},
+        },
+        "prx": payload.prx,
+        "prediction": pred.get("prediction"),
+        "confidence": pred.get("confidence"),
+        "status": pred.get("status"),
+        "id": record.id,
     }

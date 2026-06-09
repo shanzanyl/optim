@@ -46,13 +46,13 @@ interface LastResult {
 
 const StatusBadge = ({ status }: { status: string | null }) => {
   const cfg: Record<string, string> = {
-    'Normal'  : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    'Warning' : 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    'Normal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    'Warning': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
     'Critical': 'bg-red-500/15 text-red-400 border-red-500/30',
   };
   const dot: Record<string, string> = {
-    'Normal'  : 'bg-emerald-400',
-    'Warning' : 'bg-amber-400',
+    'Normal': 'bg-emerald-400',
+    'Warning': 'bg-amber-400',
     'Critical': 'bg-red-400',
   };
   const s = status || 'Warning';
@@ -90,13 +90,83 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   const [showRawOcr, setShowRawOcr] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const { 
-    currentIndex, 
-    setCurrentIndex, 
-    totalData, 
+  const [activeInputMethod, setActiveInputMethod] = useState<'ocr' | 'manual'>('ocr');
+  const [manualForm, setManualForm] = useState({
+    prx: '',
+    avg_total: '',
+    distance_1: '', distance_2: '', distance_3: '', distance_4: '',
+    loss_1: '', loss_2: '', loss_3: '', loss_4: '',
+    total_l_1: '', total_l_2: '', total_l_3: '', total_l_4: '',
+    avg_l_1: '', avg_l_2: '', avg_l_3: '', avg_l_4: '',
+    return_1: '', return_2: '', return_3: '', return_4: ''
+  });
+
+  const handleManualClassify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setImageStatus('uploading');
+    setErrorMsg('');
+    setLastResult(null);
+
+    const payload = {
+      prx: parseFloat(manualForm.prx) || 0.0,
+      avg_total: parseFloat(manualForm.avg_total) || 0.0,
+      distance_1: parseFloat(manualForm.distance_1) || 0.0,
+      distance_2: parseFloat(manualForm.distance_2) || 0.0,
+      distance_3: parseFloat(manualForm.distance_3) || 0.0,
+      distance_4: parseFloat(manualForm.distance_4) || 0.0,
+      loss_1: parseFloat(manualForm.loss_1) || 0.0,
+      loss_2: parseFloat(manualForm.loss_2) || 0.0,
+      loss_3: parseFloat(manualForm.loss_3) || 0.0,
+      loss_4: parseFloat(manualForm.loss_4) || 0.0,
+      total_l_1: parseFloat(manualForm.total_l_1) || 0.0,
+      total_l_2: parseFloat(manualForm.total_l_2) || 0.0,
+      total_l_3: parseFloat(manualForm.total_l_3) || 0.0,
+      total_l_4: parseFloat(manualForm.total_l_4) || 0.0,
+      avg_l_1: parseFloat(manualForm.avg_l_1) || 0.0,
+      avg_l_2: parseFloat(manualForm.avg_l_2) || 0.0,
+      avg_l_3: parseFloat(manualForm.avg_l_3) || 0.0,
+      avg_l_4: parseFloat(manualForm.avg_l_4) || 0.0,
+      return_1: parseFloat(manualForm.return_1) || 0.0,
+      return_2: parseFloat(manualForm.return_2) || 0.0,
+      return_3: parseFloat(manualForm.return_3) || 0.0,
+      return_4: parseFloat(manualForm.return_4) || 0.0,
+    };
+
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`${API_BASE}/api/classify-manual`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || 'Gagal memproses data manual');
+      }
+
+      const result = await response.json();
+      setLastResult(result);
+      setImageStatus('success');
+      await fetchHistory();
+      if (onDataChange) onDataChange();
+    } catch (error: any) {
+      console.error('Manual classification error:', error);
+      setErrorMsg(error.message || 'Koneksi gagal ke server.');
+      setImageStatus('error');
+    }
+  };
+
+  const {
+    currentIndex,
+    setCurrentIndex,
+    totalData,
     setTotalData,
-    autoPlay, 
-    setAutoPlay 
+    autoPlay,
+    setAutoPlay
   } = useSlide();
 
   const [prevTotalData, setPrevTotalData] = useState(0);
@@ -119,7 +189,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
   useEffect(() => {
     if (!autoPlay || allHistory.length === 0) return;
-    
+
     const interval = setInterval(() => {
       setCurrentIndex((prev: number) => {
         const newTotal = allHistory.length;
@@ -133,7 +203,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
         return prev + 1;
       });
     }, 30000);
-    
+
     return () => clearInterval(interval);
   }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
 
@@ -148,19 +218,19 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       const result = await response.json();
 
       const mappedHistory = (result.history || []).map((record: any) => ({
-        id       : record.id,
-        loss_1   : record.loss_1 ?? null,
-        loss_2   : record.loss_2 ?? null,
-        loss_3   : record.loss_3 ?? null,
-        loss_4   : record.loss_4 ?? null,
+        id: record.id,
+        loss_1: record.loss_1 ?? null,
+        loss_2: record.loss_2 ?? null,
+        loss_3: record.loss_3 ?? null,
+        loss_4: record.loss_4 ?? null,
         total_l_4: record.total_l_4 ?? null,
-        return_1 : record.return_1 ?? null,
-        return_2 : record.return_2 ?? null,
-        return_3 : record.return_3 ?? null,
-        return_4 : record.return_4 ?? null,
-        prx      : record.prx ?? null,
+        return_1: record.return_1 ?? null,
+        return_2: record.return_2 ?? null,
+        return_3: record.return_3 ?? null,
+        return_4: record.return_4 ?? null,
+        prx: record.prx ?? null,
         klasifikasi: record.klasifikasi,
-        status   : record.status,
+        status: record.status,
         timestamp: record.timestamp,
       }));
 
@@ -175,8 +245,8 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   };
 
-  useEffect(() => { 
-    fetchHistory(); 
+  useEffect(() => {
+    fetchHistory();
   }, []);
 
   useEffect(() => {
@@ -207,9 +277,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     const token = localStorage.getItem('token');
     try {
       const response = await fetch(`${API_BASE}/api/detect`, {
-        method : 'POST',
+        method: 'POST',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        body   : formData,
+        body: formData,
       });
 
       if (!response.ok) {
@@ -218,7 +288,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       }
 
       const result = await response.json();
-      
+
       if (result.extracted) {
         if (!result.extracted.avg_ls && result.extracted.total_ls && result.extracted.distances) {
           result.extracted.avg_ls = result.extracted.total_ls.map((total: number, i: number) => {
@@ -232,7 +302,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           result.extracted.avg_total = totalTotalL / totalDistance;
         }
       }
-      
+
       setLastResult(result);
       setImageStatus('success');
       await fetchHistory();
@@ -276,63 +346,221 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
         {/* Upload + Hasil */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Upload Card */}
-          <div className={`bg-[#1e2f50] p-8 rounded-2xl border-2 border-dashed transition-all ${
-            imageStatus === 'success'   ? 'border-emerald-500/50 bg-emerald-500/5' :
-            imageStatus === 'error'     ? 'border-red-500/50' :
-            imageStatus === 'uploading' ? 'border-blue-500/50 bg-blue-500/5' :
-            'border-[#3b4f6e] hover:border-blue-500/50'
-          }`}>
-            <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Foto OTDR</h3>
-            <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
+          {/* Input & Form Card */}
+          <div className={`bg-[#1e2f50] p-6 sm:p-8 rounded-2xl border transition-all ${imageStatus === 'success' ? 'border-emerald-500/50 bg-emerald-500/5' :
+            imageStatus === 'error' ? 'border-red-500/50' :
+              imageStatus === 'uploading' ? 'border-blue-500/50 bg-blue-500/5' :
+                'border-[#3b4f6e] hover:border-blue-500/50'
+            }`}>
+            {/* Toggle Metode Input */}
+            <div className="flex bg-[#0f1a2e] p-1 rounded-xl mb-6 border border-[#3b4f6e]">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveInputMethod('ocr');
+                  setImageStatus('idle');
+                  setErrorMsg('');
+                }}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${activeInputMethod === 'ocr'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white'
+                  }`}
+              >
+                OCR (Upload Foto)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveInputMethod('manual');
+                  setImageStatus('idle');
+                  setErrorMsg('');
+                }}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${activeInputMethod === 'manual'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white'
+                  }`}
+              >
+                Input Manual
+              </button>
+            </div>
 
-            {preview && (
-              <div className="mb-4 rounded-xl overflow-hidden border border-[#3b4f6e]">
-                <img src={preview} alt="Preview OTDR" className="w-full h-40 object-cover" />
-              </div>
+            {activeInputMethod === 'ocr' ? (
+              <>
+                <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Foto OTDR</h3>
+                <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
+
+                {preview && (
+                  <div className="mb-4 rounded-xl overflow-hidden border border-[#3b4f6e]">
+                    <img src={preview} alt="Preview OTDR" className="w-full h-40 object-cover" />
+                  </div>
+                )}
+
+                <div className="mb-5">
+                  <label className="text-xs font-bold text-white mb-1.5 block">
+                    Input Nilai Prx (dBm)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={prxManual}
+                      onChange={e => setPrxManual(e.target.value)}
+                      placeholder="-15.6"
+                      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
+                        text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
+                    />
+                    <span className="text-xs text-white whitespace-nowrap">dBm</span>
+                  </div>
+                </div>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  id="image-upload"
+                  ref={imageInputRef}
+                  onChange={e => e.target.files?.[0] && handleImageUpload(e.target.files[0])}
+                />
+                <label
+                  htmlFor="image-upload"
+                  className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center
+                    transition-all font-semibold text-white text-sm ${imageStatus === 'uploading'
+                      ? 'bg-slate-600 cursor-wait'
+                      : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
+                    }`}
+                >
+                  {imageStatus === 'uploading' ? 'Memproses...' :
+                    imageStatus === 'success' ? 'Upload Lagi' :
+                      imageStatus === 'error' ? 'Coba Lagi' : 'Pilih Foto OTDR'}
+                </label>
+              </>
+            ) : (
+              <form onSubmit={handleManualClassify} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-white uppercase tracking-widest mb-1.5 block">
+                      Prx (dBm)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={manualForm.prx}
+                      onChange={e => setManualForm({ ...manualForm, prx: e.target.value })}
+                      placeholder="-15.60"
+                      className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
+                        text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-white uppercase tracking-widest mb-1.5 block">
+                      Avg-Total (dB/km)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      required
+                      value={manualForm.avg_total}
+                      onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })}
+                      placeholder="0.250"
+                      className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
+                        text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
+                  <table className="w-full text-left text-xs min-w-[500px]">
+                    <thead>
+                      <tr className="bg-[#0f1a2e] text-slate-400 font-bold border-b border-[#3b4f6e]/50">
+                        <th className="p-2">Section</th>
+                        <th className="p-2">Distance (km)</th>
+                        <th className="p-2">Loss (dB)</th>
+                        <th className="p-2">Total-L (dB)</th>
+                        <th className="p-2">Avg-L (dB/km)</th>
+                        <th className="p-2">Return (dB)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#3b4f6e]/30">
+                      {[1, 2, 3, 4].map(km => (
+                        <tr key={km} className="hover:bg-[#0f1a2e]/20">
+                          <td className="p-2 font-bold text-white text-xs">KM {km}</td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.00001"
+                              required
+                              value={manualForm[`distance_${km}` as keyof typeof manualForm]}
+                              onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })}
+                              placeholder="0.0"
+                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.001"
+                              required={km !== 4}
+                              disabled={km === 4}
+                              value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]}
+                              onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })}
+                              placeholder={km === 4 ? '—' : '0.0'}
+                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.001"
+                              required
+                              value={manualForm[`total_l_${km}` as keyof typeof manualForm]}
+                              onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })}
+                              placeholder="0.0"
+                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.001"
+                              required
+                              value={manualForm[`avg_l_${km}` as keyof typeof manualForm]}
+                              onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })}
+                              placeholder="0.0"
+                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              required
+                              value={manualForm[`return_${km}` as keyof typeof manualForm]}
+                              onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })}
+                              placeholder="0.0"
+                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={imageStatus === 'uploading'}
+                  className={`w-full px-6 py-2.5 rounded-xl flex items-center justify-center
+                    transition-all font-semibold text-white text-sm mt-4 ${imageStatus === 'uploading'
+                      ? 'bg-slate-600 cursor-wait'
+                      : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
+                    }`}
+                >
+                  {imageStatus === 'uploading' ? 'Memproses Klasifikasi...' : 'Proses Klasifikasi Manual'}
+                </button>
+              </form>
             )}
-
-
-<div className="mb-5">
-  <label className="text-xs font-bold text-white mb-1.5 block">
-    Input Nilai Prx (dBm)
-  </label>
-  <div className="flex items-center gap-2">
-    <input
-      type="number"
-      step="0.1"
-      value={prxManual}
-      onChange={e => setPrxManual(e.target.value)}
-      placeholder="-15.6"
-      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
-        text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
-    />
-    <span className="text-xs text-white whitespace-nowrap">dBm</span>
-  </div>
-</div>
-
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              id="image-upload"
-              ref={imageInputRef}
-              onChange={e => e.target.files?.[0] && handleImageUpload(e.target.files[0])}
-            />
-            <label
-              htmlFor="image-upload"
-              className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center
-                transition-all font-semibold text-white text-sm ${
-                imageStatus === 'uploading'
-                  ? 'bg-slate-600 cursor-wait'
-                  : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
-              }`}
-            >
-              {imageStatus === 'uploading' ? '⏳ Memproses...' :
-               imageStatus === 'success'   ? '📸 Upload Lagi' :
-               imageStatus === 'error'     ? '❌ Coba Lagi'   : '📸 Pilih Foto OTDR'}
-            </label>
           </div>
 
           {/* Hasil Terakhir */}
@@ -358,16 +586,15 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             )}
             {lastResult && imageStatus === 'success' && (
               <div className="space-y-4">
-                <div className={`rounded-xl p-4 text-center border ${
-                  lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
                   lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                  'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                }`}>
+                    'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  }`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
                   <p className="text-2xl font-black">{lastResult.prediction}</p>
                   <p className="text-xs mt-1 opacity-70">Confidence: {lastResult.confidence?.toFixed(1)}%</p>
                 </div>
-                
+
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Info size={14} className="text-blue-400" />
@@ -377,15 +604,15 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <span className="text-white font-black text-sm">{lastResult.prx?.toFixed(1)} dBm</span>
                     <span className="text-[10px] text-white ml-2">
                       ({lastResult.prx_source === 'manual' ? 'input manual' :
-                        lastResult.prx_source === 'ocr'    ? 'dari OCR' : 'default'})
+                        lastResult.prx_source === 'ocr' ? 'dari OCR' : 'default'})
                     </span>
                   </div>
                 </div>
-                
+
                 {/* Nilai Terdeteksi */}
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nilai Terdeteksi</p>
-                  
+
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
@@ -396,7 +623,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       </div>
                     ))}
                   </div>
-                  
+
                   {lastResult.extracted.total_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
@@ -409,7 +636,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       ))}
                     </div>
                   )}
-                  
+
                   {lastResult.extracted.avg_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
@@ -422,7 +649,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       ))}
                     </div>
                   )}
-                  
+
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-slate-500">Avg-Total</span>
@@ -431,7 +658,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       </span>
                     </div>
                   )}
-                  
+
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
@@ -441,7 +668,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     ))}
                   </div>
                 </div>
-                
+
                 <button
                   onClick={() => setShowRawOcr(!showRawOcr)}
                   className="text-[10px] text-slate-500 hover:text-slate-400 underline transition"
@@ -459,7 +686,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
 
-         {/* History Table dengan Total-L dari total_l_4 */}
+        {/* History Table dengan Total-L dari total_l_4 */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] shadow-2xl overflow-hidden">
           <div className="p-5 border-b border-[#3b4f6e] flex justify-between items-center">
             <h2 className="text-sm font-bold text-white uppercase tracking-widest">Riwayat Pengukuran</h2>
@@ -472,7 +699,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               </button>
             </div>
           </div>
-          
+
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
@@ -500,7 +727,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     // 🔥 Total-L menggunakan total_l_4 dari database (sama seperti Dashboard)
                     const totalLValue = row.total_l_4;
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
-                    
+
                     return (
                       <tr key={row.id || i} className="hover:bg-[#2a3d60]/20 transition-colors">
                         <td className="px-6 py-4 text-slate-400 text-xs font-mono">{realTime}</td>
@@ -519,12 +746,11 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                           {row.prx != null ? `${row.prx.toFixed(1)} dBm` : '—'}
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
-                            row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                          <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
                             row.klasifikasi === 'Warning' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                            row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-                            'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                          }`}>
+                              row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                                'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                            }`}>
                             {row.klasifikasi || 'Unknown'}
                           </span>
                         </td>

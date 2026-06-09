@@ -23,11 +23,12 @@ email-validator==2.2.0
 python-dotenv==1.0.1
 
 # ML & Data
-lightgbm==4.5.0
-scikit-learn==1.5.2
-joblib==1.4.2
-numpy==1.26.4
-pandas==2.2.3
+lightgbm==4.6.0
+scikit-learn==1.6.1
+joblib==1.5.3
+numpy==2.0.2
+pandas==2.2.2
+scipy==1.16.3
 
 # OCR
 pillow==10.4.0
