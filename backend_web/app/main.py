@@ -1,4 +1,4 @@
-# main.py - VERSION FIXED
+# main.py - VERSION FIXED (LENGKAP)
 from datetime import datetime
 import os
 import re
@@ -56,10 +56,15 @@ else:  # Mac/Linux
             break
 
 # Google Sheets CSV export URL
-SHEET_ID  = "1dN2Q7zrp_M2RZ8o0-GPjYyL4yfZPo0KHjAKhEx8Qudo"
+SHEET_ID = "1dN2Q7zrp_M2RZ8o0-GPjYyL4yfZPo0KHjAKhEx8Qudo"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
+
+# Global EasyOCR reader
+easyocr_reader = None
+easyocr_loading = False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -107,15 +112,114 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(load_easyocr_background())
     logger.info("🔄 EasyOCR loading started in background...")
     
+    # 🔥 Auto sync background task (every 6 hours)
+    async def auto_sync_sheets():
+        while True:
+            try:
+                logger.info("🔄 Auto-sync from Google Sheets...")
+                async with AsyncSessionLocal() as db_sync:
+                    # Get all users
+                    result = await db_sync.execute(select(User))
+                    users = result.scalars().all()
+                    
+                    for user in users:
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.get(SHEET_URL, timeout=30)
+                                if resp.status_code == 200:
+                                    df = pd.read_csv(io.StringIO(resp.text))
+                                    df.columns = [c.strip() for c in df.columns]
+                                    
+                                    # Delete old sheets data
+                                    existing = await db_sync.execute(
+                                        select(OtdrResult).where(
+                                            OtdrResult.user_id == user.id,
+                                            OtdrResult.source == "sheets",
+                                        )
+                                    )
+                                    for rec in existing.scalars().all():
+                                        await db_sync.delete(rec)
+                                    await db_sync.flush()
+                                    
+                                    # Insert new data
+                                    for _, row in df.iterrows():
+                                        def g(col, default=0.0):
+                                            try:
+                                                val = row.get(col, default)
+                                                return float(val) if pd.notna(val) else default
+                                            except Exception:
+                                                return default
+                                        
+                                        otdr_values = {
+                                            'Distance 1': g('Distance 1'), 'Distance 2': g('Distance 2'),
+                                            'Distance 3': g('Distance 3'), 'Distance 4': g('Distance 4'),
+                                            'Loss 1': g('Loss 1'), 'Loss 2': g('Loss 2'), 'Loss 3': g('Loss 3'),
+                                            'Total-L 1': g('Total-L 1'), 'Total-L 2': g('Total-L 2'),
+                                            'Total-L 3': g('Total-L 3'), 'Total-L 4': g('Total-L 4'),
+                                            'Avg-L 1': g('Avg-L 1'), 'Avg-L 2': g('Avg-L 2'),
+                                            'Avg-L 3': g('Avg-L 3'), 'Avg-L 4': g('Avg-L 4'),
+                                            'Avg-Total': g('Avg-Total'),
+                                            'Return 1': g('Return 1'), 'Return 2': g('Return 2'),
+                                            'Return 3': g('Return 3'), 'Return 4': g('Return 4'),
+                                        }
+                                        
+                                        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+                                        
+                                        record = OtdrResult(
+                                            user_id=user.id,
+                                            timestamp=datetime.now(),
+                                            prx=g('Prx (dBm)'),
+                                            temperature=g('Temperature (C)'),
+                                            wavelength=g('Wavelength'),
+                                            pulse_width=g('Pulse Width (ns)'),
+                                            distance_1=g('Distance 1'), distance_2=g('Distance 2'),
+                                            distance_3=g('Distance 3'), distance_4=g('Distance 4'),
+                                            loss_1=g('Loss 1'), loss_2=g('Loss 2'), loss_3=g('Loss 3'), loss_4=g('Loss 4'),
+                                            total_l_1=g('Total-L 1'), total_l_2=g('Total-L 2'),
+                                            total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
+                                            avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
+                                            avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
+                                            return_1=g('Return 1'), return_2=g('Return 2'),
+                                            return_3=g('Return 3'), return_4=g('Return 4'),
+                                            klasifikasi=pred.get("prediction"),
+                                            status=pred.get("status"),
+                                            confidence=pred.get("confidence"),
+                                            source="sheets",
+                                        )
+                                        db_sync.add(record)
+                                    
+                                    await db_sync.commit()
+                                    logger.info(f"Auto-sync success for {user.email}")
+                        except Exception as e:
+                            logger.error(f"Auto-sync error for {user.email}: {e}")
+                
+                await asyncio.sleep(21600)  # 6 hours
+            except Exception as e:
+                logger.error(f"Auto-sync loop error: {e}")
+                await asyncio.sleep(3600)
+    
+    asyncio.create_task(auto_sync_sheets())
+    logger.info("🔄 Auto-sync background task started (every 6 hours)")
+    
     yield
+    
     logger.info("Shutting down...")
+
 
 app = FastAPI(title="OptiM API", version="2.0.1", lifespan=lifespan)
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+# 🔥 CORS - Allow all origins for testing (bisa dipersempit nanti)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "https://ashy-mushroom-0feb76700.7.azurestaticapps.net",
+        "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net",
+        "*"  # Sementara izinkan semua untuk testing
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,39 +228,21 @@ app.add_middleware(
 UPLOAD_DIR = Path(os.getenv("UPLOAD_FOLDER", "uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Global EasyOCR reader
-easyocr_reader = None
-easyocr_loading = False
-
 
 # ═══════════════════════════════════════════════════════════════════
 # SIMPLE & ROBUST OTDR PARSER
 # ═══════════════════════════════════════════════════════════════════
 
-def clean_ocr_decimal(val: float | None, max_expected: float) -> float | None:
-    """Mengoreksi kesalahan OCR drop decimal point (misal 151 jadi 1.51)"""
-    if val is None:
-        return None
-    sign = 1.0 if val >= 0 else -1.0
-    val_abs = abs(float(val))
-    if val_abs > max_expected:
-        while val_abs > max_expected:
-            val_abs /= 10.0
-    return sign * val_abs
-
-
 def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
     """
-    Parse teks OCR OTDR secara global dan dinamis (slicing token berdasarkan
-    posisi anchor distance). Sangat kuat menghadapi ketiadaan newline (EasyOCR)
-    maupun format tabel OCR.space yang rapi.
+    Parse teks OCR OTDR secara global dan dinamis.
     """
     text = raw_text.replace(',', '.')
     
-    # 1. Tokenisasi teks menjadi token numerik dan penanda dash ('---')
+    # 1. Tokenisasi teks menjadi token numerik
     raw_tokens = []
     for t in text.replace('\t', ' ').split():
-        # Lewati token yang berisi huruf alfabet murni (jl, type, dll)
+        # Lewati token yang berisi huruf alfabet murni
         t_alpha = re.sub(r'[^a-zA-Z\u0400-\u04FF]', '', t)
         if t_alpha and t_alpha.isalpha() and t_alpha not in ('dB', 'km'):
             continue
@@ -171,15 +257,14 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
                     raw_tokens.append(float(t_clean2))
                 except ValueError:
                     pass
-
-    logger.info(f"Raw numeric/dash tokens parsed: {raw_tokens}")
-
-    # 2. Cari posisi indeks anchor distance (untuk KM1 ≈ 1.0, KM2 ≈ 2.0, dst.)
+    
+    logger.info(f"Raw numeric/dash tokens parsed: {raw_tokens[:30]}")
+    
+    # 2. Cari posisi indeks anchor distance (KM1, KM2, KM3, KM4)
     anchors = {}
     last_idx = -1
     for i in range(1, 5):
         best_idx = -1
-        # Cari token float pertama setelah anchor sebelumnya yang berada di jangkauan [i-0.25, i+0.25]
         for idx in range(last_idx + 1, len(raw_tokens)):
             val = raw_tokens[idx]
             if isinstance(val, float) and (i - 0.25 <= val <= i + 0.25):
@@ -188,8 +273,8 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
         if best_idx != -1:
             anchors[i] = best_idx
             last_idx = best_idx
-            
-    # Taksir posisi anchor yang hilang (bila ada distance yang tidak terbaca sama sekali)
+    
+    # Taksir posisi anchor yang hilang
     for i in range(1, 5):
         if i not in anchors:
             if i - 1 in anchors:
@@ -198,18 +283,18 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
                 anchors[i] = max(anchors[i+1] - 6, 0)
             else:
                 anchors[i] = min((i - 1) * 6, len(raw_tokens) - 1)
-            
-    sorted_anchors = sorted(anchors.items())
-    logger.info(f"Distance anchors mapped: {anchors}")
     
-    # 3. Potong token list berdasarkan anchor (Slicing)
+    logger.info(f"Distance anchors: {anchors}")
+    
+    # 3. Slicing token berdasarkan anchor
     slices = {}
+    sorted_anchors = sorted(anchors.items())
     for idx_item, (i, start_idx) in enumerate(sorted_anchors):
         end_idx = len(raw_tokens)
         if idx_item + 1 < len(sorted_anchors):
             end_idx = sorted_anchors[idx_item + 1][1]
         slices[i] = raw_tokens[start_idx:end_idx]
-            
+    
     # 4. Klasifikasi field per baris
     rows = []
     for i in range(1, 5):
@@ -220,31 +305,22 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
                 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0
             })
             continue
-            
-        # Potong token label baris di bagian belakang jika ada
-        if len(row_tokens) > 3:
-            last_token = row_tokens[-1]
-            if isinstance(last_token, float):
-                if last_token in (40.0, 41.0, 42.0, 43.0, 44.0) or (i < 4 and abs(last_token - (40 + i + 1)) < 0.1):
-                    row_tokens.pop()
-                    
+        
         # Token pertama adalah distance
         dist = row_tokens[0]
         
-        # Ekstrak return loss (nilai antara 30-65 atau 3000-6500)
+        # Ekstrak return loss
         ret = -45.0
         ret_idx = -1
         for idx, val in enumerate(row_tokens):
-            if isinstance(val, float) and (30.0 <= abs(val) <= 65.0 or 3000.0 <= abs(val) <= 6500.0):
+            if isinstance(val, float) and (30.0 <= abs(val) <= 65.0):
                 ret = -abs(val)
                 ret_idx = idx
                 break
         if ret_idx != -1:
             row_tokens.pop(ret_idx)
-            
-        ret = clean_ocr_decimal(ret, 65.0)
-            
-        # Ekstrak section (nilai sekitar 1.0, jika ada)
+        
+        # Ekstrak section (nilai sekitar 1.0)
         sect = 1.0
         sect_idx = -1
         for idx, val in enumerate(row_tokens[1:], start=1):
@@ -254,50 +330,53 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
                 break
         if sect_idx != -1:
             row_tokens.pop(sect_idx)
-        else:
-            sect = dist if i == 1 else 1.0
-            
-        # Hapus token distance dari remaining list
+        
+        # Hapus token distance
         row_tokens.pop(0)
         
         # Sisa token dipetakan ke loss, total_l, avg_l
-        loss = 0.0
-        total_l = 0.0
-        avg_l = 0.0
-        
         remaining = [v for v in row_tokens if isinstance(v, float) or v == '---']
         
         if i == 4:
             loss = None
             pos_vals = [v for v in remaining if isinstance(v, float) and v > 0]
-            pos_vals = [clean_ocr_decimal(v, 10.0) for v in pos_vals]
             if len(pos_vals) >= 2:
                 total_l = pos_vals[0]
                 avg_l = pos_vals[1]
             elif len(pos_vals) == 1:
                 total_l = pos_vals[0]
+                avg_l = 0.0
+            else:
+                total_l = 0.0
+                avg_l = 0.0
         else:
             if len(remaining) >= 3:
-                loss = clean_ocr_decimal(remaining[0], 3.0)
-                total_l = clean_ocr_decimal(remaining[1], 10.0)
-                avg_l = clean_ocr_decimal(remaining[2], 2.0)
+                loss = remaining[0] if isinstance(remaining[0], float) else 0.0
+                total_l = remaining[1] if isinstance(remaining[1], float) else 0.0
+                avg_l = remaining[2] if isinstance(remaining[2], float) else 0.0
             elif len(remaining) == 2:
-                loss = None if '---' in remaining or remaining[0] == '---' else 0.0
-                total_l = clean_ocr_decimal(remaining[0] if remaining[0] != '---' else remaining[1], 10.0)
-                avg_l = clean_ocr_decimal(remaining[1] if remaining[0] != '---' else 0.0, 2.0)
+                loss = None
+                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
+                avg_l = remaining[1] if isinstance(remaining[1], float) else 0.0
             elif len(remaining) == 1:
-                total_l = clean_ocr_decimal(remaining[0] if remaining[0] != '---' else 0.0, 10.0)
-                
+                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
+                avg_l = 0.0
+                loss = None if i == 4 else 0.0
+            else:
+                loss = None if i == 4 else 0.0
+                total_l = 0.0
+                avg_l = 0.0
+        
         row_data = {
-            'distance': round(dist, 5),
-            'section': round(sect, 5),
-            'loss': round(loss, 3) if loss is not None else None,
-            'total_l': round(total_l, 3),
-            'avg_l': round(avg_l, 3),
-            'return': round(ret, 2)
+            'distance': round(float(dist), 5),
+            'section': round(float(sect), 5),
+            'loss': round(float(loss), 3) if loss is not None and loss != '---' else (None if i == 4 else 0.0),
+            'total_l': round(float(total_l), 3) if isinstance(total_l, float) else 0.0,
+            'avg_l': round(float(avg_l), 3) if isinstance(avg_l, float) else 0.0,
+            'return': round(float(ret), 2)
         }
         rows.append(row_data)
-
+    
     # 5. Ekstrak Avg-Total
     avg_total = 0.0
     m_avg = re.search(r'(\d+\.\d{2,3})\s*(?:dB/km|db/km)', text)
@@ -310,65 +389,43 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
         avg_total = r4['avg_l'] if r4['avg_l'] and r4['avg_l'] > 0 else (
             r4['total_l'] / r4['distance'] if r4['distance'] > 0 else 0.0
         )
-        
+    
     # 6. Hitung ulang avg_l jika masih 0
     for row in rows:
         if (not row['avg_l'] or row['avg_l'] == 0.0) and row['total_l'] > 0 and row['distance'] > 0:
             row['avg_l'] = round(row['total_l'] / row['distance'], 3)
-            
-    # 7. Bulatkan hasil akhir
-    for r in rows:
-        r['distance'] = round(float(r['distance']), 5)
-        r['section'] = round(float(r['section']), 5)
-        r['loss'] = round(float(r['loss']), 3) if r['loss'] is not None else None
-        r['total_l'] = round(float(r['total_l']), 3)
-        r['avg_l'] = round(float(r['avg_l']), 3)
-        r['return'] = round(float(r['return']), 2)
-
+    
     logger.info(f"Final parsed rows: {rows}")
     return rows, avg_total
 
 
-
 # ═══════════════════════════════════════════════════════════════════
-# SIMPLE OCR PREPROCESSING (TIDAK AGGRESIF)
+# SIMPLE OCR PREPROCESSING
 # ═══════════════════════════════════════════════════════════════════
 
 def preprocess_image_simple(image_bytes: bytes) -> list:
-    """Preprocessing sederhana untuk OCR - tidak overkill"""
+    """Preprocessing sederhana untuk OCR"""
     arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
     results = []
-    
-    # Crop area tabel — mulai dari 30% agar header tidak terpotong,
-    # dan akhir sampai 99% agar baris terakhir (KM4) tidak terpotong
     y_start = int(h * 0.30)
     y_end = int(h * 0.99)
     cropped = img[y_start:y_end, 0:w]
-    
-    # Resize 2x untuk visibility
     resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    
-    # Grayscale
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    
-    # CLAHE moderate
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     enhanced = clahe.apply(gray)
-    
-    # Binary threshold Otsu
     _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     results.append(Image.fromarray(binary))
     results.append(Image.fromarray(cv2.bitwise_not(binary)))
-    
     return results
 
 
 def easyocr_extract_simple(image_bytes: bytes) -> str:
-    """Ekstrak teks menggunakan EasyOCR dengan timeout"""
+    """Ekstrak teks menggunakan EasyOCR"""
     global easyocr_reader
     if easyocr_reader is None:
         return ""
@@ -377,16 +434,10 @@ def easyocr_extract_simple(image_bytes: bytes) -> str:
         arr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         h, w = img.shape[:2]
-        
-        # Crop sederhana — perluas ke 99% agar baris KM4 tidak terpotong
         y_start = int(h * 0.30)
         y_end = int(h * 0.99)
         cropped = img[y_start:y_end, 0:w]
-        
-        # Resize
         resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        
-        # EasyOCR read
         result = easyocr_reader.readtext(resized, detail=0, paragraph=False)
         text = ' '.join(result)
         logger.info(f"EasyOCR extracted {len(text)} chars")
@@ -403,7 +454,6 @@ def tesseract_extract(image_bytes: bytes) -> str:
     
     try:
         images = preprocess_image_simple(image_bytes)
-        
         for img in images:
             configs = ["--oem 3 --psm 6", "--oem 3 --psm 4", "--oem 1 --psm 6"]
             for config in configs:
@@ -415,7 +465,6 @@ def tesseract_extract(image_bytes: bytes) -> str:
                         best_text = text
                 except Exception:
                     continue
-        
         logger.info(f"Tesseract extracted {len(best_text)} chars, score={best_score}")
         return best_text
     except Exception as e:
@@ -458,11 +507,11 @@ def ocr_space_extract(image_bytes: bytes) -> str:
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 def format_markdown_to_html(text: str) -> str:
-    """Konversi markdown ke HTML"""
     html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
     html = html.replace('\n', '<br>')
     return html
+
 
 @app.post("/api/chat")
 async def chat(
@@ -471,19 +520,14 @@ async def chat(
     current_user: User = Depends(get_optional_user)
 ):
     user_message = request.get("message", "").strip()
-    context_state = request.get("context_state", None)
     
     if not user_message:
         return {"response": "Pesan tidak boleh kosong.", "source": "error"}
     
     if not GEMINI_API_KEY:
-        return {
-            "response": "Maaf, chatbot belum tersedia. API Key tidak ditemukan.",
-            "source": "error"
-        }
+        return {"response": "Maaf, chatbot belum tersedia.", "source": "error"}
     
     try:
-        # Ambil data dari database
         result_total = await db.execute(select(func.count(OtdrResult.id)))
         total_data = result_total.scalar() or 0
         
@@ -492,29 +536,23 @@ async def chat(
         )
         latest = result_latest.scalar_one_or_none()
         
-        prompt = f"""Anda adalah asisten AI untuk aplikasi OptiM (Intelligent Fiber Monitoring).
+        prompt = f"""Anda adalah asisten AI untuk aplikasi OptiM.
 
 [DATA REAL-TIME DARI DATABASE]
 - Total data pengukuran: {total_data}
 - Klasifikasi terakhir: {latest.klasifikasi if latest else 'Belum ada'}
 - Status terakhir: {latest.status if latest else 'Belum ada'}
-- Loss terakhir: {latest.loss_1 if latest else 0} dB, {latest.loss_2 if latest else 0} dB, {latest.loss_3 if latest else 0} dB, {latest.loss_4 if latest else 0} dB
+- Loss terakhir: KM1={latest.loss_1 if latest else 0} dB, KM2={latest.loss_2 if latest else 0} dB, KM3={latest.loss_3 if latest else 0} dB, KM4={latest.loss_4 if latest else 0} dB
 - Prx: {latest.prx if latest else 0} dBm
 
 [PERTANYAAN PENGGUNA]
 {user_message}
 
 [JAWABAN]
-Jawab dengan bahasa Indonesia yang ramah dan profesional. Format output dengan HTML dasar (<strong>, <br>, <ul>, <li>).
-"""
+Jawab dengan bahasa Indonesia yang ramah dan profesional. Format output dengan HTML."""
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
         
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=30)
@@ -522,23 +560,12 @@ Jawab dengan bahasa Indonesia yang ramah dan profesional. Format output dengan H
             
             if response.status_code == 200:
                 reply = data["candidates"][0]["content"]["parts"][0]["text"]
-                reply_html = format_markdown_to_html(reply)
-                return {"response": reply_html, "source": "gemini_api"}
+                return {"response": format_markdown_to_html(reply), "source": "gemini_api"}
             else:
-                error_msg = data.get("error", {}).get("message", str(data))
-                return {
-                    "response": f"Maaf, terjadi kesalahan: {error_msg[:200]}",
-                    "source": "error"
-                }
+                return {"response": f"Maaf, terjadi kesalahan.", "source": "error"}
     except Exception as e:
         logger.error(f"Chat exception: {e}")
-        return {
-            "response": f"Maaf, terjadi kesalahan: {str(e)[:200]}",
-            "source": "error"
-        }
-
-
-
+        return {"response": f"Maaf, terjadi kesalahan: {str(e)[:200]}", "source": "error"}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -634,17 +661,7 @@ async def get_pending_users(
         select(User).where(User.is_approved == False, User.is_admin == False)
     )
     users = result.scalars().all()
-    return {
-        "users": [
-            {
-                "id": u.id,
-                "email": u.email,
-                "name": u.name,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-            for u in users
-        ]
-    }
+    return {"users": [{"id": u.id, "email": u.email, "name": u.name, "created_at": u.created_at.isoformat() if u.created_at else None} for u in users]}
 
 
 @app.get("/api/admin/users/all")
@@ -654,19 +671,7 @@ async def get_all_users(
 ):
     result = await db.execute(select(User))
     users = result.scalars().all()
-    return {
-        "users": [
-            {
-                "id": u.id,
-                "email": u.email,
-                "name": u.name,
-                "is_approved": u.is_approved,
-                "is_admin": u.is_admin,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-            for u in users
-        ]
-    }
+    return {"users": [{"id": u.id, "email": u.email, "name": u.name, "is_approved": u.is_approved, "is_admin": u.is_admin, "created_at": u.created_at.isoformat() if u.created_at else None} for u in users]}
 
 
 @app.post("/api/admin/approve/{user_id}")
@@ -700,7 +705,7 @@ async def reject_user(
 
 
 # ═══════════════════════════════════════════════════════════════════
-# DETECTION OCR - MAIN ENDPOINT (FIXED)
+# DETECTION OCR - MAIN ENDPOINT
 # ═══════════════════════════════════════════════════════════════════
 
 @app.post("/api/detect")
@@ -710,7 +715,6 @@ async def detect_ocr(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
-    # Validate file
     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
     if file.content_type not in allowed:
         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
@@ -722,7 +726,6 @@ async def detect_ocr(
     logger.info("=" * 70)
     logger.info("🔄 Starting OCR process...")
     
-    # Try OCR methods
     async def run_easyocr():
         if easyocr_reader is not None:
             return easyocr_extract_simple(content)
@@ -735,19 +738,16 @@ async def detect_ocr(
         return ocr_space_extract(content)
     
     try:
-        # Run OCR methods concurrently
         easyocr_task = asyncio.create_task(run_easyocr())
         tesseract_task = asyncio.create_task(run_tesseract())
         ocrspace_task = asyncio.create_task(run_ocrspace())
         
-        # Wait for all with timeout
         done, pending = await asyncio.wait(
             [easyocr_task, tesseract_task, ocrspace_task],
             timeout=20.0,
             return_when=asyncio.ALL_COMPLETED
         )
         
-        # Check results
         best_text = ""
         best_score = 0
         
@@ -782,10 +782,8 @@ async def detect_ocr(
     
     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
     
-    # Parse using simple parser
     rows, avg_total = parse_otdr_table_simple(raw_text)
     
-    # Extract Prx
     prx_from_ocr = extract_prx(raw_text)
     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
     
@@ -793,7 +791,6 @@ async def detect_ocr(
     for i, row in enumerate(rows):
         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
     
-    # Validate
     valid = [r for r in rows if r['distance'] > 0.5]
     if len(valid) < 2:
         raise HTTPException(
@@ -801,7 +798,7 @@ async def detect_ocr(
             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
         )
     
-    # ML Prediction - WITH DETAILED ERROR HANDLING
+    # ML Prediction
     logger.info("=" * 50)
     logger.info("Starting ML Prediction...")
     
@@ -818,27 +815,17 @@ async def detect_ocr(
         'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
     }
     
-    logger.info(f"📊 OTDR Values for ML: {otdr_values}")
-    
     try:
         pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
         logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')} (confidence: {pred.get('confidence')}%)")
     except Exception as e:
         logger.error(f"❌ ML prediction FAILED: {e}")
-        import traceback
-        traceback.print_exc()
-        pred = {
-            "prediction": "Normal",
-            "confidence": 70.0,
-            "status": "Normal"
-        }
-        logger.info(f"📌 Using fallback prediction: {pred}")
+        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
     
-    # Save to database - WITH DETAILED ERROR HANDLING
+    # Save to database
     logger.info("=" * 50)
     logger.info("💾 Saving to Database...")
     user_id = current_user.id if current_user else 1
-    logger.info(f"👤 User ID: {user_id}")
     
     try:
         record = OtdrResult(
@@ -862,24 +849,16 @@ async def detect_ocr(
             raw_text=raw_text[:1000],
         )
         
-        logger.info("✅ OtdrResult object created successfully")
         db.add(record)
-        logger.info("✅ Record added to session")
-        
         await db.commit()
-        logger.info("✅ Database commit successful")
-        
         await db.refresh(record)
-        logger.info(f"✅ Record refreshed, ID={record.id}")
+        logger.info(f"✅ Saved to DB: ID={record.id}")
         
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-    logger.info(f"✅ Successfully saved to DB: ID={record.id}")
     logger.info("=" * 70)
     
     return {
@@ -892,12 +871,7 @@ async def detect_ocr(
             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
             "returns": [rows[i]['return'] for i in range(4)],
         },
-        "per_km": {
-            "km1": rows[0],
-            "km2": rows[1],
-            "km3": rows[2],
-            "km4": rows[3],
-        },
+        "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
         "prx": final_prx,
         "prediction": pred.get("prediction"),
         "confidence": pred.get("confidence"),
@@ -1059,7 +1033,6 @@ async def sync_from_sheets(
     
     df.columns = [c.strip() for c in df.columns]
     
-    # Delete existing sheets data for this user
     existing = await db.execute(
         select(OtdrResult).where(
             OtdrResult.user_id == current_user.id,
@@ -1082,14 +1055,6 @@ async def sync_from_sheets(
                 except Exception:
                     return default
             
-            timestamp = datetime.now()
-            time_col = next((c for c in df.columns if 'time' in c.lower()), None)
-            if time_col and pd.notna(row.get(time_col)):
-                try:
-                    timestamp = pd.to_datetime(row[time_col])
-                except Exception:
-                    pass
-            
             otdr_values = {
                 'Distance 1': g('Distance 1'), 'Distance 2': g('Distance 2'),
                 'Distance 3': g('Distance 3'), 'Distance 4': g('Distance 4'),
@@ -1103,11 +1068,11 @@ async def sync_from_sheets(
                 'Return 3': g('Return 3'), 'Return 4': g('Return 4'),
             }
             
-            pred = ml.predict_from_otdr(otdr_values)
+            pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
             
             record = OtdrResult(
                 user_id=current_user.id,
-                timestamp=timestamp,
+                timestamp=datetime.now(),
                 prx=g('Prx (dBm)'),
                 temperature=g('Temperature (C)'),
                 wavelength=g('Wavelength'),
