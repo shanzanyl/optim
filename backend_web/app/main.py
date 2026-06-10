@@ -1555,7 +1555,7 @@ async def health_check():
         "app": "OptiM API",
         "version": "2.0.1",
         "model": "loaded" if ml.lgbm_model else "not found",
-        "easyocr": "loaded" if easyocr_reader else ("loading" if easyocr_loading else "not loaded"),
+        # "easyocr": "loaded" if easyocr_reader else ("loading" if easyocr_loading else "not loaded"),
     }
 
 
