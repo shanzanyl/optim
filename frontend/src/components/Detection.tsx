@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, AlertTriangle, Info, Edit3 } from 'lucide-react';
 import { useSlide } from '../Context/SlideContext';
+import { triggerSlideAlert } from '../services/api';
 
 interface DetectionProps {
   refreshTrigger?: number;
@@ -187,6 +188,25 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     setTotalData(allHistory.length);
   }, [allHistory.length, setTotalData]);
 
+  // 🔥 PERBAIKAN 1: Effect untuk trigger Telegram Alert (dipisah dari autoPlay)
+  useEffect(() => {
+    if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
+    const currentRecord = allHistory[currentIndex];
+    if (!currentRecord) return;
+
+    const status = currentRecord.status || '';
+    if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
+      triggerSlideAlert(currentRecord.id)
+        .then((res: { status: string }) => {
+          if (res.status === 'sent') {
+            console.log(`Telegram alert sent automatically from Detection for record ID: ${currentRecord.id}`);
+          }
+        })
+        .catch((err: any) => console.error('Error triggering slide alert:', err));
+    }
+  }, [currentIndex, allHistory, isLoadingHistory]);
+
+  // 🔥 PERBAIKAN 2: Effect untuk AutoPlay (yang sudah ada, tanpa nested useEffect)
   useEffect(() => {
     if (!autoPlay || allHistory.length === 0) return;
 
@@ -565,7 +585,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
           {/* Hasil Terakhir */}
           <div className="bg-[#1e2f50] p-8 rounded-2xl border border-[#3b4f6e]">
-            <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-widest">Hasil Upload Foto OTDR</h3>
+            <h3 className="text-lg font-bold text-white mb-4 uppercase tracking-widest">Result Classification</h3>
             {imageStatus === 'uploading' && (
               <div className="flex flex-col items-center justify-center h-52 gap-3">
                 <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
@@ -573,7 +593,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               </div>
             )}
             {imageStatus === 'idle' && !lastResult && (
-              <div className="flex flex-col items-center justify-c enter h-52 gap-2 text-slate-500">
+              <div className="flex flex-col items-center justify-center h-52 gap-2 text-slate-500">
                 <Camera className="w-8 h-8" />
                 <p className="text-sm italic">Upload photo OTDR to view results</p>
               </div>
@@ -615,7 +635,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-slate-500">Loss KM {i + 1}</span>
+                        <span className="text-white">Loss KM {i + 1}</span>
                         <span className="text-white font-mono">
                           {l === 0 || l === null || l === undefined ? '---' : l.toString()} dB
                         </span>
@@ -627,7 +647,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-slate-500">Total-L KM {i + 1}</span>
+                          <span className="text-white">Total-L KM {i + 1}</span>
                           <span className="text-white font-mono">
                             {tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB
                           </span>
@@ -640,7 +660,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-slate-500">Avg-L KM {i + 1}</span>
+                          <span className="text-white">Avg-L KM {i + 1}</span>
                           <span className="text-white font-mono">
                             {al === 0 ? '---' : al.toString()} dB/km
                           </span>
@@ -651,7 +671,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
-                      <span className="text-slate-500">Avg-Total</span>
+                      <span className="text-white">Avg-Total</span>
                       <span className="text-white font-mono">
                         {lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString()} dB/km
                       </span>
@@ -661,7 +681,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-slate-500">Return KM {i + 1}</span>
+                        <span className="text-white">Return KM {i + 1}</span>
                         <span className="text-white font-mono">{r.toString()} dB</span>
                       </div>
                     ))}
@@ -702,7 +722,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
-                <tr className="bg-[#1e2f50] text-white text-[11px] font-black uppercase tracking-widest border-b border-[#3b4f6e]">
+                <tr className="bg-[#1e2f50] text-white text-[13px] font-black uppercase tracking-widest border-b border-[#3b4f6e]">
                   <th className="px-6 py-4">Time</th>
                   <th className="px-6 py-4 text-center">Loss KM1-4 (dB)</th>
                   <th className="px-6 py-4 text-center">Total-L (dB)</th>

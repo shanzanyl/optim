@@ -65,6 +65,97 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 easyocr_reader = None
 easyocr_loading = False
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+def send_telegram_alert(classification: str, status: str, loss: list, rl: list, prx, distances: list = None, timestamp = None):
+    """Mengirim pesan notifikasi gangguan ke Telegram Teknisi dengan format detail baru"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.info("[TELEGRAM] Notifikasi dibatalkan karena token/chat_id belum dikonfigurasi di .env")
+        return
+
+    status_lower = status.lower()
+    if status_lower not in ["warning", "critical"]:
+        logger.info(f"[TELEGRAM] Status '{status}' Normal, alert tidak dikirim.")
+        return
+
+    # Format values safely
+    prx_val = round(float(prx), 2) if prx is not None else 0.0
+    safe_loss = [float(l) if l is not None else 0.0 for l in loss]
+    safe_rl = [float(r) if r is not None else 0.0 for r in rl]
+    
+    # Pad loss and return lists to ensure 4 elements
+    while len(safe_loss) < 4:
+        safe_loss.append(0.0)
+    while len(safe_rl) < 4:
+        safe_rl.append(0.0)
+
+    # Default distances if not provided
+    if not distances:
+        distances = [1.004, 2.006, 3.010, 4.014]
+    
+    safe_dist = []
+    for i in range(4):
+        if i < len(distances) and distances[i] is not None:
+            safe_dist.append(float(distances[i]))
+        else:
+            safe_dist.append(float(i + 1))
+            
+    # Find anomaly location (KM with max loss)
+    max_loss_val = max(safe_loss)
+    max_loss_idx = safe_loss.index(max_loss_val) if safe_loss else 0
+    km_loc = max_loss_idx + 1
+    jarak_loc = round(safe_dist[max_loss_idx], 3)
+    redaman_loc = round(max_loss_val, 2)
+    
+    # Format time
+    if timestamp:
+        if isinstance(timestamp, str):
+            time_str = timestamp.replace("T", " ")[:19]
+        else:
+            time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+    status_cap = str(status).capitalize()
+    
+    # Construct message template
+    message = (
+        f"🚨 <b>GANGGUAN TERDETEKSI!</b> 🚨\n\n"
+        f"<b>Jenis Gangguan:</b> {classification}\n"
+        f"<b>Tingkat Bahaya:</b> {status_cap}\n\n"
+        f"<b>Parameter Pengukuran:</b>\n"
+        f"• <b>Daya (Prx):</b> {prx_val} dBm\n\n"
+        f"<b>Detail Redaman &amp; Pantulan:</b>\n"
+        f"• <b>KM 1:</b> Loss {safe_loss[0]:.2f} dB | Return {safe_rl[0]:.2f} dB\n"
+        f"• <b>KM 2:</b> Loss {safe_loss[1]:.2f} dB | Return {safe_rl[1]:.2f} dB\n"
+        f"• <b>KM 3:</b> Loss {safe_loss[2]:.2f} dB | Return {safe_rl[2]:.2f} dB\n"
+        f"• <b>KM 4:</b> Loss {safe_loss[3]:.2f} dB | Return {safe_rl[3]:.2f} dB\n\n"
+        f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {redaman_loc:.2f} dB)\n"
+        f"<b>Waktu:</b> {time_str}"
+    )
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Pisahkan Chat ID jika ada lebih dari satu (dipisah koma)
+    chat_ids = [cid.strip() for cid in str(TELEGRAM_CHAT_ID).split(",") if cid.strip()]
+    
+    for chat_id in chat_ids:
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                logger.info(f"[TELEGRAM] Alert '{status}' berhasil dikirim ke ID: {chat_id}.")
+            else:
+                logger.error(f"[TELEGRAM] Gagal mengirim alert ke ID {chat_id}: {response.text}")
+        except Exception as e:
+            logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
+
 # ═══════════════════════════════════════════════════════════════════
 # 🔥 FUNGSI MAPPING KOLOM - SESUAI DENGAN FEATURE_ORDER.JSON
 # ═══════════════════════════════════════════════════════════════════
@@ -187,6 +278,12 @@ async def lifespan(app: FastAPI):
     # Create tables (safe: only creates if not exists, never drops)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        try:
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE otdr_results ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE;"))
+            logger.info("✅ Database migration: added telegram_alert_sent column")
+        except Exception as mig_err:
+            logger.warning(f"⚠️ Migration check: {mig_err}")
     
     # Create admin user
     async with AsyncSessionLocal() as db:
@@ -699,6 +796,7 @@ def format_markdown_to_html(text: str) -> str:
     html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
     html = html.replace('\n', '<br>')
     return html
+
 
 
 @app.post("/api/chat")
@@ -1305,6 +1403,56 @@ async def get_slide_data(
         "status": record.status,
         "timestamp": record.timestamp.isoformat() if record.timestamp else None,
     }
+
+
+@app.post("/api/slide-alert")
+async def slide_alert(payload: dict, db: AsyncSession = Depends(get_db)):
+    """Endpoint untuk mengirimkan alert dari slideshow monitoring ke Telegram dengan deduplikasi"""
+    try:
+        record_id = payload.get("id")
+        if not record_id:
+            raise HTTPException(status_code=400, detail="Missing record id")
+        
+        result = await db.execute(select(OtdrResult).where(OtdrResult.id == record_id))
+        record = result.scalar_one_or_none()
+        if not record:
+            raise HTTPException(status_code=404, detail="Record not found")
+        
+        # Skip jika sudah dikirim
+        if record.telegram_alert_sent:
+            return {"status": "skipped", "reason": "alert already sent"}
+        
+        # Skip jika normal
+        status_str = record.status or ""
+        if status_str.lower() not in ["warning", "critical"]:
+            return {"status": "skipped", "reason": f"status is {status_str}"}
+        
+        # Kirim Telegram alert
+        loss_list = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
+        rl_list = [record.return_1, record.return_2, record.return_3, record.return_4]
+        
+        logger.info(f"[TELEGRAM] Mengirim slide alert untuk: {record.klasifikasi} ({status_str}) ID={record_id}")
+        await asyncio.to_thread(
+            send_telegram_alert,
+            classification=record.klasifikasi,
+            status=status_str,
+            loss=loss_list,
+            rl=rl_list,
+            prx=record.prx,
+            distances=[record.distance_1, record.distance_2, record.distance_3, record.distance_4],
+            timestamp=record.timestamp
+        )
+        
+        # Tandai sudah dikirim
+        record.telegram_alert_sent = True
+        await db.commit()
+        return {"status": "sent", "id": record_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SLIDE-ALERT] Gagal mengirim slide alert: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/sync")

@@ -115,7 +115,7 @@ STATUS_MAP = {
     "Bad Splice": "Warning",
     "Air Gap": "Warning",
     "Dirty Connector": "Warning",
-    "Hampir Putus": "Critical",
+    "Nearly Cut": "Critical",
     "Fiber Cut": "Critical",
 }
 
@@ -139,7 +139,7 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         max_loss = max(losses) if losses else 0
         
         if max_loss > 3.0:
-            prediction = "Hampir Putus"
+            prediction = "Nearly Cut"
             confidence = 85.0
         elif max_loss > 1.2:
             prediction = "Bending"
@@ -184,7 +184,7 @@ def predict_from_otdr(otdr_values: dict) -> dict:
             label = label_encoder.inverse_transform([pred_int])[0]
         else:
             # Fallback labels
-            labels = ["Normal", "Bending", "Bad Splice", "Air Gap", "Dirty Connector", "Hampir Putus", "Fiber Cut"]
+            labels = ["Normal", "Bending", "Bad Splice", "Air Gap", "Dirty Connector", "Nearly Cut", "Fiber Cut"]
             label = labels[pred_int % len(labels)]
         
         # Get confidence
@@ -214,7 +214,7 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         max_loss = max(losses) if losses else 0
         
         if max_loss > 3.0:
-            prediction = "Hampir Putus"
+            prediction = "Nearly Cut"
         elif max_loss > 1.2:
             prediction = "Bending"
         elif max_loss > 0.5:

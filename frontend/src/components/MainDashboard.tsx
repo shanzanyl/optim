@@ -7,7 +7,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine
 } from 'recharts';
-import { syncFromSheets } from '../services/api';
+import { syncFromSheets, triggerSlideAlert } from '../services/api';
 import topologyImage from '../assets/topology.png';
 import { useSlide } from '../Context/SlideContext';
 import NetworkTopology from '../components/NetworkTopology';
@@ -26,7 +26,7 @@ const StatusBadge = ({ status }: { status: string | null | undefined }) => {
     'Critical': 'bg-red-500/15 text-red-400 border-red-500/30',
   };
   const dot: Record<string, string> = {
-    'Normal'  : 'bg-emerald-400',
+    'Normal'  : 'bg-emerald-400', 
     'Warning' : 'bg-amber-400',
     'Critical': 'bg-red-400',
   };
@@ -42,8 +42,9 @@ const StatusBadge = ({ status }: { status: string | null | undefined }) => {
 const getRealTimeLabels = (count: number) => {
   const now = new Date();
   const labels = [];
+  const intervalSeconds = 5;
   for (let i = count - 1; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 30 * 1000);
+    const time = new Date(now.getTime() - i * intervalSeconds * 1000);
     labels.push(time.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
   }
   return labels;
@@ -95,7 +96,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 30000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 

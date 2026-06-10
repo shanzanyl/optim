@@ -114,7 +114,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
         <h1 className="text-2xl md:text-4xl font-light tracking-wide text-white">
           Opti<span className="font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">M</span>
         </h1>
-        <p className="text-[8px] md:text-[11px] text-slate-400 font-medium tracking-[0.2em] uppercase mt-0.5">Intelligent Fiber Monitoring</p>
+        <p className="text-[8px] md:text-[11px] text-slate-400 font-medium tracking-[0.2em] uppercase mt-0.5">Optical Monitoring</p>
       </div>
     </div>
 
