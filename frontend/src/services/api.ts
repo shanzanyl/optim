@@ -78,3 +78,31 @@ export async function uploadOtdrImage(file: File) {
   
   return response.json();
 }
+
+export async function detectManual(payload: any) {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_URL}/detect-manual`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}` 
+    },
+    body: JSON.stringify(payload),
+  });
+  
+  return response.json();
+}
+
+export async function triggerSlideAlert(id: number) {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_URL}/slide-alert`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : ''
+    },
+    body: JSON.stringify({ id }),
+  });
+  
+  return response.json();
+}
