@@ -62,8 +62,8 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=cs
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 
 # Global EasyOCR reader
-easyocr_reader = None
-easyocr_loading = False
+#easyocr_reader = None
+#easyocr_loading = False
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -304,24 +304,24 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Database tables ready")
     
     # 🔥 Load EasyOCR di background (non-blocking)
-    async def load_easyocr_background():
-        global easyocr_reader, easyocr_loading
-        easyocr_loading = True
-        try:
-            def _init_reader():
-                import easyocr
-                return easyocr.Reader(['en'], gpu=False, verbose=False)
+    # async def load_easyocr_background():
+    #     global easyocr_reader, easyocr_loading
+    #     easyocr_loading = True
+    #     try:
+    #         def _init_reader():
+    #             import easyocr
+    #             return easyocr.Reader(['en'], gpu=False, verbose=False)
             
-            easyocr_reader = await asyncio.to_thread(_init_reader)
-            logger.info("✅ EasyOCR loaded successfully")
-        except Exception as e:
-            logger.warning(f"⚠️ EasyOCR failed to load: {e}")
-            easyocr_reader = None
-        finally:
-            easyocr_loading = False
+    #         easyocr_reader = await asyncio.to_thread(_init_reader)
+    #         logger.info("✅ EasyOCR loaded successfully")
+    #     except Exception as e:
+    #         logger.warning(f"⚠️ EasyOCR failed to load: {e}")
+    #         easyocr_reader = None
+    #     finally:
+    #         easyocr_loading = False
     
-    asyncio.create_task(load_easyocr_background())
-    logger.info("🔄 EasyOCR loading started in background...")
+    # asyncio.create_task(load_easyocr_background())
+    # logger.info("🔄 EasyOCR loading started in background...")
     
     # 🔥 Auto sync background task (every 6 hours)
     async def auto_sync_sheets():
@@ -709,27 +709,27 @@ def preprocess_image_simple(image_bytes: bytes) -> list:
     return results
 
 
-def easyocr_extract_simple(image_bytes: bytes) -> str:
-    """Ekstrak teks menggunakan EasyOCR"""
-    global easyocr_reader
-    if easyocr_reader is None:
-        return ""
+# def easyocr_extract_simple(image_bytes: bytes) -> str:
+#     """Ekstrak teks menggunakan EasyOCR"""
+#     global easyocr_reader
+#     if easyocr_reader is None:
+#         return ""
     
-    try:
-        arr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        h, w = img.shape[:2]
-        y_start = int(h * 0.30)
-        y_end = int(h * 0.99)
-        cropped = img[y_start:y_end, 0:w]
-        resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        result = easyocr_reader.readtext(resized, detail=0, paragraph=False)
-        text = ' '.join(result)
-        logger.info(f"EasyOCR extracted {len(text)} chars")
-        return text
-    except Exception as e:
-        logger.error(f"EasyOCR error: {e}")
-        return ""
+#     try:
+#         arr = np.frombuffer(image_bytes, np.uint8)
+#         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+#         h, w = img.shape[:2]
+#         y_start = int(h * 0.30)
+#         y_end = int(h * 0.99)
+#         cropped = img[y_start:y_end, 0:w]
+#         resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+#         result = easyocr_reader.readtext(resized, detail=0, paragraph=False)
+#         text = ' '.join(result)
+#         logger.info(f"EasyOCR extracted {len(text)} chars")
+#         return text
+#     except Exception as e:
+#         logger.error(f"EasyOCR error: {e}")
+#         return ""
 
 
 def tesseract_extract(image_bytes: bytes) -> str:
@@ -1100,10 +1100,10 @@ async def detect_ocr(
     logger.info("=" * 70)
     logger.info("🔄 Starting OCR process...")
     
-    async def run_easyocr():
-        if easyocr_reader is not None:
-            return easyocr_extract_simple(content)
-        return ""
+    # async def run_easyocr():
+    #     if easyocr_reader is not None:
+    #         return easyocr_extract_simple(content)
+    #     return ""
     
     async def run_tesseract():
         return tesseract_extract(content)
