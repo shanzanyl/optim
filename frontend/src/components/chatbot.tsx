@@ -17,7 +17,7 @@ const Chatbot: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
-      text: 'Halo! Saya asisten AI OptiM. Saya bisa membantu Anda menganalisis data monitoring fiber optik.<br/><br/>📊 <strong>Saya punya akses ke:</strong><br/>• Data OTDR (Loss, Return, PRX)<br/>• Klasifikasi gangguan (Normal, Bending, Fiber Cut, dll)<br/>• Statistik dashboard<br/>• History pengukuran<br/><br/>Apa yang ingin Anda tanyakan?',
+      text: 'Halo! Saya asisten AI OptiM. Saya bisa membantu Anda menganalisis data monitoring fiber optik',
       sender: 'bot',
       timestamp: new Date()
     }
@@ -299,7 +299,6 @@ const Chatbot: React.FC = () => {
                 </button>
               </div>
               <p className="text-[8px] text-slate-500 mt-2 text-center">
-                💡 Contoh: "Loss data pertama berapa?", "Batas Prx normal?", "Jumlah data bending?"
               </p>
             </div>
           </>

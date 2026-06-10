@@ -254,7 +254,7 @@ async def lifespan(app: FastAPI):
                                     # Delete old sheets data
                                     existing = await db_sync.execute(
                                         select(OtdrResult).where(
-                                            OtdrResult.user_id == user.id,
+                                            OtdrResult.user_id == None,
                                             OtdrResult.source == "sheets",
                                         )
                                     )
@@ -338,7 +338,7 @@ async def lifespan(app: FastAPI):
                                         
                                         # Simpan ke database
                                         record = OtdrResult(
-                                            user_id=user.id,
+                                            user_id=None,
                                             timestamp=datetime.now(),
                                             prx=prx_val,
                                             temperature=temp_val,

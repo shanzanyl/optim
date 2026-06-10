@@ -275,16 +275,16 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
-            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400"><Activity size={20} /></div><span className="text-md text-white">Total Pengukuran</span></div>
-            <span className="text-4xl font-black text-blue-400">{totalProcessed}</span>
+            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400"><Activity size={20} /></div><span className="text-lg text-white">Total Measurement</span></div>
+            <span className="text-3xl font-black text-white">{totalProcessed}</span>
           </div>
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
-            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400"><CheckCircle2 size={20} /></div><span className="text-md text-white">Normal</span></div>
-            <span className="text-4xl font-black text-emerald-400">{normalCount}</span>
+            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400"><CheckCircle2 size={20} /></div><span className="text-lg text-white">Normal</span></div>
+            <span className="text-3xl font-black text-white">{normalCount}</span>
           </div>
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
-            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400"><AlertTriangle size={20} /></div><span className="text-md text-white">Terdeteksi Gangguan</span></div>
-            <span className="text-4xl font-black text-amber-400">{gangguanCount}</span>
+            <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400"><AlertTriangle size={20} /></div><span className="text-lg text-white">Event Detected</span></div>
+            <span className="text-3xl font-black text-white">{gangguanCount}</span>
           </div>
         </div>
 
@@ -305,7 +305,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 return (
                   <div key={km} className="group bg-[#1e2f50] border border-red-500/30 p-5 rounded-[2rem] opacity-70">
                     <div className="text-center py-8">
-                      <p className="text-red-400 text-xs font-bold animate-pulse">⚠️ FIBER CUT</p>
+                      <p className="text-red-400 text-xs font-bold animate-pulse">FIBER CUT</p>
                       <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di KM {cutKM}</p>
                       <p className="text-slate-500 text-[8px] mt-2">Prx: {currentRecord?.prx} dBm</p>
                     </div>
@@ -325,7 +325,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                         </h4>
                         {!(lossValue === 0 && km === 4) && <span className="text-[10px] font-bold text-white uppercase">dB</span>}
                       </div>
-                      {isAboveThreshold && <p className="text-[7px] text-red-400 mt-1 animate-pulse">⚠️ Melebihi batas!</p>}
+                      {isAboveThreshold && <p className="text-[12px] text-red-400 mt-1 animate-pulse">Melebihi batas!</p>}
                     </div>
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors[km - 1], boxShadow: `0 0 12px ${lossColors[km - 1]}` }} />
                   </div>
@@ -346,7 +346,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                           axisLine={{ stroke: '#ffffff', strokeWidth: 1 }}
                           dy={8} 
                           tick={{ fill: '#ffffff' }}
-                          label={{ value: 'Waktu', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 10 }} 
+                          label={{ value: 'Time', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 10 }} 
                         />
                         <YAxis 
                     stroke="#ffffff"
@@ -386,7 +386,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 return (
                   <div key={km} className="group bg-[#1e2f50] border border-red-500/30 p-5 rounded-[2rem] opacity-70">
                     <div className="text-center py-8">
-                      <p className="text-red-400 text-xs font-bold animate-pulse">⚠️ FIBER CUT</p>
+                      <p className="text-red-400 text-xs font-bold animate-pulse">FIBER CUT</p>
                       <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di KM {cutKM}</p>
                     </div>
                   </div>
@@ -403,7 +403,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                         <h4 className={`text-2xl font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}`}>{returnValue}</h4>
                         <span className="text-[10px] font-bold text-white uppercase">dB</span>
                       </div>
-                      {isAboveThreshold && <p className="text-[7px] text-red-400 mt-1 animate-pulse">⚠️ Melebihi batas!</p>}
+                      {isAboveThreshold && <p className="text-[12px] text-red-400 mt-1 animate-pulse">Melebihi batas!</p>}
                     </div>
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: returnColors[km - 1], boxShadow: `0 0 12px ${returnColors[km - 1]}` }} />
                   </div>
@@ -424,7 +424,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                           axisLine={{ stroke: '#ffffff', strokeWidth: 1 }}
                           dy={8} 
                           tick={{ fill: '#ffffff' }}
-                          label={{ value: 'Waktu', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 10 }} 
+                          label={{ value: 'Time', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 10 }} 
                         />
                         <YAxis 
                     stroke="#ffffff"
@@ -484,7 +484,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     axisLine={{ stroke: '#ffffff', strokeWidth: 1 }}
                     dy={8} 
                     tick={{ fill: '#ffffff' }}
-                    label={{ value: 'Waktu', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 11 }} 
+                    label={{ value: 'Time', position: 'insideBottom', offset: -5, fill: '#ffffff', fontSize: 11 }} 
                   />
                   <YAxis 
                     stroke="#ffffff"
@@ -548,7 +548,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 <span className={`text-[10px] font-bold ${
                   isFiberCut() ? 'text-red-400' : 'text-amber-400'
                 }`}>
-                  {isFiberCut() ? `⚠️ FIBER CUT` : `⚠️ ${currentRecord?.klasifikasi} DETECTED`}
+                  {isFiberCut() ? `FIBER CUT` : `${currentRecord?.klasifikasi} DETECTED`}
                 </span>
               </div>
             )}

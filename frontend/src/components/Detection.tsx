@@ -145,7 +145,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
       if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.detail || 'Gagal memproses data manual');
+        throw new Error(err.detail || 'Failed to classify data');
       }
 
       const result = await response.json();
@@ -155,7 +155,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       if (onDataChange) onDataChange();
     } catch (error: any) {
       console.error('Manual classification error:', error);
-      setErrorMsg(error.message || 'Koneksi gagal ke server.');
+      setErrorMsg(error.message || 'Failed to connect to server.');
       setImageStatus('error');
     }
   };
@@ -214,7 +214,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       const response = await fetch(`${API_BASE}/api/history?limit=5000`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error('Gagal fetch history');
+      if (!response.ok) throw new Error('Failed to fetch history');
       const result = await response.json();
 
       const mappedHistory = (result.history || []).map((record: any) => ({
@@ -284,7 +284,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
       if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.detail || 'Gagal memproses gambar');
+        throw new Error(err.detail || 'Failed to process image');
       }
 
       const result = await response.json();
@@ -309,7 +309,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       if (onDataChange) onDataChange();
     } catch (error: any) {
       console.error('OCR error:', error);
-      setErrorMsg(error.message || 'Koneksi gagal. Pastikan backend jalan di port 8000');
+      setErrorMsg(error.message || 'Failed to connect. Ensure backend is running on port 8000');
       setImageStatus('error');
     }
   };
@@ -387,7 +387,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             {activeInputMethod === 'ocr' ? (
               <>
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Foto OTDR</h3>
+                <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
                 <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
 
                 {preview && (
@@ -398,7 +398,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
                 <div className="mb-5">
                   <label className="text-xs font-bold text-white mb-1.5 block">
-                    Input Nilai Prx (dBm)
+                    Input Prx Value (dBm)
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -430,9 +430,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
                     }`}
                 >
-                  {imageStatus === 'uploading' ? 'Memproses...' :
-                    imageStatus === 'success' ? 'Upload Lagi' :
-                      imageStatus === 'error' ? 'Coba Lagi' : 'Pilih Foto OTDR'}
+                  {imageStatus === 'uploading' ? 'Processing...' :
+                    imageStatus === 'success' ? 'Upload Again' :
+                      imageStatus === 'error' ? 'Try Again' : 'Select OTDR Photo'}
                 </label>
               </>
             ) : (
@@ -569,13 +569,13 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             {imageStatus === 'uploading' && (
               <div className="flex flex-col items-center justify-center h-52 gap-3">
                 <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
-                <p className="text-sm text-slate-400">OCR sedang membaca gambar...</p>
+                <p className="text-sm text-slate-400">OCR is reading the image...</p>
               </div>
             )}
             {imageStatus === 'idle' && !lastResult && (
               <div className="flex flex-col items-center justify-c enter h-52 gap-2 text-slate-500">
                 <Camera className="w-8 h-8" />
-                <p className="text-sm italic">Upload foto OTDR untuk melihat hasil</p>
+                <p className="text-sm italic">Upload photo OTDR to view results</p>
               </div>
             )}
             {errorMsg && (
@@ -592,7 +592,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   }`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
                   <p className="text-2xl font-black">{lastResult.prediction}</p>
-                  <p className="text-xs mt-1 opacity-70">Confidence: {lastResult.confidence?.toFixed(1)}%</p>
                 </div>
 
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
@@ -611,14 +610,14 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
                 {/* Nilai Terdeteksi */}
                 <div className="space-y-2">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nilai Terdeteksi</p>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detected Values</p>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-slate-500">Loss KM {i + 1}</span>
                         <span className="text-white font-mono">
-                          {l === 0 || l === null || l === undefined ? '---' : l.toFixed(2)} dB
+                          {l === 0 || l === null || l === undefined ? '---' : l.toString()} dB
                         </span>
                       </div>
                     ))}
@@ -630,7 +629,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-slate-500">Total-L KM {i + 1}</span>
                           <span className="text-white font-mono">
-                            {tl === 0 || tl === null || tl === undefined ? '---' : tl.toFixed(2)} dB
+                            {tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB
                           </span>
                         </div>
                       ))}
@@ -643,7 +642,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-slate-500">Avg-L KM {i + 1}</span>
                           <span className="text-white font-mono">
-                            {i === 3 ? (al === 0 ? '---' : al.toFixed(2)) : al.toFixed(2)} dB/km
+                            {al === 0 ? '---' : al.toString()} dB/km
                           </span>
                         </div>
                       ))}
@@ -654,7 +653,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-slate-500">Avg-Total</span>
                       <span className="text-white font-mono">
-                        {lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toFixed(2)} dB/km
+                        {lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString()} dB/km
                       </span>
                     </div>
                   )}
@@ -663,7 +662,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-slate-500">Return KM {i + 1}</span>
-                        <span className="text-white font-mono">{r.toFixed(2)} dB</span>
+                        <span className="text-white font-mono">{r.toString()} dB</span>
                       </div>
                     ))}
                   </div>
@@ -673,7 +672,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   onClick={() => setShowRawOcr(!showRawOcr)}
                   className="text-[10px] text-slate-500 hover:text-slate-400 underline transition"
                 >
-                  {showRawOcr ? '▲ Sembunyikan' : '▼ Lihat'} teks mentah OCR
+                  {showRawOcr ? '▲ Hide' : '▼ Show'} raw OCR text
                 </button>
                 {showRawOcr && (
                   <pre className="text-[9px] bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg p-3 
@@ -689,7 +688,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
         {/* History Table dengan Total-L dari total_l_4 */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] shadow-2xl overflow-hidden">
           <div className="p-5 border-b border-[#3b4f6e] flex justify-between items-center">
-            <h2 className="text-sm font-bold text-white uppercase tracking-widest">Riwayat Pengukuran</h2>
+            <h2 className="text-sm font-bold text-white uppercase tracking-widest">History of Measurements</h2>
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-400 bg-[#0f1a2e] px-3 py-1 rounded-full border border-[#3b4f6e]">
                 {totalData} data
@@ -704,12 +703,12 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
                 <tr className="bg-[#1e2f50] text-white text-[11px] font-black uppercase tracking-widest border-b border-[#3b4f6e]">
-                  <th className="px-6 py-4">Waktu</th>
+                  <th className="px-6 py-4">Time</th>
                   <th className="px-6 py-4 text-center">Loss KM1-4 (dB)</th>
                   <th className="px-6 py-4 text-center">Total-L (dB)</th>
                   <th className="px-6 py-4 text-center">Return KM1-4 (dB)</th>
                   <th className="px-6 py-4 text-center">PRX (dBm)</th>
-                  <th className="px-6 py-4">Klasifikasi</th>
+                  <th className="px-6 py-4">Classification</th>
                   <th className="px-6 py-4 text-center">Status</th>
                 </tr>
               </thead>
@@ -717,12 +716,10 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 {isLoadingHistory ? (
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500"><RefreshCw size={18} className="animate-spin mx-auto" /></td></tr>
                 ) : totalData === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">Belum ada riwayat pengukuran. Upload foto OTDR untuk memulai.</td></tr>
-                ) : displayedHistory.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">Memuat data...</td></tr>
-                ) : (
-                  displayedHistory.map((row, i) => {
-                    const timeOffset = (displayedHistory.length - 1 - i) * 30;
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available. Upload an OTDR photo to get started.</td></tr>
+                ) :  (
+                  [...allHistory].reverse().map((row, i) => {
+                    const timeOffset = i * 5;
                     const realTime = getRealTime(timeOffset);
                     // 🔥 Total-L menggunakan total_l_4 dari database (sama seperti Dashboard)
                     const totalLValue = row.total_l_4;
@@ -743,7 +740,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                           {formatReturnValue(row.return_3)} | {formatReturnValue(row.return_4)}
                         </td>
                         <td className="px-6 py-4 text-center text-blue-400 font-bold text-xs font-mono">
-                          {row.prx != null ? `${row.prx.toFixed(1)} dBm` : '—'}
+                          {row.prx != null ? `${row.prx.toString()} dBm` : '—'}
                         </td>
                         <td className="px-6 py-4">
                           <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :

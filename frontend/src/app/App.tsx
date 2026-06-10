@@ -126,7 +126,7 @@ export default function App() {
                       Opti<span className="font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">M</span>
                     </h1>
                     <p className="text-[6px] sm:text-[8px] md:text-[9px] lg:text-[10px] text-slate-400 font-medium tracking-[0.15em] uppercase mt-0.5">
-                      Intelligent Fiber Monitoring
+                      Optical Monitoring
                     </p>
                   </div>
                 </div>
@@ -157,7 +157,7 @@ export default function App() {
                       }`}
                     >
                       <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Deteksi</span>
+                      <span className="hidden sm:inline">Detection</span>
                     </button>
 
                     {isAdmin && (

@@ -87,10 +87,10 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
     if (isHighLoss) {
       switch(normalizedKlasifikasi) {
         case 'bending': return '#f59e0b';
-        case 'bad splice': return '#eab308';
-        case 'air gap': return '#06b6d4';
-        case 'dirty connector': return '#8b5cf6';
-        case 'hampir putus': return '#f97316';
+        case 'bad splice': return '#f59e0b';
+        case 'air gap': return '#f59e0b';
+        case 'dirty connector': return '#f59e0b';
+        case 'hampir putus': return '#e84910';
         default: return '#f59e0b';
       }
     }
@@ -132,23 +132,23 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
     if (!isAnyHighLoss && !isFiberCut) return null;
     
     if (isFiberCut) {
-      return `⚠️ FIBER CUT terdeteksi di KM ${cutKM}! Kabel serat optik putus total.`;
+      return `FIBER CUT terdeteksi di KM ${cutKM}! Kabel serat optik putus total.`;
     }
     
     const highLossKM = highLossKMList.join(', ');
     switch(normalizedKlasifikasi) {
       case 'bending':
-        return `⚠️ BENDING terdeteksi di KM ${highLossKM}! Terjadi tekukan pada kabel fiber.`;
+        return `BENDING terdeteksi di KM ${highLossKM}!`;
       case 'bad splice':
-        return `⚠️ BAD SPLICE terdeteksi di KM ${highLossKM}! Penyambungan fiber tidak sempurna.`;
+        return `BAD SPLICE terdeteksi di KM ${highLossKM}!`;
       case 'air gap':
-        return `⚠️ AIR GAP terdeteksi di KM ${highLossKM}! Ada celah udara pada konektor.`;
+        return `AIR GAP terdeteksi di KM ${highLossKM}! `;
       case 'dirty connector':
-        return `⚠️ DIRTY CONNECTOR terdeteksi di KM ${highLossKM}! Konektor kotor perlu dibersihkan.`;
+        return `DIRTY CONNECTOR terdeteksi di KM ${highLossKM}!`;
       case 'hampir putus':
-        return `⚠️ HAMPIR PUTUS terdeteksi di KM ${highLossKM}! Sinyal sangat lemah.`;
+        return `HAMPIR PUTUS terdeteksi di KM ${highLossKM}!`;
       default:
-        return `⚠️ ${klasifikasi} terdeteksi di KM ${highLossKM}! Perlu investigasi.`;
+        return `${klasifikasi} terdeteksi di KM ${highLossKM}!`;
     }
   };
   
@@ -180,7 +180,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
             : 'bg-red-500/20 text-red-400 border border-red-500/30'
         }`}>
-          {isMobile ? `${klasifikasi}` : `Klasifikasi: ${klasifikasi} ${status ? `(${status})` : ''} - ${confidencePercent}`}
+          {isMobile ? `${klasifikasi}` : `Klasifikasi: ${klasifikasi} ${status ? `(${status})` : ''} `}
         </div>
       </div>
       
@@ -220,7 +220,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
                   <p className={`text-[9px] font-bold mt-0.5 ${nodeStyle.textColor}`}>
                     Loss: {lossValue?.toFixed(2)} dB
                   </p>
-                  <p className="text-[8px] font-bold text-red-400 mt-0.5 animate-pulse">⚠️ FIBER CUT</p>
+                  <p className="text-[8px] font-bold text-red-400 mt-0.5 animate-pulse">FIBER CUT</p>
                   <div className="w-0.5 h-4 bg-red-500/50 mx-auto mt-1"></div>
                 </div>
               );
@@ -240,7 +240,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
                   Loss: {lossValue === 0 ? '---' : `${lossValue?.toFixed(2)} dB`}
                 </p>
                 {lossValue > LOSS_THRESHOLD && (
-                  <p className="text-[7px] font-bold text-amber-400 mt-0.5 animate-pulse">⚠️ HIGH LOSS</p>
+                  <p className="text-[7px] font-bold text-amber-400 mt-0.5 animate-pulse">HIGH LOSS</p>
                 )}
                 <div className="w-0.5 h-4 bg-[#3b4f6e] mx-auto mt-1"></div>
               </div>
@@ -285,7 +285,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
               Loss: {losses[0]?.toFixed(2)} dB
             </p>
             {losses[0] > LOSS_THRESHOLD && (
-              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">⚠️ HIGH LOSS</p>
+              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">HIGH LOSS</p>
             )}
           </div>
           
@@ -305,7 +305,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
               Loss: {losses[1]?.toFixed(2)} dB
             </p>
             {losses[1] > LOSS_THRESHOLD && (
-              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">⚠️ HIGH LOSS</p>
+              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">HIGH LOSS</p>
             )}
           </div>
           
@@ -325,7 +325,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
               Loss: {losses[2]?.toFixed(2)} dB
             </p>
             {losses[2] > LOSS_THRESHOLD && (
-              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">⚠️ HIGH LOSS</p>
+              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">HIGH LOSS</p>
             )}
           </div>
           
@@ -345,7 +345,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
               Loss: {losses[3] === 0 || losses[3] === null || losses[3] === undefined ? '---' : `${losses[3]?.toFixed(2)} dB`}
             </p>
             {losses[3] > LOSS_THRESHOLD && (
-              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">⚠️ HIGH LOSS</p>
+              <p className="text-[8px] font-bold text-amber-400 mt-0.5 animate-pulse">HIGH LOSS</p>
             )}
           </div>
           
