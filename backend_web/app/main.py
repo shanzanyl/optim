@@ -273,7 +273,7 @@ def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global easyocr_reader, easyocr_loading
+    # global easyocr_reader, easyocr_loading
     
     # Create tables (safe: only creates if not exists, never drops)
     async with engine.begin() as conn:
@@ -1129,13 +1129,13 @@ async def detect_ocr(
             logger.warning("OCR.space timed out")
             results['ocr.space'] = ""
 
-        if easyocr_reader is not None:
-            try:
-                results['easyocr'] = await asyncio.wait_for(
-                    asyncio.to_thread(easyocr_extract_simple, content), timeout=20.0)
-            except asyncio.TimeoutError:
-                logger.warning("EasyOCR timed out")
-                results['easyocr'] = ""
+        # if easyocr_reader is not None:
+        #     try:
+        #         results['easyocr'] = await asyncio.wait_for(
+        #             asyncio.to_thread(easyocr_extract_simple, content), timeout=20.0)
+        #     except asyncio.TimeoutError:
+        #         logger.warning("EasyOCR timed out")
+        #         results['easyocr'] = ""
 
         best_score = 0
         for method, text in results.items():
