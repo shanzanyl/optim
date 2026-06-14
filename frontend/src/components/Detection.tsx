@@ -222,6 +222,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return () => clearInterval(interval);
   }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
 
+  // 🔥 PERUBAHAN: Hanya menampilkan data dari source 'ocr' dan 'manual' (tidak termasuk 'sheets')
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
     try {
@@ -232,22 +233,25 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       if (!response.ok) throw new Error('Failed to fetch history');
       const result = await response.json();
 
-      const mappedHistory = (result.history || []).map((record: any) => ({
-        id: record.id,
-        loss_1: record.loss_1 ?? null,
-        loss_2: record.loss_2 ?? null,
-        loss_3: record.loss_3 ?? null,
-        loss_4: record.loss_4 ?? null,
-        total_l_4: record.total_l_4 ?? null,
-        return_1: record.return_1 ?? null,
-        return_2: record.return_2 ?? null,
-        return_3: record.return_3 ?? null,
-        return_4: record.return_4 ?? null,
-        prx: record.prx ?? null,
-        klasifikasi: record.klasifikasi,
-        status: record.status,
-        timestamp: record.timestamp,
-      }));
+      // 🔥 FILTER: Hanya ambil data dengan source 'ocr' atau 'manual'
+      const mappedHistory = (result.history || [])
+        .filter((record: any) => record.source === 'ocr' || record.source === 'manual')
+        .map((record: any) => ({
+          id: record.id,
+          loss_1: record.loss_1 ?? null,
+          loss_2: record.loss_2 ?? null,
+          loss_3: record.loss_3 ?? null,
+          loss_4: record.loss_4 ?? null,
+          total_l_4: record.total_l_4 ?? null,
+          return_1: record.return_1 ?? null,
+          return_2: record.return_2 ?? null,
+          return_3: record.return_3 ?? null,
+          return_4: record.return_4 ?? null,
+          prx: record.prx ?? null,
+          klasifikasi: record.klasifikasi,
+          status: record.status,
+          timestamp: record.timestamp,
+        }));
 
       const sorted = [...mappedHistory].sort(
         (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
@@ -368,7 +372,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   setImageStatus('idle');
                   setErrorMsg('');
                 }}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${activeInputMethod === 'ocr'
+                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeInputMethod === 'ocr'
                   ? 'bg-blue-600 text-white shadow-lg'
                   : 'text-slate-400 hover:text-white'
                   }`}
@@ -382,7 +386,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   setImageStatus('idle');
                   setErrorMsg('');
                 }}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${activeInputMethod === 'manual'
+                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeInputMethod === 'manual'
                   ? 'bg-blue-600 text-white shadow-lg'
                   : 'text-slate-400 hover:text-white'
                   }`}
@@ -404,7 +408,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 )}
 
                 <div className="mb-5">
-                  <label className="text-xs font-bold text-white mb-1.5 block">
+                  <label className="text-sm font-bold text-white mb-1.5 block">
                     Input Prx Value (dBm)
                   </label>
                   <div className="flex items-center gap-2">
@@ -417,7 +421,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
                         text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
                     />
-                    <span className="text-xs text-white whitespace-nowrap">dBm</span>
+                    <span className="text-sm text-white whitespace-nowrap">dBm</span>
                   </div>
                 </div>
 
@@ -446,7 +450,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               <form onSubmit={handleManualClassify} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] font-bold text-white uppercase tracking-widest mb-1.5 block">
+                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">
                       Prx (dBm)
                     </label>
                     <input
@@ -461,7 +465,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-white uppercase tracking-widest mb-1.5 block">
+                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">
                       Avg-Total (dB/km)
                     </label>
                     <input
@@ -480,7 +484,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
                   <table className="w-full text-left text-xs min-w-[500px]">
                     <thead>
-                      <tr className="bg-[#0f1a2e] text-slate-400 font-bold border-b border-[#3b4f6e]/50">
+                      <tr className="bg-[#0f1a2e] text-white font-bold border-b border-[#3b4f6e]/50">
                         <th className="p-2">Section</th>
                         <th className="p-2">Distance (km)</th>
                         <th className="p-2">Loss (dB)</th>
@@ -723,7 +727,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 {isLoadingHistory ? (
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500"><RefreshCw size={18} className="animate-spin mx-auto" /></td></tr>
                 ) : displayedHistory.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available. Upload an OTDR photo to get started.</td></tr>
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available.</td></tr>
                 ) : (
                   displayedHistory.map((row, idx) => {
                     const recordTime = row.timestamp ? new Date(row.timestamp).toLocaleString('en-US') : '—';

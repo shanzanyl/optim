@@ -110,7 +110,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 5000);
+    }, 600000);
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
@@ -329,15 +329,15 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
             <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400"><Activity size={20} /></div><span className="text-lg text-white">Total Measurement</span></div>
-            <span className="text-3xl font-black text-white">{totalProcessed}</span>
+            <span className="text-3xl font-black text-blue-400">{totalProcessed}</span>
           </div>
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
             <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400"><CheckCircle2 size={20} /></div><span className="text-lg text-white">Normal</span></div>
-            <span className="text-3xl font-black text-white">{normalCount}</span>
+            <span className="text-3xl font-black text-emerald-400">{normalCount}</span>
           </div>
           <div className="bg-[#1e2f50] border border-[#3b4f6e] p-6 rounded-[1.8rem] flex justify-between items-center">
             <div className="flex items-center gap-4"><div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400"><AlertTriangle size={20} /></div><span className="text-lg text-white">Event Detected</span></div>
-            <span className="text-3xl font-black text-white">{gangguanCount}</span>
+            <span className="text-3xl font-black text-amber-400">{gangguanCount}</span>
           </div>
         </div>
 
