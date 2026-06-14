@@ -110,7 +110,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 600000);
+    }, 60000); 
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 

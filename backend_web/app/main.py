@@ -357,170 +357,172 @@ async def lifespan(app: FastAPI):
     # logger.info("🔄 EasyOCR loading started in background...")
     
     # 🔥 Auto sync background task (every 6 hours)
-    async def auto_sync_sheets():
-        await asyncio.sleep(10)
-        while True:
-            try:
-                logger.info("🔄 Auto-sync from Google Sheets...")
-                async with AsyncSessionLocal() as db_sync:
-                    result = await db_sync.execute(select(User))
-                    users = result.scalars().all()
-                    
-                    for user in users:
-                        try:
-                            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-                                resp = await client.get(SHEET_URL, headers={
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                                })
-                                if resp.status_code == 200:
-                                    df = pd.read_csv(io.StringIO(resp.text))
-                                    df.columns = [str(c).strip() for c in df.columns]
-                                    
-                                    logger.info(f"📊 Found columns in CSV: {df.columns.tolist()}")
-                                    
-                                    # 🔥 BUAT MAPPING KOLOM
-                                    column_mapping = create_column_mapping(df.columns.tolist())
-                                    
-                                    # Delete old sheets data
-                                    existing = await db_sync.execute(
-                                        select(OtdrResult).where(
-                                            OtdrResult.user_id == None,
-                                            OtdrResult.source == "sheets",
-                                        )
-                                    )
-                                    for rec in existing.scalars().all():
-                                        await db_sync.delete(rec)
-                                    await db_sync.flush()
-                                    
-                                    saved = 0
-                                    for _, row in df.iterrows():
-                                        # Ambil nilai dasar
-                                        prx_val = get_value_from_row(row, 'Prx (dBm)', column_mapping)
-                                        temp_val = get_value_from_row(row, 'Temperature (C)', column_mapping)
-                                        wavelength_val = get_value_from_row(row, 'Wavelength', column_mapping)
-                                        pulse_width_val = get_value_from_row(row, 'Pulse Width (ns)', column_mapping)
-                                        
-                                        # Distance values
-                                        distance = {
-                                            'Distance 1': get_value_from_row(row, 'Distance 1', column_mapping),
-                                            'Distance 2': get_value_from_row(row, 'Distance 2', column_mapping),
-                                            'Distance 3': get_value_from_row(row, 'Distance 3', column_mapping),
-                                            'Distance 4': get_value_from_row(row, 'Distance 4', column_mapping),
-                                        }
-                                        
-                                        # Loss values
-                                        loss = {
-                                            'Loss 1': get_value_from_row(row, 'Loss 1', column_mapping),
-                                            'Loss 2': get_value_from_row(row, 'Loss 2', column_mapping),
-                                            'Loss 3': get_value_from_row(row, 'Loss 3', column_mapping),
-                                        }
-                                        
-                                        # Total-L values
-                                        total_l = {
-                                            'Total-L 1': get_value_from_row(row, 'Total-L 1', column_mapping),
-                                            'Total-L 2': get_value_from_row(row, 'Total-L 2', column_mapping),
-                                            'Total-L 3': get_value_from_row(row, 'Total-L 3', column_mapping),
-                                            'Total-L 4': get_value_from_row(row, 'Total-L 4', column_mapping),
-                                        }
-                                        
-                                        # Return values
-                                        return_vals = {
-                                            'Return 1': get_value_from_row(row, 'Return 1', column_mapping),
-                                            'Return 2': get_value_from_row(row, 'Return 2', column_mapping),
-                                            'Return 3': get_value_from_row(row, 'Return 3', column_mapping),
-                                            'Return 4': get_value_from_row(row, 'Return 4', column_mapping),
-                                        }
-                                        
-                                        # Hitung nilai yang hilang (Avg-L dan Avg-Total)
-                                        calculated = calculate_missing_values(row, column_mapping, distance, total_l)
-                                        
-                                        # Siapkan values untuk ML
-                                        otdr_values = {
-                                                'Prx (dBm)': prx_val,
-                                            'Distance 1': distance['Distance 1'],
-                                            'Distance 2': distance['Distance 2'],
-                                            'Distance 3': distance['Distance 3'],
-                                            'Distance 4': distance['Distance 4'],
-                                            'Loss 1': loss['Loss 1'],
-                                            'Loss 2': loss['Loss 2'],
-                                            'Loss 3': loss['Loss 3'],
-                                            'Total-L 1': total_l['Total-L 1'],
-                                            'Total-L 2': total_l['Total-L 2'],
-                                            'Total-L 3': total_l['Total-L 3'],
-                                            'Total-L 4': total_l['Total-L 4'],
-                                            'Avg-L 1': calculated.get('Avg-L 1', 0),
-                                            'Avg-L 2': calculated.get('Avg-L 2', 0),
-                                            'Avg-L 3': calculated.get('Avg-L 3', 0),
-                                            'Avg-L 4': calculated.get('Avg-L 4', 0),
-                                            'Avg-Total': calculated.get('Avg-Total', 0),
-                                            'Return 1': return_vals['Return 1'],
-                                            'Return 2': return_vals['Return 2'],
-                                            'Return 3': return_vals['Return 3'],
-                                            'Return 4': return_vals['Return 4'],
-    }
-                                        
-                                        # Prediksi ML
-                                        try:
-                                            pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-                                        except Exception as e:
-                                            logger.error(f"ML prediction error: {e}")
-                                            pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-                                        
-                                        # Simpan ke database
-                                        record = OtdrResult(
-                                            user_id=None,
-                                            timestamp=datetime.now(),
-                                            prx=prx_val,
-                                            temperature=temp_val,
-                                            wavelength=wavelength_val,
-                                            pulse_width=pulse_width_val,
-                                            distance_1=distance['Distance 1'],
-                                            distance_2=distance['Distance 2'],
-                                            distance_3=distance['Distance 3'],
-                                            distance_4=distance['Distance 4'],
-                                            loss_1=loss['Loss 1'],
-                                            loss_2=loss['Loss 2'],
-                                            loss_3=loss['Loss 3'],
-                                            loss_4=None,
-                                            total_l_1=total_l['Total-L 1'],
-                                            total_l_2=total_l['Total-L 2'],
-                                            total_l_3=total_l['Total-L 3'],
-                                            total_l_4=total_l['Total-L 4'],
-                                            avg_l_1=calculated.get('Avg-L 1', 0),
-                                            avg_l_2=calculated.get('Avg-L 2', 0),
-                                            avg_l_3=calculated.get('Avg-L 3', 0),
-                                            avg_l_4=calculated.get('Avg-L 4', 0),
-                                            avg_total=calculated.get('Avg-Total', 0),
-                                            return_1=return_vals['Return 1'],
-                                            return_2=return_vals['Return 2'],
-                                            return_3=return_vals['Return 3'],
-                                            return_4=return_vals['Return 4'],
-                                            klasifikasi=pred.get("prediction"),
-                                            status=pred.get("status"),
-                                            confidence=pred.get("confidence"),
-                                            source="sheets",
-                                        )
-                                        db_sync.add(record)
-                                        saved += 1
-                                    
-                                    await db_sync.commit()
-                                    logger.info(f"✅ Auto-sync success for {user.email}: {saved} records saved")
-                                else:
-                                    logger.error(f"Failed to fetch sheet: {resp.status_code}")
-                        except Exception as e:
-                            logger.error(f"Auto-sync error for {user.email}: {e}")
+async def auto_sync_sheets():
+    await asyncio.sleep(10)
+    while True:
+        try:
+            logger.info("🔄 Auto-sync from Google Sheets...")
+            async with AsyncSessionLocal() as db_sync:
+                result = await db_sync.execute(select(User))
+                users = result.scalars().all()
                 
-                await asyncio.sleep(21600)  # 6 hours
-            except Exception as e:
-                logger.error(f"Auto-sync loop error: {e}")
-                await asyncio.sleep(3600)
-    
-    asyncio.create_task(auto_sync_sheets())
-    logger.info("🔄 Auto-sync background task started (every 6 hours)")
-    
-    yield
-    
-    logger.info("Shutting down...")
+                for user in users:
+                    try:
+                        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+                            resp = await client.get(SHEET_URL, headers={
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            })
+                            if resp.status_code == 200:
+                                df = pd.read_csv(io.StringIO(resp.text))
+                                df.columns = [str(c).strip() for c in df.columns]
+                                
+                                logger.info(f"📊 Found columns in CSV: {df.columns.tolist()}")
+                                
+                                # 🔥 BUAT MAPPING KOLOM
+                                column_mapping = create_column_mapping(df.columns.tolist())
+                                
+                                # Delete old sheets data
+                                existing = await db_sync.execute(
+                                    select(OtdrResult).where(
+                                        OtdrResult.user_id == None,
+                                        OtdrResult.source == "sheets",
+                                    )
+                                )
+                                for rec in existing.scalars().all():
+                                    await db_sync.delete(rec)
+                                await db_sync.flush()
+                                
+                                saved = 0
+                                for _, row in df.iterrows():
+                                    # 🔥 AMBIL TIMESTAMP DARI CSV (seperti punya teman)
+                                    timestamp = datetime.now()
+                                    time_col = next((c for c in df.columns if 'time' in c.lower()), None)
+                                    if time_col and pd.notna(row.get(time_col)):
+                                        try:
+                                            timestamp = pd.to_datetime(row[time_col])
+                                        except Exception:
+                                            pass
+                                    
+                                    # Ambil nilai dasar
+                                    prx_val = get_value_from_row(row, 'Prx (dBm)', column_mapping)
+                                    temp_val = get_value_from_row(row, 'Temperature (C)', column_mapping)
+                                    wavelength_val = get_value_from_row(row, 'Wavelength', column_mapping)
+                                    pulse_width_val = get_value_from_row(row, 'Pulse Width (ns)', column_mapping)
+                                    
+                                    # Distance values
+                                    distance = {
+                                        'Distance 1': get_value_from_row(row, 'Distance 1', column_mapping),
+                                        'Distance 2': get_value_from_row(row, 'Distance 2', column_mapping),
+                                        'Distance 3': get_value_from_row(row, 'Distance 3', column_mapping),
+                                        'Distance 4': get_value_from_row(row, 'Distance 4', column_mapping),
+                                    }
+                                    
+                                    # Loss values
+                                    loss = {
+                                        'Loss 1': get_value_from_row(row, 'Loss 1', column_mapping),
+                                        'Loss 2': get_value_from_row(row, 'Loss 2', column_mapping),
+                                        'Loss 3': get_value_from_row(row, 'Loss 3', column_mapping),
+                                    }
+                                    
+                                    # Total-L values
+                                    total_l = {
+                                        'Total-L 1': get_value_from_row(row, 'Total-L 1', column_mapping),
+                                        'Total-L 2': get_value_from_row(row, 'Total-L 2', column_mapping),
+                                        'Total-L 3': get_value_from_row(row, 'Total-L 3', column_mapping),
+                                        'Total-L 4': get_value_from_row(row, 'Total-L 4', column_mapping),
+                                    }
+                                    
+                                    # Return values
+                                    return_vals = {
+                                        'Return 1': get_value_from_row(row, 'Return 1', column_mapping),
+                                        'Return 2': get_value_from_row(row, 'Return 2', column_mapping),
+                                        'Return 3': get_value_from_row(row, 'Return 3', column_mapping),
+                                        'Return 4': get_value_from_row(row, 'Return 4', column_mapping),
+                                    }
+                                    
+                                    # Hitung nilai yang hilang (Avg-L dan Avg-Total)
+                                    calculated = calculate_missing_values(row, column_mapping, distance, total_l)
+                                    
+                                    # Siapkan values untuk ML
+                                    otdr_values = {
+                                        'Prx (dBm)': prx_val,
+                                        'Distance 1': distance['Distance 1'],
+                                        'Distance 2': distance['Distance 2'],
+                                        'Distance 3': distance['Distance 3'],
+                                        'Distance 4': distance['Distance 4'],
+                                        'Loss 1': loss['Loss 1'],
+                                        'Loss 2': loss['Loss 2'],
+                                        'Loss 3': loss['Loss 3'],
+                                        'Total-L 1': total_l['Total-L 1'],
+                                        'Total-L 2': total_l['Total-L 2'],
+                                        'Total-L 3': total_l['Total-L 3'],
+                                        'Total-L 4': total_l['Total-L 4'],
+                                        'Avg-L 1': calculated.get('Avg-L 1', 0),
+                                        'Avg-L 2': calculated.get('Avg-L 2', 0),
+                                        'Avg-L 3': calculated.get('Avg-L 3', 0),
+                                        'Avg-L 4': calculated.get('Avg-L 4', 0),
+                                        'Avg-Total': calculated.get('Avg-Total', 0),
+                                        'Return 1': return_vals['Return 1'],
+                                        'Return 2': return_vals['Return 2'],
+                                        'Return 3': return_vals['Return 3'],
+                                        'Return 4': return_vals['Return 4'],
+                                    }
+                                    
+                                    # Prediksi ML
+                                    try:
+                                        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+                                    except Exception as e:
+                                        logger.error(f"ML prediction error: {e}")
+                                        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+                                    
+                                    # Simpan ke database
+                                    record = OtdrResult(
+                                        user_id=None,
+                                        timestamp=timestamp,  # ← PAKAI TIMESTAMP DARI CSV!
+                                        prx=prx_val,
+                                        temperature=temp_val,
+                                        wavelength=wavelength_val,
+                                        pulse_width=pulse_width_val,
+                                        distance_1=distance['Distance 1'],
+                                        distance_2=distance['Distance 2'],
+                                        distance_3=distance['Distance 3'],
+                                        distance_4=distance['Distance 4'],
+                                        loss_1=loss['Loss 1'],
+                                        loss_2=loss['Loss 2'],
+                                        loss_3=loss['Loss 3'],
+                                        loss_4=None,
+                                        total_l_1=total_l['Total-L 1'],
+                                        total_l_2=total_l['Total-L 2'],
+                                        total_l_3=total_l['Total-L 3'],
+                                        total_l_4=total_l['Total-L 4'],
+                                        avg_l_1=calculated.get('Avg-L 1', 0),
+                                        avg_l_2=calculated.get('Avg-L 2', 0),
+                                        avg_l_3=calculated.get('Avg-L 3', 0),
+                                        avg_l_4=calculated.get('Avg-L 4', 0),
+                                        avg_total=calculated.get('Avg-Total', 0),
+                                        return_1=return_vals['Return 1'],
+                                        return_2=return_vals['Return 2'],
+                                        return_3=return_vals['Return 3'],
+                                        return_4=return_vals['Return 4'],
+                                        klasifikasi=pred.get("prediction"),
+                                        status=pred.get("status"),
+                                        confidence=pred.get("confidence"),
+                                        source="sheets",
+                                    )
+                                    db_sync.add(record)
+                                    saved += 1
+                                
+                                await db_sync.commit()
+                                logger.info(f"✅ Auto-sync success for {user.email}: {saved} records saved")
+                            else:
+                                logger.error(f"Failed to fetch sheet: {resp.status_code}")
+                    except Exception as e:
+                        logger.error(f"Auto-sync error for {user.email}: {e}")
+            
+            await asyncio.sleep(21600)  # 6 hours
+        except Exception as e:
+            logger.error(f"Auto-sync loop error: {e}")
+            await asyncio.sleep(3600)
 
 
 app = FastAPI(title="OptiM API", version="2.0.1", lifespan=lifespan)
@@ -552,123 +554,168 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
     """
-    Parse teks OCR OTDR dengan metode sederhana dan robust.
+    Parse teks OCR OTDR secara global dan dinamis.
     """
     text = raw_text.replace(',', '.')
     
-    # Extract semua angka floating point
-    all_numbers = re.findall(r'-?\d+\.\d+', text)
-    numbers = []
-    for n in all_numbers:
-        try:
-            val = float(n)
-            if -100 <= val <= 100:
-                numbers.append(val)
-        except:
-            pass
+    # 1. Tokenisasi teks menjadi token numerik
+    raw_tokens = []
+    for t in text.replace('\t', ' ').split():
+        # Lewati token yang berisi huruf alfabet murni
+        t_alpha = re.sub(r'[^a-zA-Z\u0400-\u04FF]', '', t)
+        if t_alpha and t_alpha.isalpha() and t_alpha not in ('dB', 'km'):
+            continue
+            
+        t_clean = t.replace('km', '').replace('dB', '').replace('/km', '').strip()
+        if re.match(r'^[-–—]+$', t_clean) or t_clean == '':
+            raw_tokens.append('---')
+        else:
+            t_clean2 = re.sub(r'[^\d\.\-]', '', t_clean)
+            if t_clean2 and t_clean2 not in ('-', '.'):
+                try:
+                    raw_tokens.append(float(t_clean2))
+                except ValueError:
+                    pass
     
-    logger.info(f"Extracted {len(numbers)} numbers: {numbers[:20]}...")
+    logger.info(f"Raw numeric/dash tokens parsed: {raw_tokens[:30]}")
     
-    # Cari jarak (biasanya 1.xxxxx, 2.xxxxx, 3.xxxxx, 4.xxxxx)
-    distances = []
-    for n in numbers:
-        if 0.9 <= n <= 4.1 and abs(n - round(n)) > 0.01:
-            distances.append(n)
+    # 2. Cari posisi indeks anchor distance (KM1, KM2, KM3, KM4)
+    anchors = {}
+    last_idx = -1
+    for i in range(1, 5):
+        best_idx = -1
+        for idx in range(last_idx + 1, len(raw_tokens)):
+            val = raw_tokens[idx]
+            if isinstance(val, float) and (i - 0.25 <= val <= i + 0.25):
+                best_idx = idx
+                break
+        if best_idx != -1:
+            anchors[i] = best_idx
+            last_idx = best_idx
     
-    unique_dist = sorted(set(distances))[:4]
-    logger.info(f"Distances found: {unique_dist}")
+    # Taksir posisi anchor yang hilang
+    for i in range(1, 5):
+        if i not in anchors:
+            if i - 1 in anchors:
+                anchors[i] = min(anchors[i-1] + 6, len(raw_tokens) - 1)
+            elif i + 1 in anchors:
+                anchors[i] = max(anchors[i+1] - 6, 0)
+            else:
+                anchors[i] = min((i - 1) * 6, len(raw_tokens) - 1)
     
-    # Cari loss values
-    losses = []
-    for n in numbers:
-        if 0.01 <= n <= 3.0 and n not in unique_dist:
-            losses.append(n)
-    losses = losses[:4]
-    logger.info(f"Losses found: {losses}")
+    logger.info(f"Distance anchors: {anchors}")
     
-    # Cari Total-L
-    total_ls = []
-    for n in numbers:
-        if 0.5 <= n <= 10.0 and n not in unique_dist and n not in losses:
-            total_ls.append(n)
-    total_ls = sorted(total_ls)[:4]
-    logger.info(f"Total-L found: {total_ls}")
+    # 3. Slicing token berdasarkan anchor
+    slices = {}
+    sorted_anchors = sorted(anchors.items())
+    for idx_item, (i, start_idx) in enumerate(sorted_anchors):
+        end_idx = len(raw_tokens)
+        if idx_item + 1 < len(sorted_anchors):
+            end_idx = sorted_anchors[idx_item + 1][1]
+        slices[i] = raw_tokens[start_idx:end_idx]
     
-    # Cari Return Loss
-    returns = []
-    for n in numbers:
-        if 20 <= abs(n) <= 60:
-            returns.append(-abs(n))
-    returns = returns[:4]
-    logger.info(f"Returns found: {returns}")
-    
-    # Build rows dengan format yang benar
+    # 4. Klasifikasi field per baris
     rows = []
-    for i in range(4):
-        dist = unique_dist[i] if i < len(unique_dist) else float(i + 1)
-        loss = losses[i] if i < len(losses) else 0.0
-        total_l = total_ls[i] if i < len(total_ls) else 0.0
-        ret = returns[i] if i < len(returns) else 0.0
+    for i in range(1, 5):
+        row_tokens = list(slices.get(i, []))
+        if not row_tokens:
+            rows.append({
+                'distance': float(i), 'section': 1.0, 'loss': None if i == 4 else 0.0,
+                'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0
+            })
+            continue
         
-        prev_dist = unique_dist[i-1] if i > 0 and i-1 < len(unique_dist) else 0
-        section = dist - prev_dist if prev_dist > 0 else dist
+        # Token pertama adalah distance
+        dist = row_tokens[0]
         
-        rows.append({
-            'distance': round(dist, 5),
-            'section': round(section, 5),
-            'loss': round(loss, 3),
-            'total_l': round(total_l, 3),
-            'avg_l': round(total_l / dist if dist > 0 else 0, 3),
-            'return': round(ret, 2),
-        })
+        # Ekstrak return loss
+        ret = -45.0
+        ret_idx = -1
+        for idx, val in enumerate(row_tokens):
+            if isinstance(val, float) and (30.0 <= abs(val) <= 65.0):
+                ret = -abs(val)
+                ret_idx = idx
+                break
+        if ret_idx != -1:
+            row_tokens.pop(ret_idx)
+        
+        # Ekstrak section (nilai sekitar 1.0)
+        sect = 1.0
+        sect_idx = -1
+        for idx, val in enumerate(row_tokens[1:], start=1):
+            if isinstance(val, float) and 0.8 <= val <= 1.2:
+                sect = val
+                sect_idx = idx
+                break
+        if sect_idx != -1:
+            row_tokens.pop(sect_idx)
+        
+        # Hapus token distance
+        row_tokens.pop(0)
+        
+        # Sisa token dipetakan ke loss, total_l, avg_l
+        remaining = [v for v in row_tokens if isinstance(v, float) or v == '---']
+        
+        if i == 4:
+            loss = None
+            pos_vals = [v for v in remaining if isinstance(v, float) and v > 0]
+            if len(pos_vals) >= 2:
+                total_l = pos_vals[0]
+                avg_l = pos_vals[1]
+            elif len(pos_vals) == 1:
+                total_l = pos_vals[0]
+                avg_l = 0.0
+            else:
+                total_l = 0.0
+                avg_l = 0.0
+        else:
+            if len(remaining) >= 3:
+                loss = remaining[0] if isinstance(remaining[0], float) else 0.0
+                total_l = remaining[1] if isinstance(remaining[1], float) else 0.0
+                avg_l = remaining[2] if isinstance(remaining[2], float) else 0.0
+            elif len(remaining) == 2:
+                loss = None
+                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
+                avg_l = remaining[1] if isinstance(remaining[1], float) else 0.0
+            elif len(remaining) == 1:
+                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
+                avg_l = 0.0
+                loss = None if i == 4 else 0.0
+            else:
+                loss = None if i == 4 else 0.0
+                total_l = 0.0
+                avg_l = 0.0
+        
+        row_data = {
+            'distance': round(float(dist), 5),
+            'section': round(float(sect), 5),
+            'loss': round(float(loss), 3) if loss is not None and loss != '---' else (None if i == 4 else 0.0),
+            'total_l': round(float(total_l), 3) if isinstance(total_l, float) else 0.0,
+            'avg_l': round(float(avg_l), 3) if isinstance(avg_l, float) else 0.0,
+            'return': round(float(ret), 2)
+        }
+        rows.append(row_data)
     
-    # Pattern matching untuk koreksi
-    # KM1
-    pattern_km1 = re.search(r'1\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+0\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
-    if pattern_km1 and len(rows) > 0:
-        rows[0]['loss'] = float(f"0.{pattern_km1.group(1)}")
-        rows[0]['total_l'] = float(f"0.{pattern_km1.group(2)}")
-        rows[0]['avg_l'] = float(f"0.{pattern_km1.group(3)}")
-        rows[0]['return'] = -float(pattern_km1.group(4))
-        logger.info(f"KM1 pattern matched: loss={rows[0]['loss']}")
     
-    # KM2
-    pattern_km2 = re.search(r'2\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+1\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
-    if pattern_km2 and len(rows) > 1:
-        rows[1]['loss'] = float(f"0.{pattern_km2.group(1)}")
-        rows[1]['total_l'] = float(f"1.{pattern_km2.group(2)}")
-        rows[1]['avg_l'] = float(f"0.{pattern_km2.group(3)}")
-        rows[1]['return'] = -float(pattern_km2.group(4))
-        logger.info(f"KM2 pattern matched: loss={rows[1]['loss']}")
-    
-    # KM3
-    pattern_km3 = re.search(r'3\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+2\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
-    if pattern_km3 and len(rows) > 2:
-        rows[2]['loss'] = float(f"0.{pattern_km3.group(1)}")
-        rows[2]['total_l'] = float(f"2.{pattern_km3.group(2)}")
-        rows[2]['avg_l'] = float(f"0.{pattern_km3.group(3)}")
-        rows[2]['return'] = -float(pattern_km3.group(4))
-        logger.info(f"KM3 pattern matched: loss={rows[2]['loss']}")
-    
-    # KM4
-    pattern_km4 = re.search(r'4\.\d{5}\s+1\.\d{5}\s+[-–]\s+(\d+\.\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
-    if pattern_km4 and len(rows) > 3:
-        rows[3]['total_l'] = float(pattern_km4.group(1))
-        rows[3]['avg_l'] = float(f"0.{pattern_km4.group(2)}")
-        rows[3]['return'] = -float(pattern_km4.group(3))
-        sum_loss = sum(r['loss'] for r in rows[:3] if r['loss'] > 0)
-        if rows[3]['total_l'] > sum_loss:
-            rows[3]['loss'] = round(rows[3]['total_l'] - sum_loss, 3)
-        logger.info(f"KM4 pattern matched: total_l={rows[3]['total_l']}, loss={rows[3]['loss']}")
-    
-    # Extract Avg-Total
+    # 5. Ekstrak Avg-Total
     avg_total = 0.0
-    match_avg = re.search(r'(\d+\.\d{2})\s*dB/km', text)
-    if match_avg:
-        avg_total = float(match_avg.group(1))
-        logger.info(f"Avg-Total: {avg_total} dB/km")
+    m_avg = re.search(r'(\d+\.\d{2,3})\s*(?:dB/km|db/km)', text)
+    if not m_avg:
+        m_avg = re.search(r'(\d+\.\d{1,3})\s*(?:dB/km|db/km|dB)', text)
+    if m_avg:
+        avg_total = float(m_avg.group(1))
+    else:
+        r4 = rows[3]
+        avg_total = r4['avg_l'] if r4['avg_l'] and r4['avg_l'] > 0 else (
+            r4['total_l'] / r4['distance'] if r4['distance'] > 0 else 0.0
+        )
     
-    logger.info(f"Final rows: {rows}")
+    # 6. Hitung ulang avg_l jika masih 0
+    for row in rows:
+        if (not row['avg_l'] or row['avg_l'] == 0.0) and row['total_l'] > 0 and row['distance'] > 0:
+            row['avg_l'] = round(row['total_l'] / row['distance'], 3)
+    
+    logger.info(f"Final parsed rows: {rows}")
     return rows, avg_total
 
 
@@ -1692,6 +1739,7 @@ async def get_dashboard(
             "status": r.status,
             "confidence": r.confidence,
             "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "source": r.source,
         } for r in records],
         "total": total,
         "normal": normal,
@@ -1738,6 +1786,7 @@ async def get_history(
             "klasifikasi": r.klasifikasi,
             "status": r.status,
             "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "source": r.source,
         } for r in records],
         "total": len(records),
     }
