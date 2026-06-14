@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
+telegram_alert_sent = Column(Boolean, default=False, server_default="false")
 
 class User(Base):
     __tablename__ = "users"
@@ -71,5 +72,6 @@ class OtdrResult(Base):
     source      = Column(String(20), default="sheets")
     raw_text    = Column(Text, nullable=True)
     timestamp   = Column(DateTime(timezone=True), server_default=func.now())
+    telegram_alert_sent = Column(Boolean, default=False, server_default="false")
 
     owner = relationship("User", back_populates="results")

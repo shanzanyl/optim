@@ -126,7 +126,7 @@ const SlideShow: React.FC = () => {
           </p>
           <p className="text-sm text-slate-500 mt-2">Confidence: {data?.confidence?.toFixed(1)}%</p>
           <p className="text-xs mt-4 text-slate-600">
-            ⏳ {autoPlay ? `Berikutnya dalam 30 detik...` : 'Paused - klik Play untuk lanjut'}
+            {autoPlay ? `Berikutnya dalam 30 detik...` : 'Paused - klik Play untuk lanjut'}
           </p>
         </div>
 

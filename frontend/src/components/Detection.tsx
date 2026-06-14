@@ -65,11 +65,6 @@ const StatusBadge = ({ status }: { status: string | null }) => {
   );
 };
 
-const getRealTime = (offsetSeconds: number = 0) => {
-  const time = new Date(Date.now() - offsetSeconds * 1000);
-  return time.toLocaleString('id-ID');
-};
-
 const formatLossValue = (value: number | null | undefined) => {
   if (value === null || value === undefined || value === 0) return '---';
   return value.toFixed(2);
@@ -334,7 +329,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   };
 
-  const displayedHistory = allHistory.slice(Math.max(0, currentIndex - 4), currentIndex + 1).reverse();
+  const displayedHistory = [...allHistory].reverse();
   const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
 
   return (
@@ -346,14 +341,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             <span className="text-xs text-white">Slide Show Progress (Classification)</span>
             <div className="flex items-center gap-3">
               <span className="text-xs text-white font-mono">{currentIndex + 1} / {totalData}</span>
-              {/* <button
-                onClick={() => setAutoPlay(!autoPlay)}
-                className={`px-3 py-1 rounded-lg text-[10px] font-bold transition ${
-                  autoPlay ? 'bg-emerald-600 text-white' : 'bg-slate-600 text-slate-300'
-                }`}
-              >
-                {autoPlay ? '⏸ Pause' : '▶ Play'}
-              </button> */}
             </div>
           </div>
           <div className="w-full bg-slate-600 rounded-full h-2">
@@ -711,7 +698,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             <h2 className="text-sm font-bold text-white uppercase tracking-widest">History of Measurements</h2>
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-400 bg-[#0f1a2e] px-3 py-1 rounded-full border border-[#3b4f6e]">
-                {totalData} data
+                {displayedHistory.length} data
               </span>
               <button onClick={fetchHistory} className="text-slate-500 hover:text-white transition-colors" title="Refresh">
                 <RefreshCw size={14} className={isLoadingHistory ? 'animate-spin' : ''} />
@@ -735,19 +722,17 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               <tbody className="divide-y divide-[#3b4f6e]/50">
                 {isLoadingHistory ? (
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500"><RefreshCw size={18} className="animate-spin mx-auto" /></td></tr>
-                ) : totalData === 0 ? (
+                ) : displayedHistory.length === 0 ? (
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available. Upload an OTDR photo to get started.</td></tr>
-                ) :  (
-                  [...allHistory].reverse().map((row, i) => {
-                    const timeOffset = i * 5;
-                    const realTime = getRealTime(timeOffset);
-                    // 🔥 Total-L menggunakan total_l_4 dari database (sama seperti Dashboard)
+                ) : (
+                  displayedHistory.map((row, idx) => {
+                    const recordTime = row.timestamp ? new Date(row.timestamp).toLocaleString('en-US') : '—';
                     const totalLValue = row.total_l_4;
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
-
+                    
                     return (
-                      <tr key={row.id || i} className="hover:bg-[#2a3d60]/20 transition-colors">
-                        <td className="px-6 py-4 text-slate-400 text-xs font-mono">{realTime}</td>
+                      <tr key={row.id || idx} className="hover:bg-[#2a3d60]/20 transition-colors">
+                        <td className="px-6 py-4 text-slate-400 text-xs font-mono">{recordTime}</td>
                         <td className="px-6 py-4 text-center text-white text-xs font-mono">
                           {formatLossValue(row.loss_1)} | {formatLossValue(row.loss_2)} |{' '}
                           {formatLossValue(row.loss_3)} | {formatLossValue(row.loss_4)}
@@ -760,15 +745,16 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                           {formatReturnValue(row.return_3)} | {formatReturnValue(row.return_4)}
                         </td>
                         <td className="px-6 py-4 text-center text-blue-400 font-bold text-xs font-mono">
-                          {row.prx != null ? `${row.prx.toString()} dBm` : '—'}
+                          {row.prx != null ? `${row.prx.toFixed(1)} dBm` : '—'}
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                          <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
+                            row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
                             row.klasifikasi === 'Warning' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                              row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-                                'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                            }`}>
-                            {row.klasifikasi || 'Unknown'}
+                            row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                            'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                          }`}>
+                            {row.klasifikasi === 'hampir putus' ? 'Nearly Cut' : (row.klasifikasi || 'Unknown')}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-center"><StatusBadge status={row.status} /></td>

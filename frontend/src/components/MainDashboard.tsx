@@ -100,6 +100,24 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
+  // Trigger Telegram alert saat slide monitoring berpindah ke data warning/critical
+useEffect(() => {
+  if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
+  const currentRecord = allData[currentIndex];
+  if (!currentRecord) return;
+
+  const status = currentRecord.status || '';
+  if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
+    triggerSlideAlert(currentRecord.id)
+      .then((res: { status: string; }) => {
+        if (res.status === 'sent') {
+          console.log(`Telegram alert sent automatically for record ID: ${currentRecord.id}`);
+        }
+      })
+      .catch((err: any) => console.error('Error triggering slide alert:', err));
+  }
+}, [currentIndex, allData, loading]);
+
   const fetchAllData = async () => {
     try {
       const token = localStorage.getItem('token');

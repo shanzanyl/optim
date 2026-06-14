@@ -1,5 +1,5 @@
 # main.py - VERSION FIXED (LENGKAP)
-from datetime import datetime
+from datetime import  datetime, timedelta
 import os
 import re
 import io
@@ -68,6 +68,10 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# Telegram configurations
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 def send_telegram_alert(classification: str, status: str, loss: list, rl: list, prx, distances: list = None, timestamp = None):
     """Mengirim pesan notifikasi gangguan ke Telegram Teknisi dengan format detail baru"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -101,23 +105,52 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         else:
             safe_dist.append(float(i + 1))
             
-    # Find anomaly location (KM with max loss)
-    max_loss_val = max(safe_loss)
-    max_loss_idx = safe_loss.index(max_loss_val) if safe_loss else 0
-    km_loc = max_loss_idx + 1
-    jarak_loc = round(safe_dist[max_loss_idx], 3)
-    redaman_loc = round(max_loss_val, 2)
+    # Find anomaly location (Wajib sesuai dengan logika visualisasi dashboard & topology)
+    classification_lower = classification.lower() if classification else ""
+    is_fiber_cut = "cut" in classification_lower or "putus" in classification_lower
     
-    # Format time
+    if is_fiber_cut:
+        # Cari KM pertama yang loss-nya 0.0 (sebagai lokasi putus)
+        cut_idx = -1
+        for idx, val in enumerate(safe_loss):
+            if val == 0.0:
+                cut_idx = idx
+                break
+        if cut_idx == -1:
+            cut_idx = 3  # default KM 4 jika tidak ditemukan 0.0
+        km_loc = cut_idx + 1
+        jarak_loc = round(safe_dist[cut_idx], 3)
+        redaman_loc = 0.0
+    else:
+        # Untuk gangguan selain putus, cari KM dengan loss tertinggi
+        max_loss_val = max(safe_loss)
+        max_loss_idx = safe_loss.index(max_loss_val) if safe_loss else 0
+        km_loc = max_loss_idx + 1
+        jarak_loc = round(safe_dist[max_loss_idx], 3)
+        redaman_loc = round(max_loss_val, 2)
+    
+    # Format time (Konversi dari UTC ke Waktu Lokal WIB/GMT+7 agar sinkron dengan tabel dashboard)
     if timestamp:
         if isinstance(timestamp, str):
-            time_str = timestamp.replace("T", " ")[:19]
+            try:
+                # Parse string ISO format (jika dikirim string)
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                local_time = dt + timedelta(hours=7)
+                time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                time_str = timestamp.replace("T", " ")[:19]
         else:
-            time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            # Datetime object dari DB (biasanya naive UTC)
+            local_time = timestamp + timedelta(hours=7)
+            time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
     else:
-        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        local_time = datetime.utcnow() + timedelta(hours=7)
+        time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
         
     status_cap = str(status).capitalize()
+    
+    # Format nilai KM 4 agar menampilkan '---' jika bernilai 0.0 agar persis dengan tabel dashboard
+    loss_km4_str = "---" if safe_loss[3] == 0.0 else f"{safe_loss[3]:.2f} dB"
     
     # Construct message template
     message = (
@@ -130,7 +163,7 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         f"• <b>KM 1:</b> Loss {safe_loss[0]:.2f} dB | Return {safe_rl[0]:.2f} dB\n"
         f"• <b>KM 2:</b> Loss {safe_loss[1]:.2f} dB | Return {safe_rl[1]:.2f} dB\n"
         f"• <b>KM 3:</b> Loss {safe_loss[2]:.2f} dB | Return {safe_rl[2]:.2f} dB\n"
-        f"• <b>KM 4:</b> Loss {safe_loss[3]:.2f} dB | Return {safe_rl[3]:.2f} dB\n\n"
+        f"• <b>KM 4:</b> Loss {loss_km4_str} | Return {safe_rl[3]:.2f} dB\n\n"
         f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {redaman_loc:.2f} dB)\n"
         f"<b>Waktu:</b> {time_str}"
     )
@@ -519,168 +552,123 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
     """
-    Parse teks OCR OTDR secara global dan dinamis.
+    Parse teks OCR OTDR dengan metode sederhana dan robust.
     """
     text = raw_text.replace(',', '.')
     
-    # 1. Tokenisasi teks menjadi token numerik
-    raw_tokens = []
-    for t in text.replace('\t', ' ').split():
-        # Lewati token yang berisi huruf alfabet murni
-        t_alpha = re.sub(r'[^a-zA-Z\u0400-\u04FF]', '', t)
-        if t_alpha and t_alpha.isalpha() and t_alpha not in ('dB', 'km'):
-            continue
-            
-        t_clean = t.replace('km', '').replace('dB', '').replace('/km', '').strip()
-        if re.match(r'^[-–—]+$', t_clean) or t_clean == '':
-            raw_tokens.append('---')
-        else:
-            t_clean2 = re.sub(r'[^\d\.\-]', '', t_clean)
-            if t_clean2 and t_clean2 not in ('-', '.'):
-                try:
-                    raw_tokens.append(float(t_clean2))
-                except ValueError:
-                    pass
+    # Extract semua angka floating point
+    all_numbers = re.findall(r'-?\d+\.\d+', text)
+    numbers = []
+    for n in all_numbers:
+        try:
+            val = float(n)
+            if -100 <= val <= 100:
+                numbers.append(val)
+        except:
+            pass
     
-    logger.info(f"Raw numeric/dash tokens parsed: {raw_tokens[:30]}")
+    logger.info(f"Extracted {len(numbers)} numbers: {numbers[:20]}...")
     
-    # 2. Cari posisi indeks anchor distance (KM1, KM2, KM3, KM4)
-    anchors = {}
-    last_idx = -1
-    for i in range(1, 5):
-        best_idx = -1
-        for idx in range(last_idx + 1, len(raw_tokens)):
-            val = raw_tokens[idx]
-            if isinstance(val, float) and (i - 0.25 <= val <= i + 0.25):
-                best_idx = idx
-                break
-        if best_idx != -1:
-            anchors[i] = best_idx
-            last_idx = best_idx
+    # Cari jarak (biasanya 1.xxxxx, 2.xxxxx, 3.xxxxx, 4.xxxxx)
+    distances = []
+    for n in numbers:
+        if 0.9 <= n <= 4.1 and abs(n - round(n)) > 0.01:
+            distances.append(n)
     
-    # Taksir posisi anchor yang hilang
-    for i in range(1, 5):
-        if i not in anchors:
-            if i - 1 in anchors:
-                anchors[i] = min(anchors[i-1] + 6, len(raw_tokens) - 1)
-            elif i + 1 in anchors:
-                anchors[i] = max(anchors[i+1] - 6, 0)
-            else:
-                anchors[i] = min((i - 1) * 6, len(raw_tokens) - 1)
+    unique_dist = sorted(set(distances))[:4]
+    logger.info(f"Distances found: {unique_dist}")
     
-    logger.info(f"Distance anchors: {anchors}")
+    # Cari loss values
+    losses = []
+    for n in numbers:
+        if 0.01 <= n <= 3.0 and n not in unique_dist:
+            losses.append(n)
+    losses = losses[:4]
+    logger.info(f"Losses found: {losses}")
     
-    # 3. Slicing token berdasarkan anchor
-    slices = {}
-    sorted_anchors = sorted(anchors.items())
-    for idx_item, (i, start_idx) in enumerate(sorted_anchors):
-        end_idx = len(raw_tokens)
-        if idx_item + 1 < len(sorted_anchors):
-            end_idx = sorted_anchors[idx_item + 1][1]
-        slices[i] = raw_tokens[start_idx:end_idx]
+    # Cari Total-L
+    total_ls = []
+    for n in numbers:
+        if 0.5 <= n <= 10.0 and n not in unique_dist and n not in losses:
+            total_ls.append(n)
+    total_ls = sorted(total_ls)[:4]
+    logger.info(f"Total-L found: {total_ls}")
     
-    # 4. Klasifikasi field per baris
+    # Cari Return Loss
+    returns = []
+    for n in numbers:
+        if 20 <= abs(n) <= 60:
+            returns.append(-abs(n))
+    returns = returns[:4]
+    logger.info(f"Returns found: {returns}")
+    
+    # Build rows dengan format yang benar
     rows = []
-    for i in range(1, 5):
-        row_tokens = list(slices.get(i, []))
-        if not row_tokens:
-            rows.append({
-                'distance': float(i), 'section': 1.0, 'loss': None if i == 4 else 0.0,
-                'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0
-            })
-            continue
+    for i in range(4):
+        dist = unique_dist[i] if i < len(unique_dist) else float(i + 1)
+        loss = losses[i] if i < len(losses) else 0.0
+        total_l = total_ls[i] if i < len(total_ls) else 0.0
+        ret = returns[i] if i < len(returns) else 0.0
         
-        # Token pertama adalah distance
-        dist = row_tokens[0]
+        prev_dist = unique_dist[i-1] if i > 0 and i-1 < len(unique_dist) else 0
+        section = dist - prev_dist if prev_dist > 0 else dist
         
-        # Ekstrak return loss
-        ret = -45.0
-        ret_idx = -1
-        for idx, val in enumerate(row_tokens):
-            if isinstance(val, float) and (30.0 <= abs(val) <= 65.0):
-                ret = -abs(val)
-                ret_idx = idx
-                break
-        if ret_idx != -1:
-            row_tokens.pop(ret_idx)
-        
-        # Ekstrak section (nilai sekitar 1.0)
-        sect = 1.0
-        sect_idx = -1
-        for idx, val in enumerate(row_tokens[1:], start=1):
-            if isinstance(val, float) and 0.8 <= val <= 1.2:
-                sect = val
-                sect_idx = idx
-                break
-        if sect_idx != -1:
-            row_tokens.pop(sect_idx)
-        
-        # Hapus token distance
-        row_tokens.pop(0)
-        
-        # Sisa token dipetakan ke loss, total_l, avg_l
-        remaining = [v for v in row_tokens if isinstance(v, float) or v == '---']
-        
-        if i == 4:
-            loss = None
-            pos_vals = [v for v in remaining if isinstance(v, float) and v > 0]
-            if len(pos_vals) >= 2:
-                total_l = pos_vals[0]
-                avg_l = pos_vals[1]
-            elif len(pos_vals) == 1:
-                total_l = pos_vals[0]
-                avg_l = 0.0
-            else:
-                total_l = 0.0
-                avg_l = 0.0
-        else:
-            if len(remaining) >= 3:
-                loss = remaining[0] if isinstance(remaining[0], float) else 0.0
-                total_l = remaining[1] if isinstance(remaining[1], float) else 0.0
-                avg_l = remaining[2] if isinstance(remaining[2], float) else 0.0
-            elif len(remaining) == 2:
-                loss = None
-                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
-                avg_l = remaining[1] if isinstance(remaining[1], float) else 0.0
-            elif len(remaining) == 1:
-                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
-                avg_l = 0.0
-                loss = None if i == 4 else 0.0
-            else:
-                loss = None if i == 4 else 0.0
-                total_l = 0.0
-                avg_l = 0.0
-        
-        row_data = {
-            'distance': round(float(dist), 5),
-            'section': round(float(sect), 5),
-            'loss': round(float(loss), 3) if loss is not None and loss != '---' else (None if i == 4 else 0.0),
-            'total_l': round(float(total_l), 3) if isinstance(total_l, float) else 0.0,
-            'avg_l': round(float(avg_l), 3) if isinstance(avg_l, float) else 0.0,
-            'return': round(float(ret), 2)
-        }
-        rows.append(row_data)
+        rows.append({
+            'distance': round(dist, 5),
+            'section': round(section, 5),
+            'loss': round(loss, 3),
+            'total_l': round(total_l, 3),
+            'avg_l': round(total_l / dist if dist > 0 else 0, 3),
+            'return': round(ret, 2),
+        })
     
+    # Pattern matching untuk koreksi
+    # KM1
+    pattern_km1 = re.search(r'1\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+0\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
+    if pattern_km1 and len(rows) > 0:
+        rows[0]['loss'] = float(f"0.{pattern_km1.group(1)}")
+        rows[0]['total_l'] = float(f"0.{pattern_km1.group(2)}")
+        rows[0]['avg_l'] = float(f"0.{pattern_km1.group(3)}")
+        rows[0]['return'] = -float(pattern_km1.group(4))
+        logger.info(f"KM1 pattern matched: loss={rows[0]['loss']}")
     
-    # 5. Ekstrak Avg-Total
+    # KM2
+    pattern_km2 = re.search(r'2\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+1\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
+    if pattern_km2 and len(rows) > 1:
+        rows[1]['loss'] = float(f"0.{pattern_km2.group(1)}")
+        rows[1]['total_l'] = float(f"1.{pattern_km2.group(2)}")
+        rows[1]['avg_l'] = float(f"0.{pattern_km2.group(3)}")
+        rows[1]['return'] = -float(pattern_km2.group(4))
+        logger.info(f"KM2 pattern matched: loss={rows[1]['loss']}")
+    
+    # KM3
+    pattern_km3 = re.search(r'3\.\d{5}\s+1\.\d{5}\s+0\.(\d{2})\s+2\.(\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
+    if pattern_km3 and len(rows) > 2:
+        rows[2]['loss'] = float(f"0.{pattern_km3.group(1)}")
+        rows[2]['total_l'] = float(f"2.{pattern_km3.group(2)}")
+        rows[2]['avg_l'] = float(f"0.{pattern_km3.group(3)}")
+        rows[2]['return'] = -float(pattern_km3.group(4))
+        logger.info(f"KM3 pattern matched: loss={rows[2]['loss']}")
+    
+    # KM4
+    pattern_km4 = re.search(r'4\.\d{5}\s+1\.\d{5}\s+[-–]\s+(\d+\.\d{2})\s+0\.(\d{2})\s+(\d{2}\.\d{2})', text)
+    if pattern_km4 and len(rows) > 3:
+        rows[3]['total_l'] = float(pattern_km4.group(1))
+        rows[3]['avg_l'] = float(f"0.{pattern_km4.group(2)}")
+        rows[3]['return'] = -float(pattern_km4.group(3))
+        sum_loss = sum(r['loss'] for r in rows[:3] if r['loss'] > 0)
+        if rows[3]['total_l'] > sum_loss:
+            rows[3]['loss'] = round(rows[3]['total_l'] - sum_loss, 3)
+        logger.info(f"KM4 pattern matched: total_l={rows[3]['total_l']}, loss={rows[3]['loss']}")
+    
+    # Extract Avg-Total
     avg_total = 0.0
-    m_avg = re.search(r'(\d+\.\d{2,3})\s*(?:dB/km|db/km)', text)
-    if not m_avg:
-        m_avg = re.search(r'(\d+\.\d{1,3})\s*(?:dB/km|db/km|dB)', text)
-    if m_avg:
-        avg_total = float(m_avg.group(1))
-    else:
-        r4 = rows[3]
-        avg_total = r4['avg_l'] if r4['avg_l'] and r4['avg_l'] > 0 else (
-            r4['total_l'] / r4['distance'] if r4['distance'] > 0 else 0.0
-        )
+    match_avg = re.search(r'(\d+\.\d{2})\s*dB/km', text)
+    if match_avg:
+        avg_total = float(match_avg.group(1))
+        logger.info(f"Avg-Total: {avg_total} dB/km")
     
-    # 6. Hitung ulang avg_l jika masih 0
-    for row in rows:
-        if (not row['avg_l'] or row['avg_l'] == 0.0) and row['total_l'] > 0 and row['distance'] > 0:
-            row['avg_l'] = round(row['total_l'] / row['distance'], 3)
-    
-    logger.info(f"Final parsed rows: {rows}")
+    logger.info(f"Final rows: {rows}")
     return rows, avg_total
 
 
@@ -791,12 +779,292 @@ def ocr_space_extract(image_bytes: bytes) -> str:
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+gemini_client = None
+gemini_model_name = None
+
+GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+
+try:
+    import google.genai as genai_new
+    if GEMINI_API_KEY:
+        gemini_client = genai_new.Client(api_key=GEMINI_API_KEY)
+        gemini_model_name = "gemini-2.5-flash"
+        logger.info(f"✅ Gemini AI configured: {gemini_model_name} (google-genai)")
+except ImportError:
+    try:
+        import google.generativeai as genai_old
+        if GEMINI_API_KEY:
+            genai_old.configure(api_key=GEMINI_API_KEY)
+            gemini_client = genai_old.GenerativeModel(
+                model_name="gemini-2.5-flash",
+                system_instruction=(
+                    "Anda adalah OptiM AI Assistant, asisten chatbot profesional dan ramah untuk website OptiM "
+                    "(sistem monitoring & klasifikasi gangguan serat optik). Anda memiliki akses ke DATA REAL-TIME dari database monitoring.\n\n"
+                    "KEMAMPUAN ANDA:\n"
+                    "1. Menjawab pertanyaan seputar fiber optik, jenis gangguan (Bending, Dirty Connector, Fiber Cut, Bad Splice, Air Gap, Hampir Putus/Nearly Cut), "
+                    "dan cara membaca parameter OTDR (Loss dB, Return Loss dB, Prx dBm).\n"
+                    "2. Merekap data monitoring: total pengukuran, jumlah dan jenis gangguan dalam rentang HARI INI, 7 HARI TERAKHIR, atau 30 HARI TERAKHIR.\n"
+                    "3. Memberikan analisis tren gangguan dan rekomendasi teknis.\n\n"
+                    "ATURAN FORMAT JAWABAN:\n"
+                    "1. Jawablah dalam bahasa Indonesia yang sopan, RINGKAS, INFORMATIF, dan mudah dicerna dalam sekali lihat.\n"
+                    "2. Untuk pertanyaan rekap/statistik: tampilkan data dalam format terstruktur dengan angka yang jelas.\n"
+                    "   Contoh format rekap: '<strong>Total Gangguan Hari Ini: X</strong><br>Rincian:<ul><li>Bending (Warning): Y kali</li></ul>'\n"
+                    "3. Gunakan tag HTML dasar langsung (<strong>, <br>, <ul>, <li>, <ol>). JANGAN gunakan markdown (** atau * atau #) maupun tag ```html.\n"
+                    "4. Jika data menunjukkan 0 gangguan, tetap sampaikan dengan jelas: 'Tidak ada gangguan terdeteksi.'\n"
+                    "5. Atur spasi agar rapat, hindari baris kosong berlebihan."
+                )
+            )
+            gemini_model_name = "legacy"
+            logger.info("✅ Gemini AI configured via legacy google.generativeai")
+    except Exception as e:
+        logger.warning(f"⚠️ Gagal mengonfigurasi Gemini AI: {e}")
+except Exception as e:
+    logger.warning(f"⚠️ Gagal mengonfigurasi Gemini AI: {e}")
+
+SYSTEM_INSTRUCTION = (
+    "Anda adalah OptiM AI Assistant, asisten chatbot profesional dan ramah untuk website OptiM "
+    "(sistem monitoring & klasifikasi gangguan serat optik). Anda memiliki akses ke DATA REAL-TIME dari database monitoring.\n\n"
+    "KEMAMPUAN ANDA:\n"
+    "1. Menjawab pertanyaan seputar fiber optik, jenis gangguan (Bending, Dirty Connector, Fiber Cut, Bad Splice, Air Gap, Hampir Putus, Normal), "
+    "dan cara membaca parameter OTDR (Loss dB, Return Loss dB, Prx dBm).\n"
+    "2. Menjawab pertanyaan tentang tanggal spesifik (contoh: 8 Juni 2026) dengan memeriksa 'RINGKASAN HARIAN DATA PENGUKURAN & GANGGUAN' pada tanggal tersebut, menghitung total pengukuran, total gangguan, dan rincian jenis gangguannya.\n"
+    "3. Menjawab pertanyaan tentang akumulasi tipe gangguan tertentu dalam rentang waktu tertentu (contoh: gangguan Air Gap dalam sebulan terakhir) dengan mencari dan menjumlahkan kejadian tipe tersebut dalam rentang tanggal yang sesuai.\n"
+    "4. Merekap data monitoring umum: hari ini, 7 hari terakhir, 30 hari terakhir, atau keseluruhan.\n\n"
+    "ATURAN FORMAT JAWABAN:\n"
+    "1. Jawablah dalam bahasa Indonesia yang sopan, RINGKAS, INFORMATIF, dan ramah.\n"
+    "2. Untuk pertanyaan tentang tanggal spesifik: sebutkan tanggalnya secara tebal, lalu berikan total pengukuran, total gangguan, dan rincian gangguannya.\n"
+    "   Contoh: 'Pada tanggal <strong>8 Juni 2026</strong>, terdapat total <strong>15 pengukuran</strong> dengan <strong>5 gangguan terdeteksi</strong>.<br>Rincian gangguan:<ul><li>Bending (Warning): 3 kali</li><li>Dirty Connector (Warning): 2 kali</li></ul>'\n"
+    "3. Untuk pertanyaan tipe gangguan dalam sebulan/seminggu: hanya sajikan info tipe gangguan yang ditanyakan secara terfokus.\n"
+    "   Contoh: 'Dalam satu bulan terakhir (sejak 11 Mei 2026), jenis gangguan <strong>Air Gap</strong> terjadi sebanyak <strong>4 kali</strong>.'\n"
+    "4. Gunakan tag HTML dasar langsung (<strong>, <br>, <ul>, <li>, <ol>). JANGAN gunakan markdown (** atau * atau #) maupun tag ```html.\n"
+    "5. Jika tidak ada gangguan pada tanggal/periode yang ditanyakan, sampaikan dengan jelas: 'tidak ada gangguan terdeteksi.'\n"
+    "6. Atur spasi agar rapat, hindari baris kosong berlebihan."
+)
+
+BOT_RESPONSES = {
+    "normal": "Kondisi <strong>Normal</strong> pada jaringan fiber optik ditandai dengan redaman (loss) transmisi yang sangat rendah, biasanya di bawah 0.22 dB/km untuk panjang gelombang 1550nm. Selain itu, nilai Return Loss (refleksi balik) berada pada rentang yang sangat bagus (&lt; -40 dB) dan Rx Power stabil antara 15 hingga 25 dBm. Kondisi ini menunjukkan jalur transmisi optik bersih tanpa hambatan fisik.",
+    "bending": "<strong>Bending (Tekukan Makro)</strong> terjadi ketika kabel fiber optik tertekuk melebihi radius kelengkungan minimumnya (biasanya radius &lt; 30mm). Hal ini menyebabkan cahaya bocor keluar dari core serat ke cladding, sehingga loss meningkat secara tiba-tiba di lokasi tekukan. <br><br><strong>Solusi:</strong> Periksa jalur kabel fisik, rapihkan tumpukan serat di dalam OTB (Optical Termination Box) atau splice tray, dan hindari melipat kabel dengan sudut tajam.",
+    "dirty": "<strong>Dirty Connector (Konektor Kotor)</strong> adalah masalah paling umum yang terjadi pada titik sambungan konektor (patch cord / adaptor). Kotoran berupa debu, minyak sidik jari, atau kelembapan menutupi ujung ferrule, menghalangi cahaya masuk, dan memantulkan sebagian cahaya kembali. <br><br><strong>Solusi:</strong> Bersihkan ferrule konektor menggunakan *Fiber Cleaning Cassette* atau *Fiber Pen Cleaner* yang dibasahi sedikit alkohol isopropil 99%, kemudian seka kering sebelum dimasukkan kembali.",
+    "cut": "<strong>Fiber Cut (Kabel Putus)</strong> adalah gangguan kritis di mana core serat optik terputus total. Hal ini menyebabkan loss transmisi melonjak hingga maksimal (50+ dB), refleksi balik hilang sepenuhnya (0 dB), dan daya penerima (Prx) turun ke 0 dBm (mati total). <br><br><strong>Penyebab:</strong> Umumnya disebabkan oleh aktivitas galian pihak ketiga, pohon tumbang, kabel tersangkut kendaraan tinggi, atau gigitan hewan pengerat.<br><br><strong>Solusi:</strong> Lakukan pengukuran OTDR untuk mencari letak persis titik putus (jarak km), lalu kirim tim teknis untuk menyambung ulang core menggunakan fusion splicer di dalam joint closure.",
+    "splice": "<strong>Bad Splice (Penyambungan Buruk)</strong> terjadi saat proses penyambungan fusion splicing tidak sempurna, misalnya pemotongan serat (cleaving) yang tidak lurus, adanya debu saat peleburan, atau alignment core yang meleset. Ini menyebabkan loss lokal tinggi (&gt; 0.1 dB per sambungan).<br><br><strong>Solusi:</strong> Potong kembali ujung serat yang gagal, bersihkan core dengan tisu bebas serat (lint-free wipes) beralkohol, potong ulang secara presisi dengan fiber cleaver, lalu lakukan fusion splicing ulang menggunakan splicer yang terkalibrasi.",
+    "gap": "<strong>Air Gap (Celah Udara)</strong> terjadi ketika terdapat ruang udara kecil di antara dua ujung konektor fiber optik yang saling berpasangan di dalam adaptor. Ini bisa terjadi karena konektor tidak terkunci rapat atau ukuran ferrule yang tidak pas. Celah udara ini menyebabkan indeks bias berubah tiba-tiba, memicu refleksi balik yang sangat tinggi (nilai Return Loss memburuk hingga -10 dB hingga -15 dB).<br><br><strong>Solusi:</strong> Pastikan konektor terdorong penuh hingga berbunyi 'klik' dan terkunci di adaptornya, atau ganti adaptor/konektor yang sudah longgar.",
+    "nearly": "<strong>Nearly Cut (Hampir Putus)</strong> adalah kondisi kritis di mana serat optik mengalami kerusakan fisik berat namun belum putus sepenuhnya (misal core tergores, retak, atau tertarik keras). Ini menyebabkan loss transmisi meningkat sangat tinggi dan sinyal melemah secara drastis.<br><br><strong>Solusi:</strong> Segera jadwalkan pemeliharaan preventif sebelum serat terputus total. Potong segmen yang rusak lalu sambung ulang serat di lokasi tersebut.",
+    "bantuan": "Saya dapat membantu Anda memberikan informasi tentang jaringan fiber optik. Silakan ketik nama gangguan seperti: <ul><li><strong>Bending</strong></li><li><strong>Dirty Connector</strong></li><li><strong>Fiber Cut</strong></li><li><strong>Bad Splice</strong></li><li><strong>Air Gap</strong></li><li><strong>Nearly Cut</strong></li></ul>Atau tanyakan cara perbaikan jaringan.",
+    "default": "Maaf, saya tidak begitu memahami pertanyaan tersebut. Coba tanyakan mengenai jenis gangguan jaringan fiber optik seperti <strong>Bending</strong>, <strong>Dirty Connector</strong>, <strong>Fiber Cut</strong>, atau <strong>Bad Splice</strong> agar saya dapat membantu Anda."
+}
+
+def get_local_chatbot_response(query: str) -> str:
+    clean_query = query.lower()
+    if "bending" in clean_query or "tekuk" in clean_query:
+        return BOT_RESPONSES["bending"]
+    elif "dirty" in clean_query or "kotor" in clean_query or "konektor" in clean_query:
+        return BOT_RESPONSES["dirty"]
+    elif "fiber cut" in clean_query or "putus" in clean_query or "cut" in clean_query:
+        return BOT_RESPONSES["cut"]
+    elif "splice" in clean_query or "sambung" in clean_query:
+        return BOT_RESPONSES["splice"]
+    elif "gap" in clean_query or "celah" in clean_query or "air gap" in clean_query:
+        return BOT_RESPONSES["gap"]
+    elif "nearly" in clean_query or "hampir" in clean_query:
+        return BOT_RESPONSES["nearly"]
+    elif "normal" in clean_query or "sehat" in clean_query:
+        return BOT_RESPONSES["normal"]
+    elif "bantuan" in clean_query or "tolong" in clean_query or "halo" in clean_query or "hai" in clean_query:
+        return BOT_RESPONSES["bantuan"]
+    return BOT_RESPONSES["default"]
+
 def format_markdown_to_html(text: str) -> str:
+    """Konversi markdown ke HTML dengan spacing yang bersih"""
+    # Hapus wrapper ```html atau ``` yang mungkin ditambahkan AI
+    text = re.sub(r'```html\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    
+    # Ganti markdown bold/italic
     html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
+    
+    # Ganti newlines dengan <br>
     html = html.replace('\n', '<br>')
-    return html
+    
+    # Bersihkan <br> yang tidak perlu di sekitar tag list/struktur HTML agar spasi rapat
+    html = re.sub(r'(<ul>|<ol>|<li>)\s*<br>', r'\1', html)
+    html = re.sub(r'<br>\s*(</ul>|</ol>|</li>)', r'\1', html)
+    html = re.sub(r'</li>\s*<br>\s*<li>', r'</li><li>', html)
+    html = re.sub(r'</ul>\s*<br>\s*<ul>', r'</ul><ul>', html)
+    
+    # Ganti kelipatan <br> berlebih (lebih dari dua) menjadi maksimal satu saja untuk spasi rapat
+    html = re.sub(r'(<br>\s*){2,}', r'<br>', html)
+    
+    return html.strip()
 
+def make_db_aware_response(user_message: str, today_total: int, today_g: int, today_detail: str,
+                            week_total: int, week_g: int, week_detail: str,
+                            month_total: int, month_g: int, month_detail: str,
+                            total_data: int, all_g_total: int, all_detail: str,
+                            latest, daily_records: list = None, history_records: list = None) -> str:
+    """Jawaban berbasis data DB tanpa Gemini — untuk rekap statistik dan filter kustom"""
+    q = user_message.lower()
+    
+    import re
+    from datetime import datetime, timedelta
+    
+    # Mapping nama bulan Indonesia ke nomor bulan
+    indo_months = {
+        "januari": "01", "februari": "02", "maret": "03", "april": "04",
+        "mei": "05", "juni": "06", "juli": "07", "agustus": "08",
+        "september": "09", "oktober": "10", "november": "11", "desember": "12",
+        "jan": "01", "feb": "02", "mar": "03", "apr": "04", "mei": "05", "jun": "06",
+        "jul": "07", "agu": "08", "sep": "09", "okt": "10", "nov": "11", "des": "12"
+    }
+    
+    # 1. Deteksi pertanyaan tanggal spesifik (contoh: "8 juni 2026")
+    date_match = re.search(r'(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})', q)
+    if date_match:
+        day_str = date_match.group(1).zfill(2)
+        month_name = date_match.group(2).lower()
+        year_str = date_match.group(3)
+        
+        month_str = indo_months.get(month_name, None)
+        if month_str:
+            target_date_str = f"{year_str}-{month_str}-{day_str}"
+            
+            total_g = 0
+            total_measurements = 0
+            details = []
+            if daily_records:
+                for r in daily_records:
+                    if r.date_str == target_date_str:
+                        total_measurements += r.count
+                        if r.klasifikasi != "Normal":
+                            total_g += r.count
+                            details.append(f"{r.klasifikasi} ({r.status}): {r.count} kali")
+            
+            detail_html = ""
+            if total_g > 0:
+                li_items = "".join([f"<li>{item}</li>" for item in details])
+                detail_html = f"<br>Rincian gangguan:<ul>{li_items}</ul>"
+            else:
+                detail_html = " (tidak ada gangguan terdeteksi)."
+                
+            return (
+                f"Pada tanggal <strong>{day_str} {month_name.capitalize()} {year_str}</strong>, "
+                f"terdapat total <strong>{total_measurements} pengukuran</strong> dengan "
+                f"<strong>{total_g} gangguan terdeteksi</strong>.{detail_html}"
+            )
+            
+    # 2. Deteksi kueri rentang waktu untuk tipe gangguan tertentu
+    fault_types = {
+        "air gap": "Air Gap",
+        "bending": "Bending",
+        "dirty connector": "Dirty Connector",
+        "hampir putus": "Hampir Putus",
+        "nearly cut": "Hampir Putus",
+        "fiber cut": "Fiber Cut",
+        "bad splice": "Bad Splice",
+        "normal": "Normal"
+    }
+    
+    detected_fault = None
+    for key, val in fault_types.items():
+        if key in q:
+            detected_fault = val
+            break
+            
+    if detected_fault:
+        # Tentukan rentang hari
+        days_limit = None
+        period_name = ""
+        if any(x in q for x in ["bulan", "30 hari", "sebulan"]):
+            days_limit = 30
+            period_name = "satu bulan terakhir"
+        elif any(x in q for x in ["minggu", "7 hari", "seminggu"]):
+            days_limit = 7
+            period_name = "7 hari terakhir"
+        elif any(x in q for x in ["hari ini", "today"]):
+            days_limit = 0
+            period_name = "hari ini"
+            
+        if days_limit is not None:
+            now = datetime.now()
+            limit_date = (now - timedelta(days=days_limit)).date()
+            now_str = now.strftime("%Y-%m-%d")
+            
+            total_count = 0
+            if daily_records:
+                for r in daily_records:
+                    if r.date_str:
+                        if days_limit == 0:
+                            if r.date_str == now_str and r.klasifikasi == detected_fault:
+                                total_count += r.count
+                        else:
+                            try:
+                                r_date = datetime.strptime(r.date_str, "%Y-%m-%d").date()
+                                if r_date >= limit_date and r.klasifikasi == detected_fault:
+                                    total_count += r.count
+                            except Exception:
+                                pass
+            
+            status_text = "gangguan" if detected_fault != "Normal" else "status"
+            date_info = f" sejak {limit_date.strftime('%d %B %Y')}" if days_limit > 0 else ""
+            return (
+                f"Dalam {period_name}{date_info}, "
+                f"jenis {status_text} <strong>{detected_fault}</strong> terjadi sebanyak "
+                f"<strong>{total_count} kali</strong>."
+            )
+            
+    # Fallback standard
+    def fmt_breakdown(detail_str: str, g_total: int) -> str:
+        if g_total == 0 or detail_str == "Tidak ada gangguan":
+            return "Tidak ada gangguan terdeteksi."
+        items = detail_str.split(", ")
+        li_items = "".join([f"<li>{item}</li>" for item in items])
+        return f"<ul>{li_items}</ul>"
+    
+    # Rekap hari ini
+    if any(x in q for x in ["hari ini", "today", "hari", "sekarang"]):
+        breakdown_html = fmt_breakdown(today_detail, today_g)
+        return (
+            f"<strong>Rekap Monitoring Hari Ini</strong><br>"
+            f"Total Pengukuran: <strong>{today_total}</strong><br>"
+            f"Total Gangguan: <strong>{today_g}</strong><br>"
+            f"Rincian Jenis Gangguan:<br>{breakdown_html}"
+        )
+    # Rekap 7 hari / minggu ini
+    elif any(x in q for x in ["minggu", "7 hari", "seminggu", "week"]):
+        breakdown_html = fmt_breakdown(week_detail, week_g)
+        return (
+            f"<strong>Rekap Monitoring 7 Hari Terakhir</strong><br>"
+            f"Total Pengukuran: <strong>{week_total}</strong><br>"
+            f"Total Gangguan: <strong>{week_g}</strong><br>"
+            f"Rincian Jenis Gangguan:<br>{breakdown_html}"
+        )
+    # Rekap bulan / 30 hari
+    elif any(x in q for x in ["bulan", "30 hari", "sebulan", "month"]):
+        breakdown_html = fmt_breakdown(month_detail, month_g)
+        return (
+            f"<strong>Rekap Monitoring Bulan Ini (30 Hari Terakhir)</strong><br>"
+            f"Total Pengukuran: <strong>{month_total}</strong><br>"
+            f"Total Gangguan: <strong>{month_g}</strong><br>"
+            f"Rincian Jenis Gangguan:<br>{breakdown_html}"
+        )
+    # Rekap keseluruhan / semua data
+    elif any(x in q for x in ["semua", "keseluruhan", "total", "rekap", "laporan", "berapa", "gangguan"]):
+        breakdown_html = fmt_breakdown(all_detail, all_g_total)
+        latest_info = ""
+        if latest:
+            latest_info = (
+                f"<br><strong>Pengukuran Terakhir:</strong> {latest.klasifikasi} ({latest.status}) "
+                f"— Loss: {latest.loss_1} dB, Prx: {latest.prx} dBm"
+            )
+        return (
+            f"<strong>Rekap Keseluruhan Sistem OptiM</strong><br>"
+            f"Total Seluruh Pengukuran: <strong>{total_data}</strong><br>"
+            f"Total Seluruh Gangguan: <strong>{all_g_total}</strong><br>"
+            f"Rincian Jenis Gangguan:<br>{breakdown_html}"
+            f"{latest_info}"
+        )
+    else:
+        return get_local_chatbot_response(user_message)
 
 
 @app.post("/api/chat")
@@ -806,141 +1074,246 @@ async def chat(
     current_user: User = Depends(get_optional_user)
 ):
     user_message = request.get("message", "").strip()
+    context_state = request.get("context_state", {})
     
     if not user_message:
         return {"response": "Pesan tidak boleh kosong.", "source": "error"}
     
-    if not GEMINI_API_KEY:
-        return {"response": "Maaf, chatbot belum tersedia.", "source": "error"}
-    
+    # Selalu ambil data DB dulu (dipakai oleh Gemini dan fallback)
     try:
-        result_total = await db.execute(select(func.count(OtdrResult.id)))
-        total_data = result_total.scalar() or 0
+        # Konversi waktu server (UTC) ke waktu lokal WIB (GMT+7) agar sinkron dengan tabel/dashboard
+        now_wib = datetime.utcnow() + timedelta(hours=7)
         
-        result_latest = await db.execute(
-            select(OtdrResult).order_by(OtdrResult.timestamp.desc()).limit(1)
+        # 1. Ambil seluruh data pengukuran user diurutkan dari terlama ke terbaru (ASC)
+        stmt_all = select(OtdrResult).order_by(OtdrResult.timestamp.asc())
+        if current_user:
+            stmt_all = stmt_all.where(OtdrResult.user_id == current_user.id)
+        result_all = await db.execute(stmt_all)
+        all_records = result_all.scalars().all()
+        
+        # 2. Saring data berdasarkan current_index dari slideshow jika dikirim
+        current_index = request.get("current_index", None)
+        if current_index is not None:
+            try:
+                idx = int(current_index)
+                if 0 <= idx < len(all_records):
+                    all_records = all_records[:idx + 1]
+            except Exception:
+                pass
+        
+        # 3. Hitung parameter statistik di Python dengan penyesuaian WIB
+        today_date = now_wib.date()
+        week_start_date = today_date - timedelta(days=6)
+        month_start_date = today_date.replace(day=1)
+        
+        today_total = 0
+        today_g = 0
+        today_faults = {}
+        
+        week_total = 0
+        week_g = 0
+        week_faults = {}
+        
+        month_total = 0
+        month_g = 0
+        month_faults = {}
+        
+        total_data = len(all_records)
+        all_g_total = 0
+        all_faults = {}
+        
+        latest = all_records[-1] if all_records else None
+        
+        # History list (150 data terbaru dari data yang sudah terjadi)
+        # Data dibalik karena all_records berurutan ASC (terlama ke terbaru)
+        history_records = list(reversed(all_records))[:150]
+        
+        history_list_str = "\n".join(
+            [f"- {(rec.timestamp + timedelta(hours=7)).strftime('%Y-%m-%d %H:%M:%S')} | {rec.klasifikasi} | {rec.status}" 
+             for rec in history_records if rec.timestamp]
+        ) if history_records else "Belum ada riwayat data."
+        
+        # Ringkasan harian
+        daily_summary_map = {}
+        
+        for rec in all_records:
+            if not rec.timestamp:
+                continue
+            # Konversi timestamp UTC database ke WIB (UTC+7)
+            rec_wib = rec.timestamp + timedelta(hours=7)
+            rec_date = rec_wib.date()
+            date_str = rec_date.strftime("%Y-%m-%d")
+            
+            # Kelompok harian
+            if date_str not in daily_summary_map:
+                daily_summary_map[date_str] = {}
+            daily_summary_map[date_str][(rec.klasifikasi, rec.status)] = daily_summary_map[date_str].get((rec.klasifikasi, rec.status), 0) + 1
+            
+            # Cek status gangguan
+            is_fault = (rec.klasifikasi != "Normal")
+            
+            if is_fault:
+                all_g_total += 1
+                all_faults[(rec.klasifikasi, rec.status)] = all_faults.get((rec.klasifikasi, rec.status), 0) + 1
+                
+            # Hari Ini
+            if rec_date == today_date:
+                today_total += 1
+                if is_fault:
+                    today_g += 1
+                    today_faults[(rec.klasifikasi, rec.status)] = today_faults.get((rec.klasifikasi, rec.status), 0) + 1
+                    
+            # 7 Hari Terakhir
+            if rec_date >= week_start_date:
+                week_total += 1
+                if is_fault:
+                    week_g += 1
+                    week_faults[(rec.klasifikasi, rec.status)] = week_faults.get((rec.klasifikasi, rec.status), 0) + 1
+                    
+            # 30 Hari Terakhir (Bulan Ini)
+            if rec_date >= month_start_date:
+                month_total += 1
+                if is_fault:
+                    month_g += 1
+                    month_faults[(rec.klasifikasi, rec.status)] = month_faults.get((rec.klasifikasi, rec.status), 0) + 1
+                    
+        # Format breakdown strings
+        def fmt_detail(faults_map):
+            if not faults_map:
+                return "Tidak ada gangguan"
+            sorted_faults = sorted(faults_map.items(), key=lambda x: x[1], reverse=True)
+            return ", ".join([f"{k} ({s}): {c} kali" for (k, s), c in sorted_faults])
+            
+        today_detail = fmt_detail(today_faults)
+        week_detail = fmt_detail(week_faults)
+        month_detail = fmt_detail(month_faults)
+        all_detail = fmt_detail(all_faults)
+        
+        # Konversi daily_summary_map ke model record stub untuk fallback
+        class DailyRecordStub:
+            def __init__(self, date_str, klasifikasi, status, count):
+                self.date_str = date_str
+                self.klasifikasi = klasifikasi
+                self.status = status
+                self.count = count
+                
+        daily_records = []
+        daily_list = []
+        for d_str in sorted(daily_summary_map.keys(), reverse=True):
+            for (klas, stat), count in daily_summary_map[d_str].items():
+                rec = DailyRecordStub(d_str, klas, stat, count)
+                daily_records.append(rec)
+                daily_list.append(f"{d_str} | {klas} ({stat}) | {count} kali")
+                
+        daily_summary_str = "\n".join(daily_list) if daily_list else "Belum ada ringkasan harian."
+        
+    except Exception as db_err:
+        logger.error(f"DB error in chat: {db_err}")
+        return {"response": get_local_chatbot_response(user_message), "source": "local_fallback"}
+    
+    # Jika tidak ada Gemini, gunakan DB-aware fallback langsung
+    if not GEMINI_API_KEY or gemini_client is None:
+        reply = make_db_aware_response(
+            user_message, today_total, today_g, today_detail,
+            week_total, week_g, week_detail,
+            month_total, month_g, month_detail,
+            total_data, all_g_total, all_detail, latest,
+            daily_records, history_records
         )
-        latest = result_latest.scalar_one_or_none()
+        return {"response": reply, "source": "db_fallback"}
+    
+    # Format context state dari frontend jika ada
+    context_str = ""
+    if context_state:
+        context_str = "\n".join([f"- {k}: {v}" for k, v in context_state.items() if v is not None])
+    
+    # Buat prompt lengkap
+    latest_wib_time = (latest.timestamp + timedelta(hours=7)).strftime('%d %B %Y %H:%M') if latest and latest.timestamp else 'N/A'
+    prompt = f"""[DATA REAL-TIME MONITORING OPTIM — {now_wib.strftime('%d %B %Y %H:%M')}]
 
-        # Database Stats queries for frequency of issues
-        from datetime import timedelta
-        now_time = datetime.now()
-        seven_days_ago = now_time - timedelta(days=7)
-        thirty_days_ago = now_time - timedelta(days=30)
+=== KONTEKS SEKARANG DI FRONTEND ===
+{context_str}
 
-        # 1. Stats last 7 days
-        q_7d = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
-            .where(OtdrResult.klasifikasi != "Normal", OtdrResult.timestamp >= seven_days_ago)\
-            .group_by(OtdrResult.klasifikasi)\
-            .order_by(func.count(OtdrResult.id).desc())
-        r_7d = await db.execute(q_7d)
-        stats_7d = r_7d.all()
+=== RINGKASAN HARIAN DATA PENGUKURAN & GANGGUAN ===
+Format: [Tanggal] | [Klasifikasi] ([Status]) | [Jumlah Kejadian]
+{daily_summary_str}
 
-        # 2. Stats last 30 days
-        q_30d = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
-            .where(OtdrResult.klasifikasi != "Normal", OtdrResult.timestamp >= thirty_days_ago)\
-            .group_by(OtdrResult.klasifikasi)\
-            .order_by(func.count(OtdrResult.id).desc())
-        r_30d = await db.execute(q_30d)
-        stats_30d = r_30d.all()
+=== REKAPITULASI HARI INI ({now_wib.strftime('%d %B %Y')}) ===
+- Total pengukuran: {today_total}
+- Total gangguan terdeteksi: {today_g}
+- Rincian gangguan: {today_detail}
 
-        # 3. Overall Stats
-        q_all = select(OtdrResult.klasifikasi, func.count(OtdrResult.id))\
-            .where(OtdrResult.klasifikasi != "Normal")\
-            .group_by(OtdrResult.klasifikasi)\
-            .order_by(func.count(OtdrResult.id).desc())
-        r_all = await db.execute(q_all)
-        stats_all = r_all.all()
+=== REKAPITULASI 7 HARI TERAKHIR ===
+- Total pengukuran: {week_total}
+- Total gangguan terdeteksi: {week_g}
+- Rincian gangguan: {week_detail}
 
-        def format_stats_list(stats_list):
-            if not stats_list:
-                return "Tidak ada gangguan terdeteksi"
-            return "<br>".join([f"• {row[0]}: <strong>{row[1]} kali</strong>" for row in stats_list])
+=== REKAPITULASI 30 HARI TERAKHIR (BULAN INI) ===
+- Total pengukuran: {month_total}
+- Total gangguan terdeteksi: {month_g}
+- Rincian gangguan: {month_detail}
 
-        stats_7d_str = format_stats_list(stats_7d)
-        stats_30d_str = format_stats_list(stats_30d)
-        stats_all_str = format_stats_list(stats_all)
-        
-        prompt = f"""Anda adalah asisten AI untuk aplikasi OptiM.
+=== DATA KESELURUHAN SISTEM ===
+- Total seluruh data pengukuran: {total_data}
+- Total seluruh gangguan: {all_g_total}
+- Rincian seluruh gangguan: {all_detail}
 
-[DATA REAL-TIME DARI DATABASE]
-- Total data pengukuran: {total_data}
-- Klasifikasi terakhir: {latest.klasifikasi if latest else 'Belum ada'}
-- Status terakhir: {latest.status if latest else 'Belum ada'}
-- Loss terakhir: KM1={latest.loss_1 if latest else 0} dB, KM2={latest.loss_2 if latest else 0} dB, KM3={latest.loss_3 if latest else 0} dB, KM4={latest.loss_4 if latest else 0} dB
+=== DETAIL RIWAYAT PENGUKURAN TERBARU (Maks 150 data) ===
+Format: [Tanggal & Waktu] | [Jenis Gangguan] | [Status/Tingkat Bahaya]
+{history_list_str}
+
+=== PENGUKURAN TERAKHIR ===
+- Klasifikasi: {latest.klasifikasi if latest else 'Belum ada'}
+- Status: {latest.status if latest else 'Belum ada'}
+- Loss KM1-4: {latest.loss_1 if latest else 0} dB | {latest.loss_2 if latest else 0} dB | {latest.loss_3 if latest else 0} dB | {latest.loss_4 if latest else 0} dB
 - Prx: {latest.prx if latest else 0} dBm
-- Statistik gangguan 7 hari terakhir:
-{stats_7d_str}
-- Statistik gangguan 30 hari terakhir:
-{stats_30d_str}
-- Statistik gangguan keseluruhan (all-time):
-{stats_all_str}
+- Waktu: {latest_wib_time}
 
 [PERTANYAAN PENGGUNA]
 {user_message}
-
-[JAWABAN]
-Jawab dengan bahasa Indonesia yang ramah dan profesional. Format output dengan HTML."""
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        
-        response = None
-        for attempt in range(2):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(url, json=payload, timeout=15)
-                    if response.status_code == 200:
-                        break
-                    elif response.status_code == 429:
-                        logger.warning(f"Gemini API rate limited (429), retrying in {1.5 * (attempt + 1)}s...")
-                        await asyncio.sleep(1.5 * (attempt + 1))
-                    else:
-                        break
-            except Exception as e:
-                logger.error(f"Gemini request attempt {attempt} failed: {e}")
-                if attempt == 1:
-                    break
-
-        if response and response.status_code == 200:
-            data = response.json()
-            reply = data["candidates"][0]["content"]["parts"][0]["text"]
-            return {"response": format_markdown_to_html(reply), "source": "gemini_api"}
-        else:
-            # Smart rule-based fallback based on DB values if API fails/gets rate-limited
-            msg_lower = user_message.lower()
-            if any(x in msg_lower for x in ["sering", "terbanyak", "dominan", "minggu", "bulan", "mingguan", "bulanan"]):
-                if "minggu" in msg_lower or "7 hari" in msg_lower:
-                    reply_html = f"Berikut adalah statistik gangguan dalam 1 minggu terakhir (7 hari):<br>{stats_7d_str}"
-                elif "bulan" in msg_lower or "30 hari" in msg_lower:
-                    reply_html = f"Berikut adalah statistik gangguan dalam 1 bulan terakhir (30 hari):<br>{stats_30d_str}"
-                else:
-                    reply_html = f"Gangguan yang paling sering terjadi (keseluruhan data):<br>{stats_all_str}<br><br>Statistik 7 hari terakhir:<br>{stats_7d_str}"
-            elif any(x in msg_lower for x in ["loss", "rugi", "db"]):
-                if latest:
-                    reply_html = f"Berdasarkan data terakhir di database:<br>• Loss KM 1: <strong>{latest.loss_1 or 0} dB</strong><br>• Loss KM 2: <strong>{latest.loss_2 or 0} dB</strong><br>• Loss KM 3: <strong>{latest.loss_3 or 0} dB</strong><br>• Loss KM 4: <strong>{latest.loss_4 or 0} dB</strong>"
-                else:
-                    reply_html = "Belum ada data pengukuran OTDR di database."
-            elif any(x in msg_lower for x in ["gangguan", "anomali", "masalah", "klasifikasi", "status", "rusak", "putus"]):
-                if latest:
-                    reply_html = f"Hasil deteksi terakhir menunjukkan klasifikasi: <strong>{latest.klasifikasi or 'Normal'}</strong> dengan status: <strong>{latest.status or 'Normal'}</strong>."
-                else:
-                    reply_html = "Belum ada data riwayat pengukuran di database."
-            elif any(x in msg_lower for x in ["prx", "daya", "signal", "sinyal"]):
-                if latest:
-                    reply_html = f"Nilai daya sinyal penerimaan terakhir (Prx) adalah: <strong>{latest.prx or 0} dBm</strong>."
-                else:
-                    reply_html = "Belum ada data daya sinyal penerimaan di database."
-            elif any(x in msg_lower for x in ["total", "jumlah", "banyak", "data", "riwayat"]):
-                reply_html = f"Total data pengukuran OTDR yang tersimpan saat ini sebanyak <strong>{total_data}</strong> data."
+"""
+    
+    # Coba tiap model Gemini dengan fallback
+    last_err = None
+    for model_name in GEMINI_MODELS:
+        try:
+            if gemini_model_name == "legacy":
+                # Pakai google.generativeai lama
+                response_data = await asyncio.to_thread(gemini_client.generate_content, prompt)
+                reply = response_data.text
             else:
-                status_str = f"klasifikasi terakhir: <strong>{latest.klasifikasi}</strong> ({latest.status})" if latest else "belum ada data"
-                reply_html = f"Maaf, saat ini kuota layanan AI sedang penuh (Rate Limit 429).<br><br><strong>Informasi dari Database:</strong><br>• Total data: {total_data}<br>• Status terakhir: {status_str}"
-                
-            return {"response": reply_html, "source": "local_fallback"}
-    except Exception as e:
-        logger.error(f"Chat exception: {e}")
-        return {"response": f"Maaf, terjadi kesalahan: {str(e)[:200]}", "source": "error"}
+                # Pakai google.genai baru
+                full_prompt = SYSTEM_INSTRUCTION + "\n\n" + prompt
+                response_data = await asyncio.to_thread(
+                    gemini_client.models.generate_content,
+                    model=model_name,
+                    contents=full_prompt
+                )
+                reply = response_data.text
+            
+            reply_html = format_markdown_to_html(reply)
+            logger.info(f"[CHAT] Gemini ({model_name}) responded OK")
+            return {"response": reply_html, "source": f"gemini_{model_name}"}
+        except Exception as e:
+            last_err = e
+            err_str = str(e).lower()
+            if "quota" in err_str or "429" in err_str or "rate" in err_str:
+                logger.warning(f"[CHAT] {model_name} quota habis, coba model berikutnya...")
+                continue
+            else:
+                logger.error(f"[CHAT] {model_name} error: {e}")
+                break
+    
+    # Semua model gagal — gunakan DB-aware fallback
+    logger.error(f"[CHAT] Semua model Gemini gagal: {last_err}. Menggunakan DB fallback.")
+    reply = make_db_aware_response(
+        user_message, today_total, today_g, today_detail,
+        week_total, week_g, week_detail,
+        month_total, month_g, month_detail,
+        total_data, all_g_total, all_detail, latest,
+        daily_records, history_records
+    )
+    return {"response": reply, "source": "db_fallback"}
 
 # ═══════════════════════════════════════════════════════════════════
 # AUTH ENDPOINTS
@@ -1405,8 +1778,35 @@ async def get_slide_data(
     }
 
 
+@app.post("/api/alert")
+async def trigger_alert(payload: dict):
+    """Endpoint manual untuk mengirimkan alert dari dashboard ke Telegram"""
+    try:
+        classification = payload.get('classification', 'unknown')
+        status = payload.get('status', 'warning')
+        loss = payload.get('loss', [0.2, 0.2, 0.2, 0.2])
+        rl = payload.get('return_loss', [-45.0, -45.0, -45.0, -45.0])
+        prx = payload.get('prx', 'N/A')
+        
+        await asyncio.to_thread(
+            send_telegram_alert,
+            classification=classification,
+            status=status,
+            loss=loss,
+            rl=rl,
+            prx=prx
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        logger.error(f"[ALERT] Gagal mengirim alert manual: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/slide-alert")
-async def slide_alert(payload: dict, db: AsyncSession = Depends(get_db)):
+async def slide_alert(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
     """Endpoint untuk mengirimkan alert dari slideshow monitoring ke Telegram dengan deduplikasi"""
     try:
         record_id = payload.get("id")
@@ -1418,9 +1818,9 @@ async def slide_alert(payload: dict, db: AsyncSession = Depends(get_db)):
         if not record:
             raise HTTPException(status_code=404, detail="Record not found")
         
-        # Skip jika sudah dikirim
-        if record.telegram_alert_sent:
-            return {"status": "skipped", "reason": "alert already sent"}
+        # Skip jika sudah dikirim (dibypass agar slideshow tetap mengirim alert)
+        # if record.telegram_alert_sent:
+        #     return {"status": "skipped", "reason": "alert already sent"}
         
         # Skip jika normal
         status_str = record.status or ""
@@ -1446,6 +1846,7 @@ async def slide_alert(payload: dict, db: AsyncSession = Depends(get_db)):
         # Tandai sudah dikirim
         record.telegram_alert_sent = True
         await db.commit()
+        await sync_db_to_persistent()
         return {"status": "sent", "id": record_id}
     except HTTPException:
         raise
@@ -1453,6 +1854,7 @@ async def slide_alert(payload: dict, db: AsyncSession = Depends(get_db)):
         logger.error(f"[SLIDE-ALERT] Gagal mengirim slide alert: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/api/sync")
@@ -1559,86 +1961,134 @@ async def health_check():
     }
 
 
-@app.post("/api/classify-manual")
-async def classify_manual(
-    payload: ManualClassifyRequest,
+@app.post("/api/detect-manual")
+async def detect_manual(
+    payload: dict,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
-    logger.info("=" * 70)
-    logger.info("🔄 Starting Manual Classification...")
+    def g(key, default=0.0):
+        try:
+            val = payload.get(key, default)
+            if val is None or val == "":
+                return default
+            return float(val)
+        except:
+            return default
+            
+    d1 = g('distance_1', 1.00447)
+    d2 = g('distance_2', 2.00639)
+    d3 = g('distance_3', 3.01036)
+    d4 = g('distance_4', 4.01432)
+    
+    l1 = g('loss_1', 0.0)
+    l2 = g('loss_2', 0.0)
+    l3 = g('loss_3', 0.0)
+    l4 = g('loss_4', 0.0)
+    
+    r1 = g('return_1', 0.0)
+    r2 = g('return_2', 0.0)
+    r3 = g('return_3', 0.0)
+    r4 = g('return_4', 0.0)
+    
+    prx = g('prx', -15.6)
+    
+    # Calculate derived values (total loss and avg loss per km) - support manual input/overrides
+    tl1 = g('total_l_1', l1)
+    tl2 = g('total_l_2', l1 + l2)
+    tl3 = g('total_l_3', l1 + l2 + l3)
+    tl4 = g('total_l_4', l1 + l2 + l3 + l4)
+    
+    al1 = g('avg_l_1', tl1 / d1 if d1 > 0 else 0.0)
+    al2 = g('avg_l_2', tl2 / d2 if d2 > 0 else 0.0)
+    al3 = g('avg_l_3', tl3 / d3 if d3 > 0 else 0.0)
+    al4 = g('avg_l_4', tl4 / d4 if d4 > 0 else 0.0)
+    avg_total = g('avg_total', tl4 / d4 if d4 > 0 else 0.0)
     
     otdr_values = {
-        'Prx (dBm)': payload.prx,
-        'Distance 1': payload.distance_1, 'Distance 2': payload.distance_2,
-        'Distance 3': payload.distance_3, 'Distance 4': payload.distance_4,
-        'Loss 1': payload.loss_1, 'Loss 2': payload.loss_2, 'Loss 3': payload.loss_3,
-        'Total-L 1': payload.total_l_1, 'Total-L 2': payload.total_l_2,
-        'Total-L 3': payload.total_l_3, 'Total-L 4': payload.total_l_4,
-        'Avg-L 1': payload.avg_l_1, 'Avg-L 2': payload.avg_l_2,
-        'Avg-L 3': payload.avg_l_3, 'Avg-L 4': payload.avg_l_4,
-        'Avg-Total': payload.avg_total,
-        'Return 1': payload.return_1, 'Return 2': payload.return_2,
-        'Return 3': payload.return_3, 'Return 4': payload.return_4,
+        'Prx (dBm)': prx,
+        'Distance 1': d1, 'Distance 2': d2, 'Distance 3': d3, 'Distance 4': d4,
+        'Loss 1': l1, 'Loss 2': l2, 'Loss 3': l3,
+        'Total-L 1': tl1, 'Total-L 2': tl2, 'Total-L 3': tl3, 'Total-L 4': tl4,
+        'Avg-L 1': al1, 'Avg-L 2': al2, 'Avg-L 3': al3, 'Avg-L 4': al4,
+        'Avg-Total': avg_total,
+        'Return 1': r1, 'Return 2': r2, 'Return 3': r3, 'Return 4': r4,
     }
     
+    logger.info(f"Manual input received: {otdr_values}")
+    
     try:
-        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-        logger.info(f"🤖 ML manual prediction SUCCESS: {pred.get('prediction')} (confidence: {pred.get('confidence')}%)")
+        pred = ml.predict_from_otdr(otdr_values)
+        logger.info(f"🤖 ML prediction SUCCESS (manual): {pred.get('prediction')} (confidence: {pred.get('confidence')}%)")
     except Exception as e:
-        logger.error(f"❌ ML manual prediction FAILED: {e}")
-        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+        logger.error(f"❌ ML prediction FAILED (manual): {e}")
+        pred = {
+            "prediction": "Normal",
+            "confidence": 70.0,
+            "status": "Normal"
+        }
         
     user_id = current_user.id if current_user else 1
     
     try:
         record = OtdrResult(
             user_id=user_id,
-            timestamp=datetime.now(),
-            prx=payload.prx,
-            loss_1=payload.loss_1, loss_2=payload.loss_2,
-            loss_3=payload.loss_3,
-            return_1=payload.return_1, return_2=payload.return_2,
-            return_3=payload.return_3, return_4=payload.return_4,
-            distance_1=payload.distance_1, distance_2=payload.distance_2,
-            distance_3=payload.distance_3, distance_4=payload.distance_4,
-            total_l_1=payload.total_l_1, total_l_2=payload.total_l_2,
-            total_l_3=payload.total_l_3, total_l_4=payload.total_l_4,
-            avg_l_1=payload.avg_l_1, avg_l_2=payload.avg_l_2,
-            avg_l_3=payload.avg_l_3, avg_l_4=payload.avg_l_4, avg_total=payload.avg_total,
+            timestamp=datetime.utcnow(),
+            prx=prx,
+            distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
+            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=l4,
+            total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
+            avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
+            return_1=r1, return_2=r2, return_3=r3, return_4=r4,
             klasifikasi=pred.get("prediction"),
             status=pred.get("status"),
             confidence=pred.get("confidence"),
             source="manual",
-            raw_text="Manual Input Classification",
+            raw_text="Manual Input Data",
         )
-        
         db.add(record)
         await db.commit()
+        await sync_db_to_persistent()
         await db.refresh(record)
-        logger.info(f"✅ Saved manual entry to DB: ID={record.id}")
         
+        # Kirim Telegram Alert jika terdeteksi anomali (warning/critical)
+        status_str = pred.get("status", "Normal")
+        logger.info(f"[TELEGRAM] Status hasil prediksi (manual): '{status_str}'")
+        if status_str.lower() in ["warning", "critical"]:
+            logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')} ({status_str})")
+            try:
+                await asyncio.to_thread(
+                    send_telegram_alert,
+                    classification=pred.get("prediction"),
+                    status=status_str,
+                    loss=[l1, l2, l3, l4],
+                    rl=[r1, r2, r3, r4],
+                    prx=prx,
+                    distances=[d1, d2, d3, d4],
+                    timestamp=record.timestamp
+                )
+                record.telegram_alert_sent = True
+                await db.commit()
+                await sync_db_to_persistent()
+            except Exception as tg_err:
+                logger.error(f"[TELEGRAM] Error saat kirim alert (manual): {tg_err}")
     except Exception as e:
-        logger.error(f"❌ DATABASE ERROR: {e}")
+        logger.error(f"❌ DATABASE ERROR (manual): {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
         
     return {
-        "message": "Klasifikasi manual berhasil disimpan",
+        "message": "Data manual berhasil diproses",
         "extracted": {
-            "distances": [payload.distance_1, payload.distance_2, payload.distance_3, payload.distance_4],
-            "losses": [payload.loss_1, payload.loss_2, payload.loss_3],
-            "total_ls": [payload.total_l_1, payload.total_l_2, payload.total_l_3, payload.total_l_4],
-            "avg_ls": [payload.avg_l_1, payload.avg_l_2, payload.avg_l_3, payload.avg_l_4, payload.avg_total],
-            "returns": [payload.return_1, payload.return_2, payload.return_3, payload.return_4],
+            "distances": [d1, d2, d3, d4],
+            "losses": [l1, l2, l3, l4],
+            "total_ls": [tl1, tl2, tl3, tl4],
+            "returns": [r1, r2, r3, r4],
+            "avg_ls": [al1, al2, al3, al4],
+            "avg_total": avg_total,
         },
-        "per_km": {
-            "km1": {"distance": payload.distance_1, "loss": payload.loss_1, "total_l": payload.total_l_1, "avg_l": payload.avg_l_1, "return": payload.return_1},
-            "km2": {"distance": payload.distance_2, "loss": payload.loss_2, "total_l": payload.total_l_2, "avg_l": payload.avg_l_2, "return": payload.return_2},
-            "km3": {"distance": payload.distance_3, "loss": payload.loss_3, "total_l": payload.total_l_3, "avg_l": payload.avg_l_3, "return": payload.return_3},
-            "km4": {"distance": payload.distance_4, "total_l": payload.total_l_4, "avg_l": payload.avg_l_4, "avg_total": payload.avg_total, "return": payload.return_4},
-        },
-        "prx": payload.prx,
+        "prx": prx,
+        "prx_source": "manual",
         "prediction": pred.get("prediction"),
         "confidence": pred.get("confidence"),
         "status": pred.get("status"),
