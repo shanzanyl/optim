@@ -1604,6 +1604,27 @@ async def detect_ocr(
         await db.commit()
         await db.refresh(record)
         logger.info(f"✅ Saved to DB: ID={record.id}")
+    
+    # Kirim Telegram Alert jika terdeteksi anomali (warning/critical)
+        status_str = pred.get("status", "Normal")
+        logger.info(f"[TELEGRAM] Status hasil prediksi: '{status_str}'")
+        if status_str.lower() in ["warning", "critical"]:
+            logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')} ({status_str})")
+            try:
+                await asyncio.to_thread(
+                    send_telegram_alert,
+                    classification=pred.get("prediction"),
+                    status=status_str,
+                    loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
+                    rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
+                    prx=final_prx,
+                    distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
+                    timestamp=record.timestamp
+                )
+                record.telegram_alert_sent = True
+                await db.commit()
+            except Exception as tg_err:
+                logger.error(f"[TELEGRAM] Error saat kirim alert (OCR): {tg_err}")
         
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR: {e}")
@@ -1846,7 +1867,6 @@ async def slide_alert(
         # Tandai sudah dikirim
         record.telegram_alert_sent = True
         await db.commit()
-        await sync_db_to_persistent()
         return {"status": "sent", "id": record_id}
     except HTTPException:
         raise
@@ -2048,7 +2068,6 @@ async def detect_manual(
         )
         db.add(record)
         await db.commit()
-        await sync_db_to_persistent()
         await db.refresh(record)
         
         # Kirim Telegram Alert jika terdeteksi anomali (warning/critical)
@@ -2069,9 +2088,31 @@ async def detect_manual(
                 )
                 record.telegram_alert_sent = True
                 await db.commit()
-                await sync_db_to_persistent()
+                # await sync_db_to_persistent()
             except Exception as tg_err:
                 logger.error(f"[TELEGRAM] Error saat kirim alert (manual): {tg_err}")
+    
+    # Kirim Telegram Alert jika terdeteksi anomali (warning/critical)
+        status_str = pred.get("status", "Normal")
+        logger.info(f"[TELEGRAM] Status hasil prediksi: '{status_str}'")
+        if status_str.lower() in ["warning", "critical"]:
+            logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')} ({status_str})")
+            try:
+                await asyncio.to_thread(
+                    send_telegram_alert,
+                    classification=pred.get("prediction"),
+                    status=status_str,
+                    loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']], # type: ignore
+                    rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']], # pyright: ignore[reportUndefinedVariable]
+                    prx=final_prx,
+                    distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']], # type: ignore
+                    timestamp=record.timestamp
+                )
+                record.telegram_alert_sent = True
+                await db.commit()
+            except Exception as tg_err:
+                logger.error(f"[TELEGRAM] Error saat kirim alert (OCR): {tg_err}")
+
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR (manual): {e}")
         await db.rollback()

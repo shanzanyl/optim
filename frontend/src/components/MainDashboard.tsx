@@ -66,6 +66,20 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   const [prevTotalData, setPrevTotalData] = useState(0);
 
+  // 🔥 TAMBAHAN: State untuk display timestamps (dari teman)
+  const [displayTimestamps, setDisplayTimestamps] = useState<Record<number, string>>(() => {
+    try {
+      const saved = localStorage.getItem('slide_display_timestamps');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('slide_display_timestamps', JSON.stringify(displayTimestamps));
+  }, [displayTimestamps]);
+
   useEffect(() => {
     if (totalData !== prevTotalData) {
       setPrevTotalData(totalData);
@@ -100,23 +114,41 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
-  // Trigger Telegram alert saat slide monitoring berpindah ke data warning/critical
-useEffect(() => {
-  if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
-  const currentRecord = allData[currentIndex];
-  if (!currentRecord) return;
+  // 🔥 TAMBAHAN: Update timestamp saat slide berubah (dari teman)
+  useEffect(() => {
+    if (allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
+    const currentRecord = allData[currentIndex];
+    if (!currentRecord) return;
 
-  const status = currentRecord.status || '';
-  if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-    triggerSlideAlert(currentRecord.id)
-      .then((res: { status: string; }) => {
-        if (res.status === 'sent') {
-          console.log(`Telegram alert sent automatically for record ID: ${currentRecord.id}`);
-        }
-      })
-      .catch((err: any) => console.error('Error triggering slide alert:', err));
-  }
-}, [currentIndex, allData, loading]);
+    setDisplayTimestamps(prev => {
+      const existing = prev[currentRecord.id];
+      if (existing) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [currentRecord.id]: new Date().toISOString()
+      };
+    });
+  }, [currentIndex, allData]);
+
+  // Trigger Telegram alert saat slide monitoring berpindah ke data warning/critical
+  useEffect(() => {
+    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
+    const currentRecord = allData[currentIndex];
+    if (!currentRecord) return;
+
+    const status = currentRecord.status || '';
+    if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
+      triggerSlideAlert(currentRecord.id)
+        .then((res: { status: string; }) => {
+          if (res.status === 'sent') {
+            console.log(`Telegram alert sent automatically for record ID: ${currentRecord.id}`);
+          }
+        })
+        .catch((err: any) => console.error('Error triggering slide alert:', err));
+    }
+  }, [currentIndex, allData, loading]);
 
   const fetchAllData = async () => {
     try {
@@ -183,6 +215,9 @@ useEffect(() => {
   const processedData = allData.slice(0, currentIndex + 1);
   const totalProcessed = processedData.length;
 
+  // 🔥 TAMBAHAN: tableData menggunakan processedData (dari teman)
+  const tableData = processedData.slice().reverse();
+
   const faultMap: Record<string, number> = {};
   processedData.forEach((r: any) => {
     const k = r.klasifikasi || 'Unknown';
@@ -213,7 +248,6 @@ useEffect(() => {
 
   const isGangguan = currentRecord?.klasifikasi && currentRecord.klasifikasi !== 'Normal';
 
-  const tableData = allData.slice(Math.max(0, currentIndex - 4), currentIndex + 1).reverse();
   const realTimeLabels15 = getRealTimeLabels(15);
   const realTimeLabels6 = getRealTimeLabels(6);
 
@@ -479,7 +513,7 @@ useEffect(() => {
                   Signal Power (Prx) Monitoring
                 </h3>
                 <div className="mt-3">
-                  <p className="text-2xl text-white font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}">
+                  <p className="text-2xl text-white font-black leading-none">
                     {currentRecord?.prx || '—'} <span className="text-sm text-white">dBm</span>
                   </p>
                 </div>
@@ -588,72 +622,81 @@ useEffect(() => {
           />
         </section>
 
-        {/* Prediction Results Table */}
-<div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] p-8 w-full shadow-2xl overflow-hidden">
-  <div className="flex justify-between items-center mb-8">
-    <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-      <div className="w-1.5 h-4 bg-indigo-500 rounded-full" />
-      Prediction Results Table
-    </h3>
-    <div className="flex items-center gap-2 text-slate-400">
-    </div>
-  </div>
-  <div className="overflow-x-auto">
-    <table className="w-full text-left">
-      <thead>
-        <tr className="border-b border-[#3b4f6e] text-white text-[13px] font-black uppercase tracking-widest">
-          <th className="pb-4 px-4">Waktu</th>
-          <th className="pb-4 px-4 text-center">Loss KM1-4 (dB)</th>
-          <th className="pb-4 px-4 text-center">Total-L (dB)</th>
-          <th className="pb-4 px-4 text-center">Return KM1-4 (dB)</th>
-          <th className="pb-4 px-4 text-center">PRX (dBm)</th>
-          <th className="pb-4 px-4">Klasifikasi</th>
-          <th className="pb-4 px-4 text-center">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {tableData.length > 0 ? tableData.map((row, idx) => {
-          const timeOffset = (tableData.length - 1 - idx) * 30;
-          const realTime = new Date(Date.now() - timeOffset * 1000).toLocaleString('id-ID');
-          const loss4Display = (row.loss_4 || 0) === 0 ? '---' : (row.loss_4 || 0);
-          // 🔥 Total-L hanya menampilkan nilai di KM4 (total_l_4)
-          const totalLDisplay = (row.total_l_4 || 0) === 0 ? '---' : (row.total_l_4 || 0);
-          return (
-            <tr key={idx} className="border-b border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20 transition-colors">
-              <td className="py-5 px-4 text-slate-300 text-xs">{realTime}</td>
-              <td className="py-5 px-4 text-center text-white text-xs font-mono">
-                {(row.loss_1 || 0)} / {(row.loss_2 || 0)} / {(row.loss_3 || 0)} / {loss4Display}
-              </td>
-              {/* 🔥 Total-L hanya 1 nilai (total_l_4) */}
-              <td className="py-5 px-4 text-center text-white text-xs font-mono">
-                {totalLDisplay}
-              </td>
-              <td className="py-5 px-4 text-center text-white text-xs font-mono">
-                {(row.return_1 || 0)} / {(row.return_2 || 0)} / {(row.return_3 || 0)} / {(row.return_4 || 0)}
-              </td>
-              <td className="py-5 px-4 text-center text-blue-400 font-bold text-xs font-mono">
-                {row.prx || '—'} dBm
-              </td>
-              <td className="py-5 px-4">
-                <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
-                  row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-                  row.klasifikasi === 'Warning' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                  row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30 animate-pulse' :
-                  'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                }`}>
-                  {row.klasifikasi || 'Unknown'}
-                </span>
-              </td>
-              <td className="py-5 px-4 text-center"><StatusBadge status={row.status} /></td>
-            </tr>
-          );
-        }) : (
-          <tr><td colSpan={7} className="py-10 text-center text-slate-500 italic">Belum ada data</td></tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-</div>
+        {/* 🔥 PREDICTION RESULTS TABLE - VERSION DARI TEMAN (SUDAH COCOK) */}
+        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] p-8 w-full shadow-2xl overflow-hidden">
+          <div className="flex justify-between items-center mb-8">
+            <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+              <div className="w-1.5 h-4 bg-indigo-500 rounded-full" />
+              Prediction Results Table
+            </h3>
+            <div className="flex items-center gap-2 text-slate-400">
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full text-left">
+              <thead className="sticky top-0 bg-[#1e2f50] z-10">
+                <tr className="border-b border-[#3b4f6e] text-white text-[13px] font-black uppercase tracking-widest bg-[#1e2f50]">
+                  <th className="pb-4 px-4">Time</th>
+                  <th className="pb-4 px-4 text-center">Loss KM1-4 (dB)</th>
+                  <th className="pb-4 px-4 text-center">Total-L (dB)</th>
+                  <th className="pb-4 px-4 text-center">Return KM1-4 (dB)</th>
+                  <th className="pb-4 px-4 text-center">PRX (dBm)</th>
+                  <th className="pb-4 px-4">Classification</th>
+                  <th className="pb-4 px-4 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const tableNow = new Date();
+                  return tableData.length > 0 ? tableData.map((row, idx) => {
+                    const displayTime = displayTimestamps[row.id];
+                    const tsVal = displayTime ? new Date(displayTime) : (row.timestamp ? new Date(row.timestamp) : new Date());
+                    const isValid = !isNaN(tsVal.getTime());
+                    const targetDate = isValid ? tsVal : new Date();
+                    const hh = String(targetDate.getHours()).padStart(2, '0');
+                    const mm = String(targetDate.getMinutes()).padStart(2, '0');
+                    const dd = String(targetDate.getDate()).padStart(2, '0');
+                    const mo = String(targetDate.getMonth() + 1).padStart(2, '0');
+                    const yyyy = targetDate.getFullYear();
+                    const realTime = `${hh}.${mm} ${dd}/${mo}/${yyyy}`;
+                    const loss4Display = (row.loss_4 || 0) === 0 ? '---' : (row.loss_4 || 0);
+                    const totalLDisplay = (row.total_l_4 || 0) === 0 ? '---' : (row.total_l_4 || 0);
+                    return (
+                      <tr key={idx} className="border-b border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20 transition-colors">
+                        <td className="py-5 px-4 text-slate-300 text-xs font-mono">{realTime}</td>
+                        <td className="py-5 px-4 text-center text-white text-xs font-mono">
+                          {(row.loss_1 || 0)} / {(row.loss_2 || 0)} / {(row.loss_3 || 0)} / {loss4Display}
+                        </td>
+                        <td className="py-5 px-4 text-center text-white text-xs font-mono">
+                          {totalLDisplay}
+                        </td>
+                        <td className="py-5 px-4 text-center text-white text-xs font-mono">
+                          {(row.return_1 || 0)} / {(row.return_2 || 0)} / {(row.return_3 || 0)} / {(row.return_4 || 0)}
+                        </td>
+                        <td className="py-5 px-4 text-center text-blue-400 font-bold text-xs font-mono">
+                          {row.prx || '—'} dBm
+                        </td>
+                        <td className="py-5 px-4">
+                          <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
+                            row.klasifikasi === 'Normal' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                            row.klasifikasi === 'Warning' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                            row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                            'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                          }`}>
+                            {row.klasifikasi === 'hampir putus' ? 'Nearly Cut' : (row.klasifikasi || 'Unknown')}
+                          </span>
+                        </td>
+                        <td className="py-5 px-4 text-center"><StatusBadge status={row.status} /></td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr><td colSpan={7} className="py-10 text-center text-slate-500 italic">No data available</td></tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
       </main>
     </div>
