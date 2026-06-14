@@ -336,7 +336,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("✅ Database tables ready")
     
-    # 🔥 Load EasyOCR di background (non-blocking)
+    # 🔥 Load EasyOCR di background (non-blocking) - DI-NONAKTIFKAN
     # async def load_easyocr_background():
     #     global easyocr_reader, easyocr_loading
     #     easyocr_loading = True
@@ -357,172 +357,179 @@ async def lifespan(app: FastAPI):
     # logger.info("🔄 EasyOCR loading started in background...")
     
     # 🔥 Auto sync background task (every 6 hours)
-async def auto_sync_sheets():
-    await asyncio.sleep(10)
-    while True:
-        try:
-            logger.info("🔄 Auto-sync from Google Sheets...")
-            async with AsyncSessionLocal() as db_sync:
-                result = await db_sync.execute(select(User))
-                users = result.scalars().all()
-                
-                for user in users:
-                    try:
-                        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-                            resp = await client.get(SHEET_URL, headers={
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                            })
-                            if resp.status_code == 200:
-                                df = pd.read_csv(io.StringIO(resp.text))
-                                df.columns = [str(c).strip() for c in df.columns]
-                                
-                                logger.info(f"📊 Found columns in CSV: {df.columns.tolist()}")
-                                
-                                # 🔥 BUAT MAPPING KOLOM
-                                column_mapping = create_column_mapping(df.columns.tolist())
-                                
-                                # Delete old sheets data
-                                existing = await db_sync.execute(
-                                    select(OtdrResult).where(
-                                        OtdrResult.user_id == None,
-                                        OtdrResult.source == "sheets",
+    async def auto_sync_sheets():
+        await asyncio.sleep(10)
+        while True:
+            try:
+                logger.info("🔄 Auto-sync from Google Sheets...")
+                async with AsyncSessionLocal() as db_sync:
+                    result = await db_sync.execute(select(User))
+                    users = result.scalars().all()
+                    
+                    for user in users:
+                        try:
+                            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+                                resp = await client.get(SHEET_URL, headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                                })
+                                if resp.status_code == 200:
+                                    df = pd.read_csv(io.StringIO(resp.text))
+                                    df.columns = [str(c).strip() for c in df.columns]
+                                    
+                                    logger.info(f"📊 Found columns in CSV: {df.columns.tolist()}")
+                                    
+                                    # 🔥 BUAT MAPPING KOLOM
+                                    column_mapping = create_column_mapping(df.columns.tolist())
+                                    
+                                    # Delete old sheets data
+                                    existing = await db_sync.execute(
+                                        select(OtdrResult).where(
+                                            OtdrResult.user_id == None,
+                                            OtdrResult.source == "sheets",
+                                        )
                                     )
-                                )
-                                for rec in existing.scalars().all():
-                                    await db_sync.delete(rec)
-                                await db_sync.flush()
-                                
-                                saved = 0
-                                for _, row in df.iterrows():
-                                    # 🔥 AMBIL TIMESTAMP DARI CSV (seperti punya teman)
-                                    timestamp = datetime.now()
-                                    time_col = next((c for c in df.columns if 'time' in c.lower()), None)
-                                    if time_col and pd.notna(row.get(time_col)):
+                                    for rec in existing.scalars().all():
+                                        await db_sync.delete(rec)
+                                    await db_sync.flush()
+                                    
+                                    saved = 0
+                                    for _, row in df.iterrows():
+                                        # 🔥 AMBIL TIMESTAMP DARI CSV
+                                        timestamp = datetime.now()
+                                        time_col = next((c for c in df.columns if 'time' in c.lower()), None)
+                                        if time_col and pd.notna(row.get(time_col)):
+                                            try:
+                                                timestamp = pd.to_datetime(row[time_col])
+                                            except Exception:
+                                                pass
+                                        
+                                        # Ambil nilai dasar
+                                        prx_val = get_value_from_row(row, 'Prx (dBm)', column_mapping)
+                                        temp_val = get_value_from_row(row, 'Temperature (C)', column_mapping)
+                                        wavelength_val = get_value_from_row(row, 'Wavelength', column_mapping)
+                                        pulse_width_val = get_value_from_row(row, 'Pulse Width (ns)', column_mapping)
+                                        
+                                        # Distance values
+                                        distance = {
+                                            'Distance 1': get_value_from_row(row, 'Distance 1', column_mapping),
+                                            'Distance 2': get_value_from_row(row, 'Distance 2', column_mapping),
+                                            'Distance 3': get_value_from_row(row, 'Distance 3', column_mapping),
+                                            'Distance 4': get_value_from_row(row, 'Distance 4', column_mapping),
+                                        }
+                                        
+                                        # Loss values
+                                        loss = {
+                                            'Loss 1': get_value_from_row(row, 'Loss 1', column_mapping),
+                                            'Loss 2': get_value_from_row(row, 'Loss 2', column_mapping),
+                                            'Loss 3': get_value_from_row(row, 'Loss 3', column_mapping),
+                                        }
+                                        
+                                        # Total-L values
+                                        total_l = {
+                                            'Total-L 1': get_value_from_row(row, 'Total-L 1', column_mapping),
+                                            'Total-L 2': get_value_from_row(row, 'Total-L 2', column_mapping),
+                                            'Total-L 3': get_value_from_row(row, 'Total-L 3', column_mapping),
+                                            'Total-L 4': get_value_from_row(row, 'Total-L 4', column_mapping),
+                                        }
+                                        
+                                        # Return values
+                                        return_vals = {
+                                            'Return 1': get_value_from_row(row, 'Return 1', column_mapping),
+                                            'Return 2': get_value_from_row(row, 'Return 2', column_mapping),
+                                            'Return 3': get_value_from_row(row, 'Return 3', column_mapping),
+                                            'Return 4': get_value_from_row(row, 'Return 4', column_mapping),
+                                        }
+                                        
+                                        # Hitung nilai yang hilang (Avg-L dan Avg-Total)
+                                        calculated = calculate_missing_values(row, column_mapping, distance, total_l)
+                                        
+                                        # Siapkan values untuk ML
+                                        otdr_values = {
+                                            'Prx (dBm)': prx_val,
+                                            'Distance 1': distance['Distance 1'],
+                                            'Distance 2': distance['Distance 2'],
+                                            'Distance 3': distance['Distance 3'],
+                                            'Distance 4': distance['Distance 4'],
+                                            'Loss 1': loss['Loss 1'],
+                                            'Loss 2': loss['Loss 2'],
+                                            'Loss 3': loss['Loss 3'],
+                                            'Total-L 1': total_l['Total-L 1'],
+                                            'Total-L 2': total_l['Total-L 2'],
+                                            'Total-L 3': total_l['Total-L 3'],
+                                            'Total-L 4': total_l['Total-L 4'],
+                                            'Avg-L 1': calculated.get('Avg-L 1', 0),
+                                            'Avg-L 2': calculated.get('Avg-L 2', 0),
+                                            'Avg-L 3': calculated.get('Avg-L 3', 0),
+                                            'Avg-L 4': calculated.get('Avg-L 4', 0),
+                                            'Avg-Total': calculated.get('Avg-Total', 0),
+                                            'Return 1': return_vals['Return 1'],
+                                            'Return 2': return_vals['Return 2'],
+                                            'Return 3': return_vals['Return 3'],
+                                            'Return 4': return_vals['Return 4'],
+                                        }
+                                        
+                                        # Prediksi ML
                                         try:
-                                            timestamp = pd.to_datetime(row[time_col])
-                                        except Exception:
-                                            pass
+                                            pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+                                        except Exception as e:
+                                            logger.error(f"ML prediction error: {e}")
+                                            pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+                                        
+                                        # Simpan ke database
+                                        record = OtdrResult(
+                                            user_id=None,
+                                            timestamp=timestamp,
+                                            prx=prx_val,
+                                            temperature=temp_val,
+                                            wavelength=wavelength_val,
+                                            pulse_width=pulse_width_val,
+                                            distance_1=distance['Distance 1'],
+                                            distance_2=distance['Distance 2'],
+                                            distance_3=distance['Distance 3'],
+                                            distance_4=distance['Distance 4'],
+                                            loss_1=loss['Loss 1'],
+                                            loss_2=loss['Loss 2'],
+                                            loss_3=loss['Loss 3'],
+                                            loss_4=None,
+                                            total_l_1=total_l['Total-L 1'],
+                                            total_l_2=total_l['Total-L 2'],
+                                            total_l_3=total_l['Total-L 3'],
+                                            total_l_4=total_l['Total-L 4'],
+                                            avg_l_1=calculated.get('Avg-L 1', 0),
+                                            avg_l_2=calculated.get('Avg-L 2', 0),
+                                            avg_l_3=calculated.get('Avg-L 3', 0),
+                                            avg_l_4=calculated.get('Avg-L 4', 0),
+                                            avg_total=calculated.get('Avg-Total', 0),
+                                            return_1=return_vals['Return 1'],
+                                            return_2=return_vals['Return 2'],
+                                            return_3=return_vals['Return 3'],
+                                            return_4=return_vals['Return 4'],
+                                            klasifikasi=pred.get("prediction"),
+                                            status=pred.get("status"),
+                                            confidence=pred.get("confidence"),
+                                            source="sheets",
+                                        )
+                                        db_sync.add(record)
+                                        saved += 1
                                     
-                                    # Ambil nilai dasar
-                                    prx_val = get_value_from_row(row, 'Prx (dBm)', column_mapping)
-                                    temp_val = get_value_from_row(row, 'Temperature (C)', column_mapping)
-                                    wavelength_val = get_value_from_row(row, 'Wavelength', column_mapping)
-                                    pulse_width_val = get_value_from_row(row, 'Pulse Width (ns)', column_mapping)
-                                    
-                                    # Distance values
-                                    distance = {
-                                        'Distance 1': get_value_from_row(row, 'Distance 1', column_mapping),
-                                        'Distance 2': get_value_from_row(row, 'Distance 2', column_mapping),
-                                        'Distance 3': get_value_from_row(row, 'Distance 3', column_mapping),
-                                        'Distance 4': get_value_from_row(row, 'Distance 4', column_mapping),
-                                    }
-                                    
-                                    # Loss values
-                                    loss = {
-                                        'Loss 1': get_value_from_row(row, 'Loss 1', column_mapping),
-                                        'Loss 2': get_value_from_row(row, 'Loss 2', column_mapping),
-                                        'Loss 3': get_value_from_row(row, 'Loss 3', column_mapping),
-                                    }
-                                    
-                                    # Total-L values
-                                    total_l = {
-                                        'Total-L 1': get_value_from_row(row, 'Total-L 1', column_mapping),
-                                        'Total-L 2': get_value_from_row(row, 'Total-L 2', column_mapping),
-                                        'Total-L 3': get_value_from_row(row, 'Total-L 3', column_mapping),
-                                        'Total-L 4': get_value_from_row(row, 'Total-L 4', column_mapping),
-                                    }
-                                    
-                                    # Return values
-                                    return_vals = {
-                                        'Return 1': get_value_from_row(row, 'Return 1', column_mapping),
-                                        'Return 2': get_value_from_row(row, 'Return 2', column_mapping),
-                                        'Return 3': get_value_from_row(row, 'Return 3', column_mapping),
-                                        'Return 4': get_value_from_row(row, 'Return 4', column_mapping),
-                                    }
-                                    
-                                    # Hitung nilai yang hilang (Avg-L dan Avg-Total)
-                                    calculated = calculate_missing_values(row, column_mapping, distance, total_l)
-                                    
-                                    # Siapkan values untuk ML
-                                    otdr_values = {
-                                        'Prx (dBm)': prx_val,
-                                        'Distance 1': distance['Distance 1'],
-                                        'Distance 2': distance['Distance 2'],
-                                        'Distance 3': distance['Distance 3'],
-                                        'Distance 4': distance['Distance 4'],
-                                        'Loss 1': loss['Loss 1'],
-                                        'Loss 2': loss['Loss 2'],
-                                        'Loss 3': loss['Loss 3'],
-                                        'Total-L 1': total_l['Total-L 1'],
-                                        'Total-L 2': total_l['Total-L 2'],
-                                        'Total-L 3': total_l['Total-L 3'],
-                                        'Total-L 4': total_l['Total-L 4'],
-                                        'Avg-L 1': calculated.get('Avg-L 1', 0),
-                                        'Avg-L 2': calculated.get('Avg-L 2', 0),
-                                        'Avg-L 3': calculated.get('Avg-L 3', 0),
-                                        'Avg-L 4': calculated.get('Avg-L 4', 0),
-                                        'Avg-Total': calculated.get('Avg-Total', 0),
-                                        'Return 1': return_vals['Return 1'],
-                                        'Return 2': return_vals['Return 2'],
-                                        'Return 3': return_vals['Return 3'],
-                                        'Return 4': return_vals['Return 4'],
-                                    }
-                                    
-                                    # Prediksi ML
-                                    try:
-                                        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-                                    except Exception as e:
-                                        logger.error(f"ML prediction error: {e}")
-                                        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-                                    
-                                    # Simpan ke database
-                                    record = OtdrResult(
-                                        user_id=None,
-                                        timestamp=timestamp,  # ← PAKAI TIMESTAMP DARI CSV!
-                                        prx=prx_val,
-                                        temperature=temp_val,
-                                        wavelength=wavelength_val,
-                                        pulse_width=pulse_width_val,
-                                        distance_1=distance['Distance 1'],
-                                        distance_2=distance['Distance 2'],
-                                        distance_3=distance['Distance 3'],
-                                        distance_4=distance['Distance 4'],
-                                        loss_1=loss['Loss 1'],
-                                        loss_2=loss['Loss 2'],
-                                        loss_3=loss['Loss 3'],
-                                        loss_4=None,
-                                        total_l_1=total_l['Total-L 1'],
-                                        total_l_2=total_l['Total-L 2'],
-                                        total_l_3=total_l['Total-L 3'],
-                                        total_l_4=total_l['Total-L 4'],
-                                        avg_l_1=calculated.get('Avg-L 1', 0),
-                                        avg_l_2=calculated.get('Avg-L 2', 0),
-                                        avg_l_3=calculated.get('Avg-L 3', 0),
-                                        avg_l_4=calculated.get('Avg-L 4', 0),
-                                        avg_total=calculated.get('Avg-Total', 0),
-                                        return_1=return_vals['Return 1'],
-                                        return_2=return_vals['Return 2'],
-                                        return_3=return_vals['Return 3'],
-                                        return_4=return_vals['Return 4'],
-                                        klasifikasi=pred.get("prediction"),
-                                        status=pred.get("status"),
-                                        confidence=pred.get("confidence"),
-                                        source="sheets",
-                                    )
-                                    db_sync.add(record)
-                                    saved += 1
-                                
-                                await db_sync.commit()
-                                logger.info(f"✅ Auto-sync success for {user.email}: {saved} records saved")
-                            else:
-                                logger.error(f"Failed to fetch sheet: {resp.status_code}")
-                    except Exception as e:
-                        logger.error(f"Auto-sync error for {user.email}: {e}")
-            
-            await asyncio.sleep(21600)  # 6 hours
-        except Exception as e:
-            logger.error(f"Auto-sync loop error: {e}")
-            await asyncio.sleep(3600)
+                                    await db_sync.commit()
+                                    logger.info(f"✅ Auto-sync success for {user.email}: {saved} records saved")
+                                else:
+                                    logger.error(f"Failed to fetch sheet: {resp.status_code}")
+                        except Exception as e:
+                            logger.error(f"Auto-sync error for {user.email}: {e}")
+                
+                await asyncio.sleep(21600)  # 6 hours
+            except Exception as e:
+                logger.error(f"Auto-sync loop error: {e}")
+                await asyncio.sleep(3600)
+    
+    asyncio.create_task(auto_sync_sheets())
+    logger.info("🔄 Auto-sync background task started (every 6 hours)")
+    
+    yield
+    
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="OptiM API", version="2.0.1", lifespan=lifespan)
