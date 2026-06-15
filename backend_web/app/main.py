@@ -21,7 +21,6 @@ from sqlalchemy import select, func
 
 from PIL import Image
 import pytesseract
-import easyocr
 import cv2
 import requests
 import tempfile
@@ -42,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-easyocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+
 
 # Tesseract path - auto detect (keep for fallback)
 if os.name == 'nt':  # Windows
@@ -360,7 +359,7 @@ def tesseract_extract(image_bytes: bytes) -> str:
     """
     Nama fungsi tetap dipertahankan supaya endpoint
     tidak perlu diubah.
-    OCR engine diganti menjadi EasyOCR.
+    OCR engine menggunakan Tesseract.
     """
 
     best_text = ""
@@ -369,49 +368,44 @@ def tesseract_extract(image_bytes: bytes) -> str:
     try:
         images = preprocess_image_simple(image_bytes)
 
+        configs = [
+            "--oem 3 --psm 6",
+            "--oem 3 --psm 4",
+            "--oem 3 --psm 11",
+            "--oem 1 --psm 6",
+            "--oem 3 --psm 3",
+        ]
+
         for img in images:
+            for config in configs:
+                try:
+                    text = pytesseract.image_to_string(img, config=config)
+                    decimal_score = len(re.findall(r'\d+\.\d{4,}', text))
+                    loss_score = len(re.findall(r'0\.\d{2}', text))
+                    total_score = decimal_score + loss_score * 2
 
-            img_np = np.array(img)
+                    if total_score > best_score:
+                        best_score = total_score
+                        best_text = text
+                except Exception:
+                    continue
 
+        custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist="0123456789.- "'
+        for img in images[:2]:
             try:
-                results = easyocr_reader.readtext(
-                    img_np,
-                    detail=1,
-                    paragraph=False
-                )
-
-                text_lines = []
-
-                for item in results:
-                    text_lines.append(item[1])
-
-                text = "\n".join(text_lines)
-
-                decimal_score = len(
-                    re.findall(r'\d+\.\d{4,}', text)
-                )
-
-                loss_score = len(
-                    re.findall(r'0\.\d{2}', text)
-                )
-
-                total_score = decimal_score + (loss_score * 2)
-
-                if total_score > best_score:
-                    best_score = total_score
+                text = pytesseract.image_to_string(img, config=custom_config)
+                score = len(re.findall(r'\d+\.\d{3,}', text))
+                if score > best_score:
+                    best_score = score
                     best_text = text
+            except:
+                pass
 
-            except Exception as e:
-                logger.error(f"EasyOCR error: {e}")
-
-        logger.info(
-            f"EasyOCR extracted {len(best_text)} chars, score={best_score}"
-        )
-
+        logger.info(f"Tesseract extracted {len(best_text)} chars, score={best_score}")
         return best_text
 
     except Exception as e:
-        logger.error(f"EasyOCR fatal error: {e}")
+        logger.error(f"Tesseract error: {e}")
         return ""
 
 def ocr_space_extract(image_bytes: bytes) -> str:
