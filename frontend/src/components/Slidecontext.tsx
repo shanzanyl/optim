@@ -11,7 +11,7 @@ interface SlideContextType {
   prevSlide: () => void;
   autoPlay: boolean;
   setAutoPlay: (auto: boolean) => void;
-  resetSlideState: () => void;  // 🔥 Baru: fungsi untuk reset
+  resetSlideState: () => void;
 }
 
 const SlideContext = createContext<SlideContextType | undefined>(undefined);
@@ -29,18 +29,17 @@ interface SlideProviderProps {
 }
 
 export const SlideProvider: React.FC<SlideProviderProps> = ({ children }) => {
-  // Load saved state from localStorage
+  // 🔥 PERBAIKAN: Load currentIndex dari localStorage
   const [currentIndex, setCurrentIndex] = useState(() => {
     const saved = localStorage.getItem('slide_current_index');
-    // 🔥 Jika saved index terlalu besar atau tidak valid, mulai dari 0
     const parsed = saved ? parseInt(saved, 10) : 0;
     return isNaN(parsed) ? 0 : parsed;
   });
-  const [totalData, setTotalData] = useState(() => {
-    const saved = localStorage.getItem('slide_total_data');
-    const parsed = saved ? parseInt(saved, 10) : 0;
-    return isNaN(parsed) ? 0 : parsed;
-  });
+  
+  // 🔥 PERBAIKAN: totalData TIDAK disimpan ke localStorage (selalu mulai dari 0)
+  const [totalData, setTotalData] = useState(0);
+  
+  // 🔥 PERBAIKAN: Load autoPlay dari localStorage
   const [autoPlay, setAutoPlay] = useState(() => {
     const saved = localStorage.getItem('slide_auto_play');
     return saved ? saved === 'true' : true;
@@ -49,20 +48,21 @@ export const SlideProvider: React.FC<SlideProviderProps> = ({ children }) => {
   // 🔥 Fungsi untuk reset slide state
   const resetSlideState = () => {
     localStorage.removeItem('slide_current_index');
-    localStorage.removeItem('slide_total_data');
+    localStorage.removeItem('slide_auto_play');
     setCurrentIndex(0);
     setTotalData(0);
+    setAutoPlay(true);
   };
 
-  // Save to localStorage whenever state changes
+  // 🔥 PERBAIKAN: Hanya simpan currentIndex ke localStorage
   useEffect(() => {
     localStorage.setItem('slide_current_index', currentIndex.toString());
   }, [currentIndex]);
 
-  useEffect(() => {
-    localStorage.setItem('slide_total_data', totalData.toString());
-  }, [totalData]);
+  // 🔥 PERBAIKAN: HAPUS useEffect untuk menyimpan totalData!
+  // totalData TIDAK perlu disimpan karena akan dihitung ulang dari data
 
+  // 🔥 PERBAIKAN: Simpan autoPlay ke localStorage
   useEffect(() => {
     localStorage.setItem('slide_auto_play', autoPlay.toString());
   }, [autoPlay]);
@@ -90,7 +90,7 @@ export const SlideProvider: React.FC<SlideProviderProps> = ({ children }) => {
         prevSlide,
         autoPlay,
         setAutoPlay,
-        resetSlideState,  // 🔥 Ekspos fungsi reset
+        resetSlideState,
       }}
     >
       {children}

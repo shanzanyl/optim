@@ -254,10 +254,12 @@ const Overview = ({ onLogin }: OverviewProps) => {
                           }}
                           placeholder="Masukkan kata sandi"
                         />
+                        {/* PERBAIKAN: Tombol show/hide password dengan aria-label dan touch target yang cukup */}
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                          aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>

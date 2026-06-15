@@ -86,11 +86,11 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [totalData, prevTotalData]);
 
-  useEffect(() => {
-    if (allData.length > 0 && currentIndex >= allData.length) {
-      setCurrentIndex(0);
-    }
-  }, [allData.length, currentIndex, setCurrentIndex]);
+  // useEffect(() => {
+  //   if (allData.length > 0 && currentIndex >= allData.length) {
+  //     setCurrentIndex(allData.length - 1);
+  //   }
+  // }, [allData.length, currentIndex, setCurrentIndex]);
 
   useEffect(() => {
     setTotalData(allData.length);
