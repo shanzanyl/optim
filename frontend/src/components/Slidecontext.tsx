@@ -29,23 +29,20 @@ interface SlideProviderProps {
 }
 
 export const SlideProvider: React.FC<SlideProviderProps> = ({ children }) => {
-  // 🔥 PERBAIKAN: Load currentIndex dari localStorage
+  // Load dari localStorage
   const [currentIndex, setCurrentIndex] = useState(() => {
     const saved = localStorage.getItem('slide_current_index');
     const parsed = saved ? parseInt(saved, 10) : 0;
     return isNaN(parsed) ? 0 : parsed;
   });
   
-  // 🔥 PERBAIKAN: totalData TIDAK disimpan ke localStorage (selalu mulai dari 0)
   const [totalData, setTotalData] = useState(0);
   
-  // 🔥 PERBAIKAN: Load autoPlay dari localStorage
   const [autoPlay, setAutoPlay] = useState(() => {
     const saved = localStorage.getItem('slide_auto_play');
     return saved ? saved === 'true' : true;
   });
 
-  // 🔥 Fungsi untuk reset slide state
   const resetSlideState = () => {
     localStorage.removeItem('slide_current_index');
     localStorage.removeItem('slide_auto_play');
@@ -54,15 +51,20 @@ export const SlideProvider: React.FC<SlideProviderProps> = ({ children }) => {
     setAutoPlay(true);
   };
 
-  // 🔥 PERBAIKAN: Hanya simpan currentIndex ke localStorage
+  // 🔥 PERBAIKAN: Ketika totalData berubah, jangan reset currentIndex jika masih valid
+  useEffect(() => {
+    if (totalData > 0 && currentIndex >= totalData) {
+      // Jika currentIndex melebihi totalData, pindah ke data terakhir
+      setCurrentIndex(totalData - 1);
+    }
+  }, [totalData, currentIndex]);
+
+  // Simpan currentIndex ke localStorage
   useEffect(() => {
     localStorage.setItem('slide_current_index', currentIndex.toString());
   }, [currentIndex]);
 
-  // 🔥 PERBAIKAN: HAPUS useEffect untuk menyimpan totalData!
-  // totalData TIDAK perlu disimpan karena akan dihitung ulang dari data
-
-  // 🔥 PERBAIKAN: Simpan autoPlay ke localStorage
+  // Simpan autoPlay ke localStorage
   useEffect(() => {
     localStorage.setItem('slide_auto_play', autoPlay.toString());
   }, [autoPlay]);

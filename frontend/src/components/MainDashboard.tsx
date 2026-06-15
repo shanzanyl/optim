@@ -86,15 +86,17 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [totalData, prevTotalData]);
 
+  // 🔥 PERBAIKAN: HAPUS/COMMENT useEffect yang mereset currentIndex
   // useEffect(() => {
   //   if (allData.length > 0 && currentIndex >= allData.length) {
   //     setCurrentIndex(allData.length - 1);
   //   }
   // }, [allData.length, currentIndex, setCurrentIndex]);
 
-  useEffect(() => {
-    setTotalData(allData.length);
-  }, [allData.length, setTotalData]);
+  // 🔥 PERBAIKAN: HAPUS useEffect ini - pindahkan setTotalData ke fetchAllData
+  // useEffect(() => {
+  //   setTotalData(allData.length);
+  // }, [allData.length, setTotalData]);
 
   useEffect(() => {
     if (!autoPlay || allData.length === 0) return;
@@ -172,8 +174,11 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
         setAllData(sorted);
+        // 🔥 PERBAIKAN: Set totalData di sini, bukan di useEffect
+        setTotalData(sorted.length);
       } else {
         setAllData([]);
+        setTotalData(0);
         // 🔥 PERBAIKAN 2: HAPUS setCurrentIndex(0) agar tidak reset saat balik dari halaman lain
         // setCurrentIndex(0);
       }
@@ -193,7 +198,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       fetchAllData();
     }
   }, [refreshTrigger]);
-
+  
   const handleSync = async () => {
     setSyncing(true);
     try {
@@ -256,27 +261,42 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   const isGangguan = currentRecord?.klasifikasi && currentRecord.klasifikasi !== 'Normal';
 
-  const realTimeLabels15 = getRealTimeLabels(15);
-  const realTimeLabels6 = getRealTimeLabels(6);
+  // 🔥 HAPUS getRealTimeLabels, ganti dengan fungsi ini
+const generateMinuteLabels = (count: number) => {
+  const now = new Date();
+  const labels = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const time = new Date(now.getTime() - i * 60 * 1000);
+    let hours = time.getHours();
+    const minutes = String(time.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12; // convert ke 12-hour format
+    const hoursStr = String(hours).padStart(2, '0');
+    labels.push(`${hoursStr}.${minutes} ${ampm}`);
+  }
+  return labels;
+};
 
-  // 🔥 PERUBAHAN 1: PRx chart hanya 6 titik (sama seperti loss/return)
-  const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
-    time: realTimeLabels6[idx],
-    prx: r.prx || -14,
-  }));
+// 🔥 GANTI chartData dan miniChartData
+const minuteLabels6 = generateMinuteLabels(6); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
 
-  const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
-    time: realTimeLabels6[idx],
-    loss_1: r.loss_1 || 0,
-    loss_2: r.loss_2 || 0,
-    loss_3: r.loss_3 || 0,
-    loss_4: r.loss_4 || 0,
-    return_1: r.return_1 || 0,
-    return_2: r.return_2 || 0,
-    return_3: r.return_3 || 0,
-    return_4: r.return_4 || 0,
-    prx: r.prx || -14,
-  }));
+const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
+  time: minuteLabels6[idx],
+  prx: r.prx || -14,
+}));
+
+const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
+  time: minuteLabels6[idx],
+  loss_1: r.loss_1 || 0,
+  loss_2: r.loss_2 || 0,
+  loss_3: r.loss_3 || 0,
+  loss_4: r.loss_4 || 0,
+  return_1: r.return_1 || 0,
+  return_2: r.return_2 || 0,
+  return_3: r.return_3 || 0,
+  return_4: r.return_4 || 0,
+  prx: r.prx || -14,
+}));
 
   const lossColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
   const returnColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
@@ -323,14 +343,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 : '⏸ Paused - klik Play untuk lanjut'}
             </p> */}
           </div>
-          {/* <button
+          <button
             onClick={handleSync}
             disabled={syncing}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600
               rounded-xl text-xs font-bold uppercase flex items-center gap-2 whitespace-nowrap"
           >
             {syncing ? 'Syncing...' : 'Sync from Sheets'}
-          </button> */}
+          </button>
         </div>
 
         {/* Summary Stats */}

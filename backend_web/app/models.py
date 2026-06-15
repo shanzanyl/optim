@@ -71,7 +71,7 @@ class OtdrResult(Base):
     # Metadata
     source      = Column(String(20), default="sheets")
     raw_text    = Column(Text, nullable=True)
-    timestamp   = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), nullable=True)  # ← hapus server_default
     telegram_alert_sent = Column(Boolean, default=False, server_default="false")
 
     owner = relationship("User", back_populates="results")

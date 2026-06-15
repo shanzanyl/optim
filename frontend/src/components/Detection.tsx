@@ -167,21 +167,21 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
   const [prevTotalData, setPrevTotalData] = useState(0);
 
-  useEffect(() => {
-    if (totalData !== prevTotalData) {
-      setPrevTotalData(totalData);
-    }
-  }, [totalData, prevTotalData]);
+  // useEffect(() => {
+  //   if (totalData !== prevTotalData) {
+  //     setPrevTotalData(totalData);
+  //   }
+  // }, [totalData, prevTotalData]);
 
-  useEffect(() => {
-    if (allHistory.length > 0 && currentIndex >= allHistory.length) {
-      setCurrentIndex(0);
-    }
-  }, [allHistory.length, currentIndex, setCurrentIndex]);
+  // useEffect(() => {
+  //   if (allHistory.length > 0 && currentIndex >= allHistory.length) {
+  //     setCurrentIndex(0);
+  //   }
+  // }, [allHistory.length, currentIndex, setCurrentIndex]);
 
-  useEffect(() => {
-    setTotalData(allHistory.length);
-  }, [allHistory.length, setTotalData]);
+  // useEffect(() => {
+  //   setTotalData(allHistory.length);
+  // }, [allHistory.length, setTotalData]);
 
   // 🔥 PERBAIKAN 1: Effect untuk trigger Telegram Alert (dipisah dari autoPlay)
   useEffect(() => {
@@ -335,6 +335,10 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
   const displayedHistory = [...allHistory].reverse();
   const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
+
+  function handleSync(event: React.MouseEvent<HTMLButtonElement>): void {
+    throw new Error('Function not implemented.');
+  }
 
   return (
     <div className="min-h-screen bg-[#14213d] text-slate-300 font-sans pb-20 w-full">

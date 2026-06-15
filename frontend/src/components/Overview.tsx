@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, Eye, EyeOff, Loader2, Activity, TrendingUp } from 'lucide-react';
-import backgroundImage from "../assets/background.png";
+import backgroundImage from "../assets/background.webp";
 
 interface OverviewProps {
   onLogin: (userData: any, isAdmin: boolean) => void;
