@@ -2160,7 +2160,7 @@ async def detect_manual(
                     status=status_str,
                     loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']], # type: ignore
                     rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']], # pyright: ignore[reportUndefinedVariable]
-                    prx=final_prx,
+                    prx=final_prx, # type: ignore
                     distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']], # type: ignore
                     timestamp=record.timestamp
                 )

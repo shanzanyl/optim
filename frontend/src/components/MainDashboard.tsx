@@ -132,6 +132,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     });
   }, [currentIndex, allData]);
 
+  // 🔥 PERBAIKAN 1: Pastikan autoPlay = true saat ada data
+  useEffect(() => {
+    if (allData.length > 0 && !autoPlay) {
+      setAutoPlay(true);
+    }
+  }, [allData.length, autoPlay, setAutoPlay]);
+
   // Trigger Telegram alert saat slide monitoring berpindah ke data warning/critical
   useEffect(() => {
     if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
@@ -167,7 +174,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         setAllData(sorted);
       } else {
         setAllData([]);
-        setCurrentIndex(0);
+        // 🔥 PERBAIKAN 2: HAPUS setCurrentIndex(0) agar tidak reset saat balik dari halaman lain
+        // setCurrentIndex(0);
       }
     } catch (error) {
       console.error('Fetch error:', error);
