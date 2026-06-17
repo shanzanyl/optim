@@ -1,4 +1,4 @@
-# main.py - VERSION FIXED (CHATBOT + TIMESTAMP + OCR)
+# main.py - VERSION FIXED (CHATBOT + TIMESTAMP + OCR + LOCAL KNOWLEDGE)
 from datetime import datetime, timedelta
 import os
 import re
@@ -747,7 +747,275 @@ def make_db_aware_response(user_message: str, today_total: int, today_g: int, to
         return get_local_chatbot_response(user_message)
 
 # ═══════════════════════════════════════════════════════════════════
-# CHAT ENDPOINT (DIPERBAIKI - BACA SHEETS)
+# LOCAL KNOWLEDGE BASE (FALLBACK UNTUK CHATBOT)
+# ═══════════════════════════════════════════════════════════════════
+
+LOCAL_KNOWLEDGE = {
+    "loss": {
+        "keywords": ["loss", "redaman", "attenuation", "loss km"],
+        "response": """
+            <strong>Apa itu Loss (Redaman)?</strong><br><br>
+            Loss atau redaman adalah <strong>penurunan kekuatan sinyal</strong> saat melewati serat optik. 
+            Diukur dalam satuan <strong>dB (decibel)</strong>.<br><br>
+            <strong>Nilai Normal:</strong><br>
+            • < 0.25 dB/km = Sangat Baik ✅<br>
+            • 0.25 - 0.35 dB/km = Normal 🟡<br>
+            • > 0.35 dB/km = Bermasalah 🔴<br><br>
+            <strong>Penyebab Loss Tinggi:</strong><br>
+            • Konektor kotor<br>
+            • Tekukan kabel<br>
+            • Sambungan buruk<br>
+            • Kabel putus (Fiber Cut)<br><br>
+            <strong>Cara Mengecek di OptiM:</strong><br>
+            Lihat grafik <strong>"Loss per KM"</strong> di Dashboard. 
+            Jika melebihi garis merah (threshold 1.2 dB), itu pertanda gangguan.
+        """
+    },
+    "return_loss": {
+        "keywords": ["return loss", "orl", "return", "pantulan"],
+        "response": """
+            <strong>Apa itu Return Loss (ORL)?</strong><br><br>
+            Return Loss atau <strong>Optical Return Loss (ORL)</strong> adalah 
+            <strong>besaran sinyal yang dipantulkan kembali</strong> ke sumber.<br><br>
+            <strong>Nilai Normal:</strong><br>
+            • < -45 dB = Baik ✅<br>
+            • -45 s/d -35 dB = Perlu Diwaspadai 🟡<br>
+            • > -35 dB = Buruk 🔴<br><br>
+            <strong>Mengapa Return Loss Penting?</strong><br>
+            • Pantulan tinggi dapat merusak laser sumber<br>
+            • Mengganggu kualitas sinyal<br>
+            • Menandakan ada masalah di konektor atau sambungan<br><br>
+            <strong>Di OptiM:</strong><br>
+            Cek grafik <strong>"Return Loss per KM"</strong> di Dashboard.
+        """
+    },
+    "prx": {
+        "keywords": ["prx", "received power", "daya terima", "rx power"],
+        "response": """
+            <strong>Apa itu PRX (Received Power)?</strong><br><br>
+            PRX atau <strong>Received Power</strong> adalah <strong>daya sinyal yang diterima</strong> 
+            oleh perangkat penerima di ujung jaringan.<br><br>
+            <strong>Nilai Normal:</strong><br>
+            • -14 s/d -20 dBm = Sinyal Kuat ✅<br>
+            • -20 s/d -24 dBm = Sinyal Cukup 🟡<br>
+            • < -24 dBm = Sinyal Lemah 🔴<br><br>
+            <strong>Penyebab PRX Rendah:</strong><br>
+            • Loss tinggi di sepanjang jalur<br>
+            • Konektor kotor<br>
+            • Jarak terlalu jauh<br>
+            • Fiber Cut<br><br>
+            <strong>Di OptiM:</strong><br>
+            Cek grafik <strong>"Signal Power (PRX) Monitoring"</strong> di Dashboard.
+        """
+    },
+    "jenis_gangguan": {
+        "keywords": ["gangguan", "jenis gangguan", "klasifikasi", "fiber cut", "bending", "dirty", "splice", "gap", "nearly"],
+        "response": """
+            <strong>Jenis-Jenis Gangguan Fiber Optik</strong><br><br>
+            <strong>1. Bending (Tekukan Makro)</strong> 🔄<br>
+            Terjadi saat kabel tertekuk melebihi radius minimum.<br>
+            <strong>Solusi:</strong> Periksa jalur kabel, rapihkan di OTB.<br><br>
+            
+            <strong>2. Dirty Connector (Konektor Kotor)</strong> 🧹<br>
+            Masalah paling umum! Debu di ujung konektor.<br>
+            <strong>Solusi:</strong> Bersihkan dengan Fiber Cleaning Cassette.<br><br>
+            
+            <strong>3. Fiber Cut (Kabel Putus)</strong> ❌<br>
+            Gangguan kritis! Sinyal hilang total.<br>
+            <strong>Solusi:</strong> Cari titik putus dengan OTDR, sambung ulang.<br><br>
+            
+            <strong>4. Bad Splice (Sambungan Buruk)</strong> 🔗<br>
+            Proses fusion splicing tidak sempurna.<br>
+            <strong>Solusi:</strong> Potong dan splicing ulang.<br><br>
+            
+            <strong>5. Air Gap (Celah Udara)</strong> 💨<br>
+            Ada ruang udara di antara konektor.<br>
+            <strong>Solusi:</strong> Pastikan konektor terkunci rapat.<br><br>
+            
+            <strong>6. Nearly Cut (Hampir Putus)</strong> ⚠️<br>
+            Kondisi kritis! Sinyal sangat lemah.<br>
+            <strong>Solusi:</strong> Segera jadwalkan pemeliharaan preventif.
+        """
+    },
+    "upload_foto": {
+        "keywords": ["upload", "foto", "gambar", "ocr", "detection", "cara pakai", "tutorial"],
+        "response": """
+            <strong>Cara Menggunakan Fitur Upload Foto OTDR</strong><br><br>
+            <strong>Langkah 1:</strong> Buka halaman <strong>Detection</strong><br>
+            <strong>Langkah 2:</strong> Klik tombol <strong>"Upload Foto OTDR"</strong><br>
+            <strong>Langkah 3:</strong> Pilih foto hasil printout OTDR<br>
+            <strong>Langkah 4:</strong> Tunggu sistem memproses dengan OCR & ML<br>
+            <strong>Langkah 5:</strong> Hasil klasifikasi akan muncul otomatis<br><br>
+            <strong>Tips:</strong><br>
+            • Pastikan foto <strong>jelas</strong> dan <strong>terang</strong><br>
+            • Tabel OTDR harus <strong>terbaca</strong> (tidak terpotong)<br>
+            • Hasil terbaik: foto dari <strong>printout OTDR</strong> langsung<br><br>
+            <strong>Fitur ini berguna untuk:</strong><br>
+            • Teknisi di lapangan yang ingin cepat cek hasil OTDR<br>
+            • Analisis cepat tanpa input manual
+        """
+    },
+    "input_manual": {
+        "keywords": ["manual input", "input manual", "detection manual", "isi manual"],
+        "response": """
+            <strong>Cara Menggunakan Fitur Input Manual</strong><br><br>
+            <strong>Langkah 1:</strong> Buka halaman <strong>Detection</strong><br>
+            <strong>Langkah 2:</strong> Pilih tab <strong>"Manual Input"</strong><br>
+            <strong>Langkah 3:</strong> Isi semua parameter OTDR:<br>
+            • PRX (dBm)<br>
+            • Loss 1-4 (dB)<br>
+            • Return 1-4 (dB)<br>
+            • Distance 1-4 (km)<br>
+            <strong>Langkah 4:</strong> Klik <strong>"Proses Data"</strong><br><br>
+            <strong>Kapan pakai fitur ini?</strong><br>
+            • Saat foto OTDR tidak jelas<br>
+            • Ingin menguji data tertentu<br>
+            • Ingin mensimulasikan skenario gangguan
+        """
+    },
+    "dashboard": {
+        "keywords": ["dashboard", "monitoring", "data", "statistik"],
+        "response": """
+            <strong>Fitur Dashboard OptiM</strong><br><br>
+            <strong>1. Total Measurement</strong><br>
+            Menampilkan jumlah total data yang sudah diproses.<br><br>
+            <strong>2. Status Normal vs Gangguan</strong><br>
+            Memisahkan data normal dan yang terdeteksi gangguan.<br><br>
+            <strong>3. Loss per KM</strong><br>
+            Grafik redaman di setiap kilometer (1-4).<br>
+            Garis merah = batas aman 1.2 dB.<br><br>
+            <strong>4. Return Loss per KM</strong><br>
+            Grafik pantulan sinyal di setiap kilometer.<br><br>
+            <strong>5. Signal Power (PRX)</strong><br>
+            Grafik daya terima. Garis merah = batas aman -24 dBm.<br><br>
+            <strong>6. Fault Distribution</strong><br>
+            Pie chart distribusi jenis gangguan.<br><br>
+            <strong>7. Network Topology</strong><br>
+            Visualisasi jaringan fiber optik.<br><br>
+            <strong>8. Prediction Results Table</strong><br>
+            Tabel detail semua hasil prediksi.
+        """
+    }
+}
+
+def format_fault_detail(faults_map: dict) -> str:
+    """Format detail gangguan menjadi HTML"""
+    if not faults_map:
+        return "✅ Tidak ada gangguan terdeteksi"
+    
+    html = "<ul style='margin: 4px 0; padding-left: 20px;'>"
+    for (klasifikasi, status), count in faults_map.items():
+        emoji = "🔴" if status == "Critical" else "🟡" if status == "Warning" else "🟢"
+        html += f"<li><strong>{klasifikasi}</strong> ({status}): {count} kali {emoji}</li>"
+    html += "</ul>"
+    return html
+
+def get_rekap_response(query: str, context: dict) -> str | None:
+    """Buat response rekap berdasarkan query dan context"""
+    query_lower = query.lower()
+    
+    # Cek jenis rekap yang diminta
+    rekap_type = None
+    
+    if any(x in query_lower for x in ["hari ini", "today", "sekarang", "hari"]):
+        rekap_type = "hari_ini"
+    elif any(x in query_lower for x in ["kemarin", "yesterday"]):
+        rekap_type = "kemarin"
+    elif any(x in query_lower for x in ["7 hari", "minggu", "seminggu", "week"]):
+        rekap_type = "7_hari"
+    elif any(x in query_lower for x in ["30 hari", "bulan", "sebulan", "month"]):
+        rekap_type = "30_hari"
+    elif any(x in query_lower for x in ["semua", "keseluruhan", "total", "all", "laporan"]):
+        rekap_type = "semua"
+    else:
+        return None
+    
+    # Ambil data dari context
+    total = context.get("Total Data", 0)
+    normal = context.get("Data Normal", 0)
+    gangguan = context.get("Data Gangguan", 0)
+    fault_detail = context.get("Rincian Gangguan", "Tidak ada data")
+    
+    # Format detail
+    detail = fault_detail if fault_detail else "✅ Tidak ada gangguan"
+    
+    # Status
+    status = "🟢 Normal" if gangguan == 0 else "🟡 Ada Gangguan" if gangguan < 5 else "🔴 Banyak Gangguan"
+    
+    # Trend atau status tambahan
+    trend = ""
+    performance = ""
+    
+    if rekap_type in ["7_hari", "30_hari"]:
+        if gangguan > 0:
+            trend = "⚠️ Masih ada gangguan yang perlu ditangani"
+            if gangguan > 5:
+                trend = "🚨 Gangguan cukup tinggi, perlu evaluasi menyeluruh"
+        else:
+            trend = "✅ Kondisi jaringan stabil, tidak ada gangguan"
+    
+    if rekap_type == "semua":
+        if gangguan == 0:
+            performance = "✅ Sistem berjalan dengan sangat baik!"
+        elif gangguan < total * 0.1:
+            performance = "🟢 Performa baik, gangguan minimal (< 10%)"
+        elif gangguan < total * 0.2:
+            performance = "🟡 Perlu perhatian, gangguan sedang (10-20%)"
+        else:
+            performance = "🔴 Perlu evaluasi serius, gangguan tinggi (> 20%)"
+    
+    # Nama rekap
+    rekap_names = {
+        "hari_ini": "Hari Ini",
+        "kemarin": "Kemarin",
+        "7_hari": "7 Hari Terakhir",
+        "30_hari": "30 Hari Terakhir",
+        "semua": "Keseluruhan Sistem OptiM"
+    }
+    
+    rekap_name = rekap_names.get(rekap_type, "Rekap")
+    
+    # Bangun response
+    response = f"""
+        <strong>📊 Rekap Gangguan {rekap_name}</strong><br><br>
+        Total Pengukuran: <strong>{total}</strong><br>
+        Gangguan Terdeteksi: <strong>{gangguan}</strong><br>
+        Normal: <strong>{normal}</strong><br><br>
+        <strong>📋 Rincian Gangguan:</strong><br>
+        {detail}
+    """
+    
+    if trend:
+        response += f"<br><strong>📈 Trend:</strong> {trend}"
+    
+    if performance:
+        response += f"<br><strong>📈 Kinerja:</strong> {performance}"
+    
+    if not trend and not performance:
+        response += f"<br><br><strong>📈 Status:</strong> {status}"
+    
+    return response
+
+def get_local_knowledge_response(query: str, context: dict = None) -> str | None:
+    """Cari jawaban dari local knowledge base berdasarkan kata kunci"""
+    query_lower = query.lower()
+    
+    # 🔥 CEK REKAP GANGGUAN DULU (prioritas tinggi)
+    if context:
+        rekap_response = get_rekap_response(query, context)
+        if rekap_response:
+            return rekap_response
+    
+    # Cek knowledge lainnya
+    for key, data in LOCAL_KNOWLEDGE.items():
+        for keyword in data["keywords"]:
+            if keyword in query_lower:
+                return data["response"]
+    
+    return None
+
+# ═══════════════════════════════════════════════════════════════════
+# CHAT ENDPOINT (DIPERBAIKI - DENGAN LOCAL KNOWLEDGE BASE)
 # ═══════════════════════════════════════════════════════════════════
 
 @app.post("/api/chat")
@@ -762,10 +1030,49 @@ async def chat(
     if not user_message:
         return {"response": "Pesan tidak boleh kosong.", "source": "error"}
     
+    # 🔥 CEK LOCAL KNOWLEDGE BASE DULU
+    local_response = get_local_knowledge_response(user_message, context_state)
+    if local_response:
+        logger.info(f"[CHAT] Menggunakan Local Knowledge untuk: {user_message[:50]}")
+        return {"response": local_response, "source": "local_knowledge"}
+    
+    # 🔥 COBA GEMINI AI
+    try:
+        if gemini_client and GEMINI_API_KEY:
+            try:
+                # Coba pakai Gemini
+                prompt = f"""
+                Anda adalah asisten OptiM. Jawab pertanyaan ini dengan ringkas dan informatif.
+                Pertanyaan: {user_message}
+                Context: {json.dumps(context_state, indent=2)}
+                """
+                
+                # Pakai client yang sesuai
+                if gemini_model_name == "gemini-2.5-flash":
+                    response = gemini_client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt
+                    )
+                    reply = response.text
+                else:
+                    # Legacy client
+                    reply = gemini_client.generate_content(prompt).text
+                
+                if reply:
+                    logger.info(f"[CHAT] Gemini AI berhasil merespon")
+                    return {"response": reply, "source": "gemini_ai"}
+                    
+            except Exception as e:
+                logger.warning(f"[CHAT] Gemini AI error: {e}")
+    
+    except Exception as e:
+        logger.warning(f"[CHAT] Gemini AI tidak tersedia: {e}")
+    
+    # 🔥 FALLBACK: DB Aware Response
     try:
         now_wib = datetime.utcnow() + timedelta(hours=7)
         
-        # 🔥 FIX: Ambil data sheets (source="sheets") + data user jika login
+        # Ambil data sheets (source="sheets") + data user jika login
         if current_user:
             stmt_all = select(OtdrResult).where(
                 (OtdrResult.source == "sheets") | 
@@ -852,19 +1159,11 @@ async def chat(
         month_detail = fmt_detail(month_faults)
         all_detail = fmt_detail(all_faults)
         
-        # Daily records untuk fallback
-        class DailyRecordStub:
-            def __init__(self, date_str, klasifikasi, status, count):
-                self.date_str = date_str
-                self.klasifikasi = klasifikasi
-                self.status = status
-                self.count = count
-        
         daily_records = []
         history_records = list(reversed(all_records))[:150]
         
     except Exception as db_err:
-        logger.error(f"DB error in chat: {db_err}")
+        logger.error(f"[CHAT] DB error: {db_err}")
         return {"response": get_local_chatbot_response(user_message), "source": "local_fallback"}
     
     reply = make_db_aware_response(
@@ -874,6 +1173,18 @@ async def chat(
         total_data, all_g_total, all_detail, latest,
         daily_records, history_records
     )
+    
+    # Kalau reply masih default, kasih response standar
+    if reply == BOT_RESPONSES["default"]:
+        reply = """
+            <strong>Maaf, saya tidak bisa menjawab pertanyaan tersebut.</strong><br><br>
+            Saya bisa membantu Anda dengan:<br>
+            • Penjelasan <strong>Loss</strong>, <strong>Return Loss</strong>, dan <strong>PRX</strong><br>
+            • Jenis-jenis <strong>gangguan</strong> fiber optik<br>
+            • Cara menggunakan fitur <strong>Upload Foto</strong> dan <strong>Input Manual</strong><br>
+            • Analisis <strong>data dashboard</strong> dan <strong>statistik</strong>
+        """
+    
     return {"response": reply, "source": "db_fallback"}
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1397,8 +1708,6 @@ async def sync_from_sheets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from datetime import datetime, timedelta
-    
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(SHEET_URL, timeout=30, follow_redirects=True)
@@ -1411,11 +1720,16 @@ async def sync_from_sheets(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal parse CSV: {str(e)}")
     
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [c.strip() for c in df.columns]
+
+    df.columns = [c.strip() for c in df.columns]
+
+    print("========== KOLOM GOOGLE SHEETS ==========")
+    print(df.columns.tolist())
+
+    print("========== CEK AVG-TOTAL BARIS PERTAMA ==========")
+    print(df.iloc[0]["Avg-Total"])
     
-    logger.info(f"📊 Found columns: {df.columns.tolist()}")
-    
-    # Hapus data sheets milik user ini
     existing = await db.execute(
         select(OtdrResult).where(
             OtdrResult.user_id == current_user.id,
@@ -1429,17 +1743,8 @@ async def sync_from_sheets(
     saved = 0
     errors = 0
     
-    # 🔥 BASE TIME: 1 Januari 2026 jam 08:00:00
-    # Setiap baris +1 menit, PASTI BERBEDA
-    base_time = datetime(2026, 6, 10, 7, 0, 0)
-    
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         try:
-            # 🔥 TIMESTAMP BERDASARKAN INDEX (PASTI BEDA SEMUA)
-            timestamp = base_time + timedelta(minutes=idx)
-
-            logger.info(f"🔴 ROW {idx}: TIMESTAMP YANG DISIMPAN = {timestamp}")
-            
             def g(col, default=0.0):
                 try:
                     val = row.get(col, default)
@@ -1462,10 +1767,13 @@ async def sync_from_sheets(
             }
             
             pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+
+            print("AVG TOTAL RAW:", row.get("Avg-Total"))
+            print("AVG TOTAL SETELAH G:", g("Avg-Total"))
             
             record = OtdrResult(
                 user_id=current_user.id,
-                timestamp=timestamp,  # 🔥 PAKAI TIMESTAMP URUTAN INDEX
+                timestamp=datetime.now(),
                 prx=g('Prx (dBm)'),
                 temperature=g('Temperature (C)'),
                 wavelength=g('Wavelength'),
@@ -1477,6 +1785,7 @@ async def sync_from_sheets(
                 total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
                 avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
                 avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
+                avg_total=g('Avg-Total'),
                 return_1=g('Return 1'), return_2=g('Return 2'),
                 return_3=g('Return 3'), return_4=g('Return 4'),
                 klasifikasi=pred.get("prediction"),
@@ -1486,15 +1795,11 @@ async def sync_from_sheets(
             )
             db.add(record)
             saved += 1
-            
         except Exception as e:
-            logger.error(f"❌ Row {idx} error: {e}")
+            logger.error(f"Sync row error: {e}")
             errors += 1
     
     await db.commit()
-    
-    logger.info(f"✅ Sync complete: {saved} saved, {errors} errors")
-    
     return {
         "message": f"Sync selesai: {saved} baris berhasil, {errors} error",
         "saved": saved,
