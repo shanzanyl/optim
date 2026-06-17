@@ -2007,7 +2007,17 @@ async def detect_manual(
             return float(val)
         except:
             return default
-            
+    
+    # 🔥 KHUSUS loss_4: handle None/NULL
+    def get_loss_4():
+        val = payload.get('loss_4')
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except:
+            return 0.0
+    
     d1 = g('distance_1', 1.00447)
     d2 = g('distance_2', 2.00639)
     d3 = g('distance_3', 3.01036)
@@ -2016,7 +2026,7 @@ async def detect_manual(
     l1 = g('loss_1', 0.0)
     l2 = g('loss_2', 0.0)
     l3 = g('loss_3', 0.0)
-    l4 = g('loss_4', 0.0)
+    l4 = get_loss_4()  # Bisa None
     
     r1 = g('return_1', 0.0)
     r2 = g('return_2', 0.0)
@@ -2025,30 +2035,48 @@ async def detect_manual(
     
     prx = g('prx', -15.6)
     
+    # 🔥 Total-L: loss_4 None berarti tidak dihitung
     tl1 = g('total_l_1', l1)
     tl2 = g('total_l_2', l1 + l2)
     tl3 = g('total_l_3', l1 + l2 + l3)
-    tl4 = g('total_l_4', l1 + l2 + l3 + l4)
     
+    # 🔥 Kalau l4 None, total_l_4 tetap pakai dari payload
+    if l4 is None:
+        tl4 = g('total_l_4', 0.0)
+    else:
+        tl4 = g('total_l_4', l1 + l2 + l3 + l4)
+    
+    # 🔥 Avg-L: kalau loss_4 None, avg_l_4 dihitung dari total_l_4 / distance_4
     al1 = g('avg_l_1', tl1 / d1 if d1 > 0 else 0.0)
     al2 = g('avg_l_2', tl2 / d2 if d2 > 0 else 0.0)
     al3 = g('avg_l_3', tl3 / d3 if d3 > 0 else 0.0)
-    al4 = g('avg_l_4', tl4 / d4 if d4 > 0 else 0.0)
+    
+    # 🔥 Avg-L 4: pakai total_l_4 / distance_4
+    if l4 is None:
+        al4 = tl4 / d4 if d4 > 0 else 0.0
+    else:
+        al4 = g('avg_l_4', tl4 / d4 if d4 > 0 else 0.0)
+    
     avg_total = g('avg_total', tl4 / d4 if d4 > 0 else 0.0)
     
+    # 🔥 OTDR VALUES UNTUK ML: TIDAK PAKAI LOSS 4!
+    # Karena ML tidak pakai Loss 4
     otdr_values = {
         'Prx (dBm)': prx,
         'Distance 1': d1, 'Distance 2': d2, 'Distance 3': d3, 'Distance 4': d4,
         'Loss 1': l1, 'Loss 2': l2, 'Loss 3': l3,
+        # 🔥 Loss 4 TIDAK DIKIRIM KE ML
         'Total-L 1': tl1, 'Total-L 2': tl2, 'Total-L 3': tl3, 'Total-L 4': tl4,
         'Avg-L 1': al1, 'Avg-L 2': al2, 'Avg-L 3': al3, 'Avg-L 4': al4,
         'Avg-Total': avg_total,
         'Return 1': r1, 'Return 2': r2, 'Return 3': r3, 'Return 4': r4,
     }
     
-    logger.info(f"Manual input received: {otdr_values}")
+    logger.info(f"Manual input received (Loss 4 skipped for ML): {otdr_values}")
+    logger.info(f"Loss 4: {l4} (None berarti tidak ada data, tidak dikirim ke ML)")
     
     try:
+        # 🔥 Prediksi LANGSUNG tanpa Loss 4
         pred = ml.predict_from_otdr(otdr_values)
         logger.info(f"🤖 ML prediction SUCCESS (manual): {pred.get('prediction')}")
     except Exception as e:
@@ -2058,12 +2086,13 @@ async def detect_manual(
     user_id = current_user.id if current_user else 1
     
     try:
+        # 🔥 Simpan ke database: loss_4 = None (bukan 0) -> biar tampil ---
         record = OtdrResult(
             user_id=user_id,
             timestamp=datetime.utcnow(),
             prx=prx,
             distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
-            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=l4,
+            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=l4,  # Bisa None
             total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
             avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
             avg_total=avg_total,
@@ -2078,14 +2107,17 @@ async def detect_manual(
         await db.commit()
         await db.refresh(record)
         
+        # 🔥 Kirim Telegram Alert jika Warning/Critical
         status_str = pred.get("status", "Normal")
         if status_str.lower() in ["warning", "critical"]:
             try:
+                # 🔥 Untuk alert, loss_4 = 0.0 kalau None
+                loss_for_alert = [l1, l2, l3, l4 if l4 is not None else 0.0]
                 await asyncio.to_thread(
                     send_telegram_alert,
                     classification=pred.get("prediction"),
                     status=status_str,
-                    loss=[l1, l2, l3, l4],
+                    loss=loss_for_alert,
                     rl=[r1, r2, r3, r4],
                     prx=prx,
                     distances=[d1, d2, d3, d4],
@@ -2100,12 +2132,13 @@ async def detect_manual(
         logger.error(f"❌ DATABASE ERROR (manual): {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-        
+    
+    # 🔥 Return: loss_4 tetap None (biar frontend tampil ---)
     return {
         "message": "Data manual berhasil diproses",
         "extracted": {
             "distances": [d1, d2, d3, d4],
-            "losses": [l1, l2, l3, l4],
+            "losses": [l1, l2, l3, l4 if l4 is not None else None],  # 🔥 None → tampil ---
             "total_ls": [tl1, tl2, tl3, tl4],
             "returns": [r1, r2, r3, r4],
             "avg_ls": [al1, al2, al3, al4],

@@ -36,7 +36,7 @@ interface LastResult {
   prx_source: 'manual' | 'ocr' | 'default';
   extracted: {
     distances: number[];
-    losses: number[];
+    losses: (number | null)[];
     returns: number[];
     total_ls: number[];
     avg_ls: number[];
@@ -103,6 +103,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     setErrorMsg('');
     setLastResult(null);
 
+    // 🔥 FIX: loss_4 bisa null (karena field disabled)
+    const loss4 = manualForm.loss_4 ? parseFloat(manualForm.loss_4) : null;
+
     const payload = {
       prx: parseFloat(manualForm.prx) || 0.0,
       avg_total: parseFloat(manualForm.avg_total) || 0.0,
@@ -113,7 +116,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       loss_1: parseFloat(manualForm.loss_1) || 0.0,
       loss_2: parseFloat(manualForm.loss_2) || 0.0,
       loss_3: parseFloat(manualForm.loss_3) || 0.0,
-      loss_4: parseFloat(manualForm.loss_4) || 0.0,
+      loss_4: loss4, // 🔥 Bisa null
       total_l_1: parseFloat(manualForm.total_l_1) || 0.0,
       total_l_2: parseFloat(manualForm.total_l_2) || 0.0,
       total_l_3: parseFloat(manualForm.total_l_3) || 0.0,
@@ -130,6 +133,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
     const token = localStorage.getItem('token');
     try {
+      // 🔥 FIX: Endpoint yang benar
       const response = await fetch(`${API_BASE}/api/detect-manual`, {
         method: 'POST',
         headers: {
@@ -167,22 +171,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
   const [prevTotalData, setPrevTotalData] = useState(0);
 
-  // useEffect(() => {
-  //   if (totalData !== prevTotalData) {
-  //     setPrevTotalData(totalData);
-  //   }
-  // }, [totalData, prevTotalData]);
-
-  // useEffect(() => {
-  //   if (allHistory.length > 0 && currentIndex >= allHistory.length) {
-  //     setCurrentIndex(0);
-  //   }
-  // }, [allHistory.length, currentIndex, setCurrentIndex]);
-
-  // useEffect(() => {
-  //   setTotalData(allHistory.length);
-  // }, [allHistory.length, setTotalData]);
-
   // 🔥 PERBAIKAN 1: Effect untuk trigger Telegram Alert (dipisah dari autoPlay)
   useEffect(() => {
     if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
@@ -201,7 +189,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   }, [currentIndex, allHistory, isLoadingHistory]);
 
-  // 🔥 PERBAIKAN 2: Effect untuk AutoPlay (yang sudah ada, tanpa nested useEffect)
+  // 🔥 PERBAIKAN 2: Effect untuk AutoPlay
   useEffect(() => {
     if (!autoPlay || allHistory.length === 0) return;
 
@@ -336,14 +324,10 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   const displayedHistory = [...allHistory].reverse();
   const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
 
-  function handleSync(event: React.MouseEvent<HTMLButtonElement>): void {
-    throw new Error('Function not implemented.');
-  }
-
   return (
     <div className="min-h-screen bg-[#14213d] text-slate-300 font-sans pb-20 w-full">
       <div className="space-y-6 p-6">
-        {/* Progress Slideshow - SAMA SEPERTI DASHBOARD */}
+        {/* Progress Slideshow */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs text-white">Slide Show Progress (Classification)</span>
@@ -628,11 +612,11 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detected Values</p>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    {lastResult.extracted.losses?.map((l: number, i: number) => (
+                    {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Loss KM {i + 1}</span>
                         <span className="text-white font-mono">
-                          {l === 0 || l === null || l === undefined ? '---' : l.toString()} dB
+                          {l === null || l === undefined || l === 0 ? '---' : l.toString()} dB
                         </span>
                       </div>
                     ))}
