@@ -111,10 +111,10 @@ const Overview = ({ onLogin }: OverviewProps) => {
         <TrendingUp className="w-5 h-5 md:w-7 md:h-7 text-white" strokeWidth={1.5} />
       </div>
       <div className="text-center md:text-left">
-        <h1 className="text-2xl md:text-4xl font-light tracking-wide text-white">
+        <h1 className="text-3xl md:text-5xl font-light tracking-wide text-white">
           Opti<span className="font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">M</span>
         </h1>
-        <p className="text-[8px] md:text-[13px] text-slate-400 font-medium tracking-[0.2em] uppercase mt-0.5">Optical Monitoring</p>
+        <p className="text-[9px] md:text-[13px] text-slate-400 font-medium tracking-[0.2em] uppercase mt-0.5">Optical Monitoring</p>
       </div>
     </div>
 
@@ -143,9 +143,9 @@ const Overview = ({ onLogin }: OverviewProps) => {
                   {/* Title Section */}
                   <div className="mb-8 text-center">
                     <h3 className="text-2xl font-semibold text-white mb-2 tracking-tight">
-                      {isLoginMode ? 'Selamat Datang Kembali' : 'Buat Akun Baru'}
+                      {isLoginMode ? 'Selamat Datang' : 'Buat Akun Baru'}
                     </h3>
-                    <p className="text-slate-400 text-sm">
+                    <p className="text-white text-sm">
                       {isLoginMode 
                         ? 'Masuk untuk mengakses dashboard monitoring Anda' 
                         : 'Daftar untuk mulai memonitor jaringan fiber optik'}
@@ -180,7 +180,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                     {/* Nama Lengkap */}
                     {!isLoginMode && (
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-400 ml-1">Nama Lengkap</label>
+                        <label className="text-xs font-medium text-white ml-1">Nama Lengkap</label>
                         <div className={`relative transition-all duration-200 ${
                           focusedField === 'name' ? 'scale-[1.01]' : ''
                         }`}>
@@ -207,7 +207,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
 
                     {/* Email Field */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400 ml-1">Alamat Email</label>
+                      <label className="text-xs font-medium text-white ml-1">Alamat Email</label>
                       <div className={`relative transition-all duration-200 ${
                         focusedField === 'email' ? 'scale-[1.01]' : ''
                       }`}>
@@ -233,7 +233,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
 
                     {/* Password Field */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400 ml-1">Kata Sandi</label>
+                      <label className="text-xs font-medium text-white ml-1">Kata Sandi</label>
                       <div className={`relative transition-all duration-200 ${
                         focusedField === 'password' ? 'scale-[1.01]' : ''
                       }`}>
@@ -318,7 +318,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                           type="button"
                           onClick={checkStatus}
                           disabled={checkingStatus}
-                          className="text-xs text-slate-500 hover:text-blue-400 transition-colors inline-flex items-center gap-1"
+                          className="text-xs text-white hover:text-blue-400 transition-colors inline-flex items-center gap-1"
                         >
                           {checkingStatus ? (
                             <>
@@ -327,7 +327,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                             </>
                           ) : (
                             <>
-                              <span>🔍</span>
+                              <span></span>
                               <span>Belum bisa login? Cek status akun</span>
                             </>
                           )}
@@ -337,7 +337,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                   </form>
 
                   {/* Footer text */}
-                  <p className="text-center text-[11px] text-slate-500 mt-6">
+                  <p className="text-center text-[11px] text-white mt-6">
                     {isLoginMode 
                       ? 'Gunakan email dan kata sandi yang telah terdaftar' 
                       : 'Dengan mendaftar, Anda menyetujui Syarat & Ketentuan yang berlaku'}

@@ -112,7 +112,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 60000); 
+    }, 900000); // 15 menit = 900000 ms
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
@@ -157,6 +157,36 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         })
         .catch((err: any) => console.error('Error triggering slide alert:', err));
     }
+  }, [currentIndex, allData, loading]);
+
+  useEffect(() => {
+    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
+    
+    const currentRecord = allData[currentIndex];
+    if (!currentRecord) return;
+    
+    const updateDashboardSlide = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const API_BASE = import.meta.env.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
+        
+        await fetch(`${API_BASE}/api/telegram-update-dashboard-slide`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            id: currentRecord.id,
+            index: currentIndex
+          })
+        });
+      } catch (err) {
+        // Silent error, ga masalah kalau gagal
+      }
+    };
+    
+    updateDashboardSlide();
   }, [currentIndex, allData, loading]);
 
   const fetchAllData = async () => {
@@ -262,7 +292,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const isGangguan = currentRecord?.klasifikasi && currentRecord.klasifikasi !== 'Normal';
 
   // 🔥 HAPUS getRealTimeLabels, ganti dengan fungsi ini
-const generateMinuteLabels = (count: number) => {
+const generateMinuteLabels = (count: number, p0?: number) => {
   const now = new Date();
   const labels = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -278,7 +308,7 @@ const generateMinuteLabels = (count: number) => {
 };
 
 // 🔥 GANTI chartData dan miniChartData
-const minuteLabels6 = generateMinuteLabels(6); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
+const minuteLabels6 = generateMinuteLabels(6, 15); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
 
 const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
   time: minuteLabels6[idx],

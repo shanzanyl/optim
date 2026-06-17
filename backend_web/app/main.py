@@ -66,6 +66,9 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+last_dashboard_slide_index = 0
+last_dashboard_slide_data = None
+
 def send_telegram_alert(classification: str, status: str, loss: list, rl: list, prx, distances: list = None, timestamp = None):
     """Mengirim pesan notifikasi gangguan ke Telegram Teknisi dengan format detail baru"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
