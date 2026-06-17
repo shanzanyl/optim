@@ -130,7 +130,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
     const token = localStorage.getItem('token');
     try {
-      const response = await fetch(`${API_BASE}/api/classify-manual`, {
+      const response = await fetch(`${API_BASE}/api/detect-manual`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
