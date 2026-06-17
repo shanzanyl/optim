@@ -112,7 +112,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 900000); // 15 menit = 900000 ms
+    }, 300000); // 5 menit = 300000 ms
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
