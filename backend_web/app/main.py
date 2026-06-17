@@ -809,32 +809,119 @@ LOCAL_KNOWLEDGE = {
         """
     },
     "jenis_gangguan": {
-        "keywords": ["gangguan", "jenis gangguan", "klasifikasi", "fiber cut", "bending", "dirty", "splice", "gap", "nearly"],
+        "keywords": ["gangguan", "jenis gangguan", "klasifikasi", "fiber cut", "bending", "dirty", "splice", "gap", "nearly", "solusi", "perbaikan", "troubleshoot", "cara perbaiki", "atasi"],
         "response": """
-            <strong>Jenis-Jenis Gangguan Fiber Optik</strong><br><br>
+            <strong>Jenis-Jenis Gangguan Fiber Optik & Solusi Perbaikan</strong><br><br>
+            
             <strong>1. Bending (Tekukan Makro)</strong> 🔄<br>
-            Terjadi saat kabel tertekuk melebihi radius minimum.<br>
-            <strong>Solusi:</strong> Periksa jalur kabel, rapihkan di OTB.<br><br>
+            <strong>Ciri-ciri:</strong> Loss meningkat drastis, biasanya di KM tertentu.<br>
+            <strong>Penyebab:</strong> Kabel tertekuk melebihi radius minimum (≤ 30mm).<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • Periksa jalur kabel fisik di OTB/ODP<br>
+            • Rapihkan tumpukan serat, jangan sampai tertekuk<br>
+            • Gunakan bend limiter atau cable tray<br>
+            • Jika permanent, ganti kabel segment<br><br>
             
             <strong>2. Dirty Connector (Konektor Kotor)</strong> 🧹<br>
-            Masalah paling umum! Debu di ujung konektor.<br>
-            <strong>Solusi:</strong> Bersihkan dengan Fiber Cleaning Cassette.<br><br>
+            <strong>Ciri-ciri:</strong> Loss naik tiba-tiba, Return Loss jelek.<br>
+            <strong>Penyebab:</strong> Debu/kotoran di ujung ferrule konektor.<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • Bersihkan dengan Fiber Cleaning Cassette (1-2x putar)<br>
+            • Jika masih kotor, gunakan isopropil alkohol + tissue optik<br>
+            • Jangan sentuh ujung ferrule dengan jari!<br>
+            • Periksa adapter/sc itu sendiri, kadang kotor di dalamnya<br><br>
             
             <strong>3. Fiber Cut (Kabel Putus)</strong> ❌<br>
-            Gangguan kritis! Sinyal hilang total.<br>
-            <strong>Solusi:</strong> Cari titik putus dengan OTDR, sambung ulang.<br><br>
+            <strong>Ciri-ciri:</strong> Loss 0 dB di salah satu KM (sinyal hilang total).<br>
+            <strong>Penyebab:</strong> Kabel tergigit hewan, tertimpa, atau putus.<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • Lakukan OTDR untuk mencari titik putus (event reflective)<br>
+            • Pastikan lokasi putus dengan hitung jarak dari OTDR<br>
+            • Lakukan splicing ulang di titik putus<br>
+            • Jika akses sulit, tarik kabel baru segment tersebut<br><br>
             
             <strong>4. Bad Splice (Sambungan Buruk)</strong> 🔗<br>
-            Proses fusion splicing tidak sempurna.<br>
-            <strong>Solusi:</strong> Potong dan splicing ulang.<br><br>
+            <strong>Ciri-ciri:</strong> Loss tinggi di titik sambung, biasanya loss > 0.1 dB.<br>
+            <strong>Penyebab:</strong> Fusion splicing tidak sempurna (kotor, sudut tidak pas).<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • Potong kembali serat di titik sambung<br>
+            • Lakukan splicing ulang dengan mesin fusion<br>
+            • Pastikan gain/splice loss ≤ 0.05 dB<br>
+            • Gunakan splice protector sleeve baru<br><br>
             
             <strong>5. Air Gap (Celah Udara)</strong> 💨<br>
-            Ada ruang udara di antara konektor.<br>
-            <strong>Solusi:</strong> Pastikan konektor terkunci rapat.<br><br>
+            <strong>Ciri-ciri:</strong> Loss tinggi, Return Loss sangat tinggi (pantulan besar).<br>
+            <strong>Penyebab:</strong> Konektor tidak terkunci rapat, ada celah udara.<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • Pastikan konektor terkunci rapat (klik terdengar)<br>
+            • Cek adapter, mungkin sudah aus<br>
+            • Ganti adapter/sc jika perlu<br>
+            • Pastikan ferrule tidak tertekan/miring<br><br>
             
             <strong>6. Nearly Cut (Hampir Putus)</strong> ⚠️<br>
-            Kondisi kritis! Sinyal sangat lemah.<br>
-            <strong>Solusi:</strong> Segera jadwalkan pemeliharaan preventif.
+            <strong>Ciri-ciri:</strong> Loss sangat tinggi (≥ 2 dB), sinyal melemah drastis.<br>
+            <strong>Penyebab:</strong> Kabel hampir putus, biasanya akibat tekanan fisik.<br>
+            <strong>✅ Saran Perbaikan:</strong><br>
+            • SEGERA jadwalkan pemeliharaan preventif!<br>
+            • Cek lokasi dengan OTDR untuk temukan titik hampir putus<br>
+            • Lakukan splicing ulang sebelum benar-benar putus<br>
+            • Jika kabel tua, pertimbangkan penggantian segment<br><br>
+            
+            <strong>📌 Panduan Umum Troubleshooting:</strong><br>
+            1. <strong>Cek PRX</strong> - Kalau < -24 dBm, sinyal lemah<br>
+            2. <strong>Cek Loss per KM</strong> - Di atas 1.2 dB = bermasalah<br>
+            3. <strong>Cek Return Loss</strong> - Di atas -35 dB = ada pantulan<br>
+            4. <strong>Bandingkan dengan data sebelumnya</strong> - Loss naik drastis = ada perubahan<br>
+            5. <strong>Gunakan OTDR</strong> - Untuk lokasi pasti gangguan<br><br>
+            
+            <strong>📱 Fitur OptiM yang membantu:</strong><br>
+            • <strong>Dashboard</strong> - Monitoring real-time semua parameter<br>
+            • <strong>Upload Foto OTDR</strong> - Analisis cepat dari printout<br>
+            • <strong>Manual Input</strong> - Simulasi dan verifikasi data<br>
+            • <strong>History</strong> - Lacak tren gangguan sebelumnya
+        """
+    },
+    "troubleshoot": {
+        "keywords": ["troubleshoot", "cara perbaiki", "solusi", "atasi", "bagaimana cara", "langkah perbaikan", "perbaikan"],
+        "response": """
+            <strong>Panduan Troubleshooting Gangguan Fiber Optik</strong><br><br>
+            
+            <strong>🔍 Langkah-langkah Umum:</strong><br>
+            <strong>1. Identifikasi Gejala:</strong><br>
+            • Cek <strong>Loss per KM</strong> - KM mana yang nilainya tinggi?<br>
+            • Cek <strong>PRX</strong> - Apakah di bawah -24 dBm?<br>
+            • Cek <strong>Return Loss</strong> - Apakah ada pantulan tinggi?<br>
+            • Bandingkan dengan data normal sebelumnya<br><br>
+            
+            <strong>2. Kategorikan Gangguan:</strong><br>
+            • <strong>Loss tinggi tapi PRX normal</strong> → Mungkin Bending/Dirty<br>
+            • <strong>Loss 0 dB dan PRX hilang</strong> → Fiber Cut<br>
+            • <strong>Return Loss jelek</strong> → Konektor kotor/Air Gap<br><br>
+            
+            <strong>3. Tindakan Berdasarkan Jenis:</strong><br>
+            • <strong>Bending</strong> → Rapihkan kabel, cek radius tekuk<br>
+            • <strong>Dirty</strong> → Bersihkan konektor dengan fiber cleaner<br>
+            • <strong>Fiber Cut</strong> → OTDR, cari titik putus, splicing<br>
+            • <strong>Bad Splice</strong> → Splicing ulang<br>
+            • <strong>Air Gap</strong> → Kunci konektor rapat<br>
+            • <strong>Nearly Cut</strong> → Splicing preventif segera<br><br>
+            
+            <strong>4. Verifikasi Perbaikan:</strong><br>
+            • Lakukan pengukuran ulang<br>
+            • Cek Loss sudah turun di bawah 1.2 dB<br>
+            • Cek PRX sudah kembali normal (≥ -20 dBm)<br>
+            • Cek Return Loss sudah di bawah -45 dB<br><br>
+            
+            <strong>5. Dokumentasi:</strong><br>
+            • Catat lokasi gangguan<br>
+            • Simpan data sebelum-sesudah perbaikan<br>
+            • Update di sistem monitoring<br><br>
+            
+            <strong>⚠️ Peringatan Keamanan:</strong><br>
+            • Jangan lihat langsung ke ujung kabel fiber (bahaya mata!)<br>
+            • Gunakan safety goggles saat handling fiber<br>
+            • Matikan laser OTDR sebelum membersihkan konektor<br>
+            • Gunakan alat yang tepat, jangan paksa
         """
     },
     "upload_foto": {
@@ -1730,7 +1817,6 @@ async def sync_from_sheets(
         print(f"Nilai: {df.iloc[0]['Avg-Total']}")
     else:
         print("⚠️ Kolom 'Avg-Total' TIDAK DITEMUKAN!")
-        print(f"Kolom yang tersedia: {df.columns.tolist()}")
     
     existing = await db.execute(
         select(OtdrResult).where(
@@ -1747,10 +1833,8 @@ async def sync_from_sheets(
     
     for idx, row in df.iterrows():
         try:
-            # 🔥 FUNGSI g() DIPERBAIKI DENGAN FALLBACK
             def g(col, default=0.0):
                 try:
-                    # Coba ambil langsung
                     val = row.get(col, default)
                     if pd.notna(val) and val != '' and val != '-':
                         return float(val)
@@ -1758,65 +1842,55 @@ async def sync_from_sheets(
                 except Exception:
                     return default
             
-            # 🔥 AMBIL AVG-TOTAL DENGAN FALLBACK NAMA KOLOM
-            avg_total = 0.0
-            avg_total_cols = ['Avg-Total', 'Avg Total', 'AvgTotal', 'Average Total']
-            for col_name in avg_total_cols:
-                if col_name in df.columns:
-                    val = row.get(col_name, 0.0)
-                    try:
-                        if pd.notna(val) and val != '' and val != '-':
-                            avg_total = float(val)
-                            print(f"✅ ROW {idx}: Avg-Total dari '{col_name}' = {avg_total}")
-                            break
-                    except:
-                        continue
+            # 🔥 AMBIL SEMUA NILAI
+            prx = g('Prx (dBm)')
+            d1, d2, d3, d4 = g('Distance 1'), g('Distance 2'), g('Distance 3'), g('Distance 4')
+            l1, l2, l3 = g('Loss 1'), g('Loss 2'), g('Loss 3')
+            l4 = None if g('Loss 4') == 0 else g('Loss 4')
+            tl1, tl2, tl3, tl4 = g('Total-L 1'), g('Total-L 2'), g('Total-L 3'), g('Total-L 4')
+            al1, al2, al3, al4 = g('Avg-L 1'), g('Avg-L 2'), g('Avg-L 3'), g('Avg-L 4')
+            r1, r2, r3, r4 = g('Return 1'), g('Return 2'), g('Return 3'), g('Return 4')
+            
+            # 🔥 AMBIL AVG-TOTAL: UTAMAKAN DARI KOLOM
+            avg_total = g('Avg-Total', 0.0)
+            
+            # 🔥 KALAU KOSONG, HITUNG MANUAL DARI Total-L4 / Distance4
+            if avg_total == 0.0:
+                if tl4 > 0 and d4 > 0:
+                    avg_total = tl4 / d4
+                    print(f"📊 ROW {idx}: Avg-Total dari kolom kosong, dihitung manual = {tl4} / {d4} = {avg_total:.3f}")
+                else:
+                    print(f"⚠️ ROW {idx}: Avg-Total kosong dan tidak bisa dihitung (tl4={tl4}, d4={d4})")
             else:
-                # 🔥 FALLBACK: Hitung dari Avg-L
-                avg_l_values = []
-                for i in range(1, 5):
-                    val = g(f'Avg-L {i}', 0.0)
-                    if val > 0:
-                        avg_l_values.append(val)
-                if avg_l_values:
-                    avg_total = sum(avg_l_values) / len(avg_l_values)
-                    print(f"📊 ROW {idx}: Avg-Total dihitung dari Avg-L = {avg_total}")
+                print(f"✅ ROW {idx}: Avg-Total dari kolom = {avg_total:.3f}")
             
             otdr_values = {
-                'Prx (dBm)': g('Prx (dBm)'),
-                'Distance 1': g('Distance 1'), 'Distance 2': g('Distance 2'),
-                'Distance 3': g('Distance 3'), 'Distance 4': g('Distance 4'),
-                'Loss 1': g('Loss 1'), 'Loss 2': g('Loss 2'), 'Loss 3': g('Loss 3'),
-                'Total-L 1': g('Total-L 1'), 'Total-L 2': g('Total-L 2'),
-                'Total-L 3': g('Total-L 3'), 'Total-L 4': g('Total-L 4'),
-                'Avg-L 1': g('Avg-L 1'), 'Avg-L 2': g('Avg-L 2'),
-                'Avg-L 3': g('Avg-L 3'), 'Avg-L 4': g('Avg-L 4'),
-                'Avg-Total': avg_total,  # 🔥 PAKAI avg_total YANG SUDAH DIPARSE
-                'Return 1': g('Return 1'), 'Return 2': g('Return 2'),
-                'Return 3': g('Return 3'), 'Return 4': g('Return 4'),
+                'Prx (dBm)': prx,
+                'Distance 1': d1, 'Distance 2': d2, 'Distance 3': d3, 'Distance 4': d4,
+                'Loss 1': l1, 'Loss 2': l2, 'Loss 3': l3,
+                'Total-L 1': tl1, 'Total-L 2': tl2, 'Total-L 3': tl3, 'Total-L 4': tl4,
+                'Avg-L 1': al1, 'Avg-L 2': al2, 'Avg-L 3': al3, 'Avg-L 4': al4,
+                'Avg-Total': avg_total,
+                'Return 1': r1, 'Return 2': r2, 'Return 3': r3, 'Return 4': r4,
             }
             
             pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
 
-            print(f"🔍 ROW {idx}: Avg-Total FINAL = {avg_total}")
+            print(f"🔍 ROW {idx}: Avg-Total FINAL = {avg_total:.3f}")
             
             record = OtdrResult(
                 user_id=current_user.id,
                 timestamp=datetime.now(),
-                prx=g('Prx (dBm)'),
+                prx=prx,
                 temperature=g('Temperature (C)'),
                 wavelength=g('Wavelength'),
                 pulse_width=g('Pulse Width (ns)'),
-                distance_1=g('Distance 1'), distance_2=g('Distance 2'),
-                distance_3=g('Distance 3'), distance_4=g('Distance 4'),
-                loss_1=g('Loss 1'), loss_2=g('Loss 2'), loss_3=g('Loss 3'), loss_4=None if g('Loss 4') == 0 else g('Loss 4'),
-                total_l_1=g('Total-L 1'), total_l_2=g('Total-L 2'),
-                total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
-                avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
-                avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
-                avg_total=avg_total,  # 🔥 PAKAI avg_total YANG SUDAH DIPARSE
-                return_1=g('Return 1'), return_2=g('Return 2'),
-                return_3=g('Return 3'), return_4=g('Return 4'),
+                distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
+                loss_1=l1, loss_2=l2, loss_3=l3, loss_4=l4,
+                total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
+                avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
+                avg_total=avg_total,
+                return_1=r1, return_2=r2, return_3=r3, return_4=r4,
                 klasifikasi=pred.get("prediction"),
                 status=pred.get("status"),
                 confidence=pred.get("confidence"),
