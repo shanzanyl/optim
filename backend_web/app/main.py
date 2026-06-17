@@ -2118,3 +2118,268 @@ async def detect_manual(
         "status": pred.get("status"),
         "id": record.id,
     }
+
+# ============================================================
+# TELEGRAM BOT COMMAND HANDLER (CEK STATUS VIA TELEGRAM)
+# ============================================================
+
+async def handle_telegram_command(update: dict) -> str | None:
+    """Handle command dari Telegram Bot"""
+    try:
+        if 'message' not in update:
+            return None
+            
+        msg = update['message']
+        text = msg.get('text', '').strip()
+        chat_id = msg.get('chat', {}).get('id')
+        
+        if not text or not chat_id:
+            return None
+            
+        command = text.lower().split()[0] if text else ''
+        
+        # /status - cek status terakhir
+        if command == '/status':
+            return await get_telegram_status()
+        
+        # /rekap - rekap hari ini
+        elif command == '/rekap':
+            return await get_telegram_rekap()
+        
+        # /help atau /start - bantuan
+        elif command in ['/help', '/start']:
+            return get_telegram_help()
+        
+        # Keyword natural: "status", "cek", "kondisi", "latest"
+        elif any(kw in text.lower() for kw in ['status', 'cek', 'kondisi', 'bagaimana', 'latest', 'terakhir']):
+            return await get_telegram_status()
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error handling command: {e}")
+        return None
+
+async def get_telegram_status() -> str:
+    """Ambil status terakhir dari database"""
+    try:
+        async with AsyncSessionLocal() as db:
+            # Ambil record terakhir
+            result = await db.execute(
+                select(OtdrResult)
+                .order_by(OtdrResult.timestamp.desc())
+                .limit(1)
+            )
+            latest = result.scalar_one_or_none()
+            
+            if not latest:
+                return "📡 Belum ada data pengukuran. Silakan upload foto OTDR terlebih dahulu."
+            
+            # Ambil semua record hari ini
+            now_wib = datetime.utcnow() + timedelta(hours=7)
+            today_date = now_wib.date()
+            
+            result_today = await db.execute(
+                select(OtdrResult)
+                .where(OtdrResult.timestamp >= datetime.utcnow() - timedelta(days=1))
+            )
+            today_records = result_today.scalars().all()
+            
+            today_total = len(today_records)
+            today_faults = sum(1 for r in today_records if r.klasifikasi != "Normal")
+            
+            # Status emoji
+            status_emoji = "🟢" if latest.status == "Normal" else "🟡" if latest.status == "Warning" else "🔴"
+            
+            # Loss values
+            loss_values = [latest.loss_1, latest.loss_2, latest.loss_3, latest.loss_4]
+            loss_str = " | ".join([f"{v:.2f} dB" if v else "---" for v in loss_values])
+            
+            # Return loss
+            return_values = [latest.return_1, latest.return_2, latest.return_3, latest.return_4]
+            return_str = " | ".join([f"{v:.1f} dB" if v else "---" for v in return_values])
+            
+            # Waktu
+            local_time = latest.timestamp + timedelta(hours=7) if latest.timestamp else datetime.utcnow() + timedelta(hours=7)
+            time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Status hari ini
+            today_status = "🟢 Normal" if today_faults == 0 else "🟡 Ada gangguan" if today_faults < 3 else "🔴 Banyak gangguan"
+            
+            message = f"""
+{status_emoji} <b>STATUS TERKINI</b> {status_emoji}
+
+<b>📊 Pengukuran Terakhir:</b>
+• <b>Waktu:</b> {time_str}
+• <b>Klasifikasi:</b> {latest.klasifikasi}
+• <b>Status:</b> {latest.status}
+• <b>PRX:</b> {latest.prx:.2f} dBm
+• <b>Confidence:</b> {latest.confidence:.1f}%
+
+<b>📈 Loss per KM:</b>
+{loss_str}
+
+<b>🔄 Return Loss per KM:</b>
+{return_str}
+
+<b>📋 Rekap Hari Ini:</b>
+• Total Pengukuran: <b>{today_total}</b>
+• Gangguan: <b>{today_faults}</b>
+• Status: {today_status}
+
+<b>💡 Perintah:</b>
+/status - Cek status terakhir
+/rekap - Rekap hari ini
+/help - Bantuan
+"""
+            return message
+            
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error get status: {e}")
+        return "❌ Gagal mengambil data status. Coba lagi nanti."
+
+async def get_telegram_rekap() -> str:
+    """Rekap gangguan hari ini"""
+    try:
+        async with AsyncSessionLocal() as db:
+            now_wib = datetime.utcnow() + timedelta(hours=7)
+            today_start = datetime(now_wib.year, now_wib.month, now_wib.day) - timedelta(hours=7)
+            
+            result = await db.execute(
+                select(OtdrResult)
+                .where(OtdrResult.timestamp >= today_start)
+                .order_by(OtdrResult.timestamp.desc())
+            )
+            records = result.scalars().all()
+            
+            if not records:
+                return "📡 Belum ada pengukuran hari ini."
+            
+            total = len(records)
+            normal = sum(1 for r in records if r.klasifikasi == "Normal")
+            faults = total - normal
+            
+            from collections import Counter
+            classification_counts = Counter(r.klasifikasi for r in records if r.klasifikasi != "Normal")
+            
+            detail_lines = []
+            for klasifikasi, count in classification_counts.most_common():
+                emoji = {
+                    "Fiber Cut": "🔴",
+                    "Nearly Cut": "🟠",
+                    "Bending": "🟡",
+                    "Dirty Connector": "🟡",
+                    "Bad Splice": "🟡",
+                    "Air Gap": "🟡",
+                }.get(klasifikasi, "🟡")
+                detail_lines.append(f"• {emoji} {klasifikasi}: {count} kali")
+            
+            detail_str = "\n".join(detail_lines) if detail_lines else "✅ Tidak ada gangguan"
+            
+            status_jaringan = "🟢 SEHAT" if faults == 0 else "🟡 PERLU PERHATIAN" if faults < 3 else "🔴 KRITIS"
+            
+            message = f"""
+📊 <b>REKAP HARI INI</b> 📊
+
+<b>Total Pengukuran:</b> {total}
+<b>Normal:</b> {normal} 🟢
+<b>Gangguan:</b> {faults} {"🔴" if faults > 0 else "✅"}
+
+<b>📋 Rincian Gangguan:</b>
+{detail_str}
+
+<b>📈 Statistik:</b>
+• Rasio Gangguan: {(faults/total*100):.1f}%
+• Status Jaringan: {status_jaringan}
+
+💡 Ketik <b>/status</b> untuk cek data terakhir
+"""
+            return message
+            
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error get rekap: {e}")
+        return "❌ Gagal mengambil rekap. Coba lagi nanti."
+
+def get_telegram_help() -> str:
+    """Bantuan Telegram Bot"""
+    return """
+🤖 <b>OptiM Bot - Panduan Perintah</b> 🤖
+
+<b>📋 Perintah yang tersedia:</b>
+
+• <b>/status</b> - Cek status pengukuran terakhir
+• <b>/rekap</b> - Lihat rekap gangguan hari ini
+• <b>/help</b> - Tampilkan bantuan ini
+
+<b>💬 Chat Natural:</b>
+Anda juga bisa bertanya langsung:
+• "status terakhir" 
+• "cek status"
+• "kondisi hari ini"
+
+<b>🔔 Alert Otomatis:</b>
+Bot akan mengirim notifikasi saat terdeteksi:
+• <b>Warning</b> 🟡 - Gangguan ringan
+• <b>Critical</b> 🔴 - Gangguan serius
+
+<b>📱 Gunakan perintah di atas untuk monitoring cepat!</b>
+"""
+
+def send_telegram_message(chat_id: str, message: str):
+    """Kirim pesan biasa ke Telegram (bukan alert)"""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.info("[TELEGRAM] Bot token belum dikonfigurasi")
+        return
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            logger.info(f"[TELEGRAM] Pesan berhasil dikirim ke {chat_id}")
+        else:
+            logger.error(f"[TELEGRAM] Gagal kirim pesan: {response.text}")
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error: {e}")
+
+@app.post("/api/telegram-webhook")
+async def telegram_webhook(request: dict):
+    """Webhook untuk menerima command dari Telegram"""
+    logger.info(f"[TELEGRAM] Webhook received: {request}")
+    
+    try:
+        response_text = await handle_telegram_command(request)
+        
+        if response_text:
+            chat_id = request.get('message', {}).get('chat', {}).get('id')
+            if chat_id:
+                send_telegram_message(str(chat_id), response_text)
+                return {"ok": True}
+        
+        return {"ok": True}
+        
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/telegram-setup")
+async def setup_telegram_webhook():
+    """Setup webhook untuk Telegram Bot"""
+    if not TELEGRAM_BOT_TOKEN:
+        return {"error": "TELEGRAM_BOT_TOKEN not configured"}
+    
+    webhook_url = "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/telegram-webhook"
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
+    payload = {"url": webhook_url}
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
