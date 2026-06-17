@@ -1632,7 +1632,7 @@ async def detect_ocr(
             except Exception as tg_err:
                 logger.error(f"[TELEGRAM] Error: {tg_err}")
         
-        
+
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR: {e}")
         await db.rollback()
@@ -2157,6 +2157,41 @@ async def detect_manual(
     }
 
 # ============================================================
+# TELEGRAM DASHBOARD SLIDE UPDATE
+# ============================================================
+
+@app.post("/api/telegram-update-dashboard-slide")
+async def update_dashboard_slide_data(payload: dict):
+    """Update data slide dashboard terakhir"""
+    global last_dashboard_slide_index, last_dashboard_slide_data
+    
+    try:
+        record_id = payload.get('id')
+        index = payload.get('index', 0)
+        
+        if not record_id:
+            return {"error": "Missing record id"}
+        
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(OtdrResult).where(OtdrResult.id == record_id)
+            )
+            record = result.scalar_one_or_none()
+            
+            if not record:
+                return {"error": "Record not found"}
+            
+            last_dashboard_slide_index = index
+            last_dashboard_slide_data = record
+            
+            logger.info(f"[TELEGRAM] Dashboard slide updated: index={index}, id={record_id}, klasifikasi={record.klasifikasi}")
+            return {"status": "updated", "index": index, "id": record_id}
+            
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error update dashboard slide: {e}")
+        return {"error": str(e)}
+
+# ============================================================
 # TELEGRAM BOT COMMAND HANDLER (CEK STATUS VIA TELEGRAM)
 # ============================================================
 
@@ -2198,31 +2233,14 @@ async def handle_telegram_command(update: dict) -> str | None:
         return None
 
 async def get_telegram_status() -> str:
-    """Ambil status terakhir dari database (semua sumber)"""
-    try:
+    """Ambil status dari DASHBOARD slide"""
+    global last_dashboard_slide_index, last_dashboard_slide_data
+    try:        
+        if not last_dashboard_slide_data:
+            return "📡 Data dashboard belum tersedia. Coba lagi nanti."
+        
+        # Ambil rekap hari ini
         async with AsyncSessionLocal() as db:
-            # Ambil record terakhir dari SEMUA sumber
-            result = await db.execute(
-                select(OtdrResult)
-                .order_by(OtdrResult.timestamp.desc())
-                .limit(1)
-            )
-            latest = result.scalar_one_or_none()
-            
-            if not latest:
-                return "📡 Belum ada data pengukuran. Silakan upload foto OTDR terlebih dahulu."
-            
-            # 🔥 Label sumber data
-            source_label = {
-                'ocr': '📷 OCR',
-                'manual': '✏️ Manual',
-                'sheets': '📊 Sheets'
-            }.get(latest.source, '📡 Unknown')
-            
-            # Ambil semua record hari ini
-            now_wib = datetime.utcnow() + timedelta(hours=7)
-            today_date = now_wib.date()
-            
             result_today = await db.execute(
                 select(OtdrResult)
                 .where(OtdrResult.timestamp >= datetime.utcnow() - timedelta(days=1))
@@ -2233,38 +2251,38 @@ async def get_telegram_status() -> str:
             today_faults = sum(1 for r in today_records if r.klasifikasi != "Normal")
             
             # Status emoji
-            status_emoji = "🟢" if latest.status == "Normal" else "🟡" if latest.status == "Warning" else "🔴"
+            status_emoji = "🟢" if record.status == "Normal" else "🟡" if record.status == "Warning" else "🔴"
             
             # Loss values
-            loss_values = [latest.loss_1, latest.loss_2, latest.loss_3, latest.loss_4]
+            loss_values = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
             loss_str = " | ".join([f"{v:.2f} dB" if v else "---" for v in loss_values])
             
             # Return loss
-            return_values = [latest.return_1, latest.return_2, latest.return_3, latest.return_4]
+            return_values = [record.return_1, record.return_2, record.return_3, record.return_4]
             return_str = " | ".join([f"{v:.1f} dB" if v else "---" for v in return_values])
             
             # Waktu
-            local_time = latest.timestamp + timedelta(hours=7) if latest.timestamp else datetime.utcnow() + timedelta(hours=7)
+            local_time = record.timestamp + timedelta(hours=7) if record.timestamp else datetime.utcnow() + timedelta(hours=7)
             time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
             
             # Status hari ini
             today_status = "🟢 Normal" if today_faults == 0 else "🟡 Ada gangguan" if today_faults < 3 else "🔴 Banyak gangguan"
             
             message = f"""
-{status_emoji} <b>STATUS TERKINI</b> {status_emoji}
+{status_emoji} <b>STATUS DARI DASHBOARD</b> {status_emoji}{slide_info}
 <i>Sumber: {source_label}</i>
 
-<b>📊 Pengukuran Terakhir:</b>
+<b>📊 Pengukuran:</b>
 • <b>Waktu:</b> {time_str}
-• <b>Klasifikasi:</b> {latest.klasifikasi}
-• <b>Status:</b> {latest.status}
-• <b>PRX:</b> {latest.prx:.2f} dBm
-• <b>Confidence:</b> {latest.confidence:.1f}%
+• <b>Klasifikasi:</b> {record.klasifikasi}
+• <b>Status:</b> {record.status}
+• <b>PRX:</b> {record.prx:.2f} dBm
+• <b>Confidence:</b> {record.confidence:.1f}%
 
-<b>Loss per KM:</b>
+<b>📈 Loss per KM:</b>
 {loss_str}
 
-<b>Return Loss per KM:</b>
+<b>🔄 Return Loss per KM:</b>
 {return_str}
 
 <b>📋 Rekap Hari Ini:</b>
@@ -2273,15 +2291,15 @@ async def get_telegram_status() -> str:
 • Status: {today_status}
 
 <b>💡 Perintah:</b>
-/status - Cek status terakhir
+/status - Cek status dari Dashboard
 /rekap - Rekap hari ini
 /help - Bantuan
 """
             return message
             
     except Exception as e:
-        logger.error(f"[TELEGRAM] Error get status: {e}")
-        return "❌ Gagal mengambil data status. Coba lagi nanti."
+        logger.error(f"[TELEGRAM] Error get status from dashboard: {e}")
+        return "❌ Gagal mengambil data dashboard. Coba lagi nanti."
 
 async def get_telegram_rekap() -> str:
     """Rekap gangguan hari ini"""
