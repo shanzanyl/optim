@@ -2194,10 +2194,10 @@ async def handle_telegram_command(update: dict) -> str | None:
         return None
 
 async def get_telegram_status() -> str:
-    """Ambil status terakhir dari database"""
+    """Ambil status terakhir dari database (semua sumber)"""
     try:
         async with AsyncSessionLocal() as db:
-            # Ambil record terakhir
+            # Ambil record terakhir dari SEMUA sumber
             result = await db.execute(
                 select(OtdrResult)
                 .order_by(OtdrResult.timestamp.desc())
@@ -2207,6 +2207,13 @@ async def get_telegram_status() -> str:
             
             if not latest:
                 return "📡 Belum ada data pengukuran. Silakan upload foto OTDR terlebih dahulu."
+            
+            # 🔥 Label sumber data
+            source_label = {
+                'ocr': '📷 OCR',
+                'manual': '✏️ Manual',
+                'sheets': '📊 Sheets'
+            }.get(latest.source, '📡 Unknown')
             
             # Ambil semua record hari ini
             now_wib = datetime.utcnow() + timedelta(hours=7)
@@ -2241,6 +2248,7 @@ async def get_telegram_status() -> str:
             
             message = f"""
 {status_emoji} <b>STATUS TERKINI</b> {status_emoji}
+<i>Sumber: {source_label}</i>
 
 <b>📊 Pengukuran Terakhir:</b>
 • <b>Waktu:</b> {time_str}
@@ -2249,10 +2257,10 @@ async def get_telegram_status() -> str:
 • <b>PRX:</b> {latest.prx:.2f} dBm
 • <b>Confidence:</b> {latest.confidence:.1f}%
 
-<b>📈 Loss per KM:</b>
+<b>Loss per KM:</b>
 {loss_str}
 
-<b>🔄 Return Loss per KM:</b>
+<b>Return Loss per KM:</b>
 {return_str}
 
 <b>📋 Rekap Hari Ini:</b>
