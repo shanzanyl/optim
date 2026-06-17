@@ -1037,39 +1037,75 @@ def format_fault_detail(faults_map: dict) -> str:
     html += "</ul>"
     return html
 
-def get_rekap_response(query: str, context: dict) -> str | None:
-    """Buat response rekap berdasarkan query dan context"""
+def get_rekap_response(query: str, all_records: list = None) -> str | None:
+    """Buat response rekap dari data database (bukan dari context)"""
+    if all_records is None:
+        return None
+    
     query_lower = query.lower()
     
-    # Cek jenis rekap yang diminta
-    rekap_type = None
-    
-    if any(x in query_lower for x in ["hari ini", "today", "sekarang", "hari"]):
-        rekap_type = "hari_ini"
+    # 🔥 URUTAN: YANG LEBIH SPESIFIK DULUAN
+    if any(x in query_lower for x in ["30 hari", "30 hari terakhir", "bulan ini", "sebulan", "last 30 days", "month"]):
+        rekap_type = "30_hari"
+    elif any(x in query_lower for x in ["7 hari", "minggu ini", "seminggu", "last 7 days", "week"]):
+        rekap_type = "7_hari"
     elif any(x in query_lower for x in ["kemarin", "yesterday"]):
         rekap_type = "kemarin"
-    elif any(x in query_lower for x in ["7 hari", "minggu", "seminggu", "week"]):
-        rekap_type = "7_hari"
-    elif any(x in query_lower for x in ["30 hari", "bulan", "sebulan", "month"]):
-        rekap_type = "30_hari"
+    elif any(x in query_lower for x in ["hari ini", "today", "sekarang"]):
+        rekap_type = "hari_ini"
     elif any(x in query_lower for x in ["semua", "keseluruhan", "total", "all", "laporan"]):
         rekap_type = "semua"
     else:
         return None
     
-    # Ambil data dari context
-    total = context.get("Total Data", 0)
-    normal = context.get("Data Normal", 0)
-    gangguan = context.get("Data Gangguan", 0)
-    fault_detail = context.get("Rincian Gangguan", "Tidak ada data")
+    # 🔥 HITUNG DARI DATABASE
+    now_wib = datetime.utcnow() + timedelta(hours=7)
+    today_date = now_wib.date()
+    week_start_date = today_date - timedelta(days=6)
+    month_start_date = today_date.replace(day=1)
+    yesterday_date = today_date - timedelta(days=1)
+    
+    total = 0
+    normal = 0
+    gangguan = 0
+    faults = {}
+    
+    for rec in all_records:
+        if not rec.timestamp:
+            continue
+        rec_wib = rec.timestamp + timedelta(hours=7)
+        rec_date = rec_wib.date()
+        
+        is_fault = (rec.klasifikasi != "Normal")
+        
+        should_include = False
+        
+        if rekap_type == "hari_ini" and rec_date == today_date:
+            should_include = True
+        elif rekap_type == "kemarin" and rec_date == yesterday_date:
+            should_include = True
+        elif rekap_type == "7_hari" and rec_date >= week_start_date:
+            should_include = True
+        elif rekap_type == "30_hari" and rec_date >= month_start_date:
+            should_include = True
+        elif rekap_type == "semua":
+            should_include = True
+        
+        if should_include:
+            total += 1
+            if is_fault:
+                gangguan += 1
+                faults[(rec.klasifikasi, rec.status)] = faults.get((rec.klasifikasi, rec.status), 0) + 1
+            else:
+                normal += 1
     
     # Format detail
-    detail = fault_detail if fault_detail else "✅ Tidak ada gangguan"
+    detail = format_fault_detail(faults)
     
     # Status
     status = "🟢 Normal" if gangguan == 0 else "🟡 Ada Gangguan" if gangguan < 5 else "🔴 Banyak Gangguan"
     
-    # Trend atau status tambahan
+    # Trend
     trend = ""
     performance = ""
     
@@ -1082,14 +1118,15 @@ def get_rekap_response(query: str, context: dict) -> str | None:
             trend = "✅ Kondisi jaringan stabil, tidak ada gangguan"
     
     if rekap_type == "semua":
-        if gangguan == 0:
-            performance = "✅ Sistem berjalan dengan sangat baik!"
-        elif gangguan < total * 0.1:
-            performance = "🟢 Performa baik, gangguan minimal (< 10%)"
-        elif gangguan < total * 0.2:
-            performance = "🟡 Perlu perhatian, gangguan sedang (10-20%)"
-        else:
-            performance = "🔴 Perlu evaluasi serius, gangguan tinggi (> 20%)"
+        if total > 0:
+            if gangguan == 0:
+                performance = "✅ Sistem berjalan dengan sangat baik!"
+            elif gangguan < total * 0.1:
+                performance = "🟢 Performa baik, gangguan minimal (< 10%)"
+            elif gangguan < total * 0.2:
+                performance = "🟡 Perlu perhatian, gangguan sedang (10-20%)"
+            else:
+                performance = "🔴 Perlu evaluasi serius, gangguan tinggi (> 20%)"
     
     # Nama rekap
     rekap_names = {
@@ -1123,13 +1160,13 @@ def get_rekap_response(query: str, context: dict) -> str | None:
     
     return response
 
-def get_local_knowledge_response(query: str, context: dict = None) -> str | None:
+def get_local_knowledge_response(query: str, all_records: list = None) -> str | None:
     """Cari jawaban dari local knowledge base berdasarkan kata kunci"""
     query_lower = query.lower()
     
-    # 🔥 CEK REKAP GANGGUAN DULU (prioritas tinggi)
-    if context:
-        rekap_response = get_rekap_response(query, context)
+    # 🔥 CEK REKAP GANGGUAN DARI DATABASE (prioritas tinggi)
+    if all_records is not None:
+        rekap_response = get_rekap_response(query, all_records)
         if rekap_response:
             return rekap_response
     
@@ -1157,49 +1194,8 @@ async def chat(
     if not user_message:
         return {"response": "Pesan tidak boleh kosong.", "source": "error"}
     
-    # 🔥 CEK LOCAL KNOWLEDGE BASE DULU
-    local_response = get_local_knowledge_response(user_message, context_state)
-    if local_response:
-        logger.info(f"[CHAT] Menggunakan Local Knowledge untuk: {user_message[:50]}")
-        return {"response": local_response, "source": "local_knowledge"}
-    
-    # 🔥 COBA GEMINI AI
+    # 🔥 AMBIL DATA DARI DATABASE
     try:
-        if gemini_client and GEMINI_API_KEY:
-            try:
-                # Coba pakai Gemini
-                prompt = f"""
-                Anda adalah asisten OptiM. Jawab pertanyaan ini dengan ringkas dan informatif.
-                Pertanyaan: {user_message}
-                Context: {json.dumps(context_state, indent=2)}
-                """
-                
-                # Pakai client yang sesuai
-                if gemini_model_name == "gemini-2.5-flash":
-                    response = gemini_client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt
-                    )
-                    reply = response.text
-                else:
-                    # Legacy client
-                    reply = gemini_client.generate_content(prompt).text
-                
-                if reply:
-                    logger.info(f"[CHAT] Gemini AI berhasil merespon")
-                    return {"response": reply, "source": "gemini_ai"}
-                    
-            except Exception as e:
-                logger.warning(f"[CHAT] Gemini AI error: {e}")
-    
-    except Exception as e:
-        logger.warning(f"[CHAT] Gemini AI tidak tersedia: {e}")
-    
-    # 🔥 FALLBACK: DB Aware Response
-    try:
-        now_wib = datetime.utcnow() + timedelta(hours=7)
-        
-        # Ambil data sheets (source="sheets") + data user jika login
         if current_user:
             stmt_all = select(OtdrResult).where(
                 (OtdrResult.source == "sheets") | 
@@ -1212,17 +1208,59 @@ async def chat(
         
         result_all = await db.execute(stmt_all)
         all_records = result_all.scalars().all()
-        
         logger.info(f"[CHAT] Total records fetched: {len(all_records)}")
-        
-        current_index = request.get("current_index", None)
-        if current_index is not None:
+    except Exception as e:
+        logger.error(f"[CHAT] Gagal ambil data: {e}")
+        all_records = []
+    
+    # 🔥 CEK LOCAL KNOWLEDGE BASE DENGAN DATA DATABASE
+    local_response = get_local_knowledge_response(user_message, all_records)
+    if local_response:
+        logger.info(f"[CHAT] Menggunakan Local Knowledge untuk: {user_message[:50]}")
+        return {"response": local_response, "source": "local_knowledge"}
+    
+    # 🔥 COBA GEMINI AI (tetap pakai context_state)
+    try:
+        if gemini_client and GEMINI_API_KEY:
             try:
-                idx = int(current_index)
-                if 0 <= idx < len(all_records):
-                    all_records = all_records[:idx + 1]
-            except Exception:
-                pass
+                prompt = f"""
+                Anda adalah asisten OptiM. Jawab pertanyaan ini dengan ringkas dan informatif.
+                Pertanyaan: {user_message}
+                Context: {json.dumps(context_state, indent=2)}
+                """
+                
+                if gemini_model_name == "gemini-2.5-flash":
+                    response = gemini_client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt
+                    )
+                    reply = response.text
+                else:
+                    reply = gemini_client.generate_content(prompt).text
+                
+                if reply:
+                    logger.info(f"[CHAT] Gemini AI berhasil merespon")
+                    return {"response": reply, "source": "gemini_ai"}
+                    
+            except Exception as e:
+                logger.warning(f"[CHAT] Gemini AI error: {e}")
+    
+    except Exception as e:
+        logger.warning(f"[CHAT] Gemini AI tidak tersedia: {e}")
+    
+    # 🔥 FALLBACK: DB Aware Response (tetap pakai yang sudah ada)
+    try:
+        now_wib = datetime.utcnow() + timedelta(hours=7)
+        
+        # 🔥 HAPUS filter current_index - biar semua data terbaca
+        # current_index = request.get("current_index", None)
+        # if current_index is not None:
+        #     try:
+        #         idx = int(current_index)
+        #         if 0 <= idx < len(all_records):
+        #             all_records = all_records[:idx + 1]
+        #     except Exception:
+        #         pass
         
         today_date = now_wib.date()
         week_start_date = today_date - timedelta(days=6)
@@ -1286,9 +1324,6 @@ async def chat(
         month_detail = fmt_detail(month_faults)
         all_detail = fmt_detail(all_faults)
         
-        daily_records = []
-        history_records = list(reversed(all_records))[:150]
-        
     except Exception as db_err:
         logger.error(f"[CHAT] DB error: {db_err}")
         return {"response": get_local_chatbot_response(user_message), "source": "local_fallback"}
@@ -1298,10 +1333,9 @@ async def chat(
         week_total, week_g, week_detail,
         month_total, month_g, month_detail,
         total_data, all_g_total, all_detail, latest,
-        daily_records, history_records
+        None, None
     )
     
-    # Kalau reply masih default, kasih response standar
     if reply == BOT_RESPONSES["default"]:
         reply = """
             <strong>Maaf, saya tidak bisa menjawab pertanyaan tersebut.</strong><br><br>
