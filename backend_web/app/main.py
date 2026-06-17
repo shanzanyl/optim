@@ -751,134 +751,174 @@ def make_db_aware_response(user_message: str, today_total: int, today_g: int, to
 # ═══════════════════════════════════════════════════════════════════
 
 LOCAL_KNOWLEDGE = {
-    "loss": {
-        "keywords": ["loss", "redaman", "attenuation", "loss km"],
+    # ... (loss, return_loss, prx tetap sama) ...
+    
+    # 🔥 GANTI: response khusus untuk setiap jenis gangguan
+    "fiber_cut": {
+        "keywords": ["fiber cut", "kabel putus", "putus", "cut", "cara perbaiki fiber cut", "perbaiki fiber cut"],
         "response": """
-            <strong>Apa itu Loss (Redaman)?</strong><br><br>
-            Loss atau redaman adalah <strong>penurunan kekuatan sinyal</strong> saat melewati serat optik. 
-            Diukur dalam satuan <strong>dB (decibel)</strong>.<br><br>
-            <strong>Nilai Normal:</strong><br>
-            • < 0.25 dB/km = Sangat Baik ✅<br>
-            • 0.25 - 0.35 dB/km = Normal 🟡<br>
-            • > 0.35 dB/km = Bermasalah 🔴<br><br>
-            <strong>Penyebab Loss Tinggi:</strong><br>
-            • Konektor kotor<br>
-            • Tekukan kabel<br>
-            • Sambungan buruk<br>
-            • Kabel putus (Fiber Cut)<br><br>
-            <strong>Cara Mengecek di OptiM:</strong><br>
-            Lihat grafik <strong>"Loss per KM"</strong> di Dashboard. 
-            Jika melebihi garis merah (threshold 1.2 dB), itu pertanda gangguan.
-        """
-    },
-    "return_loss": {
-        "keywords": ["return loss", "orl", "return", "pantulan"],
-        "response": """
-            <strong>Apa itu Return Loss (ORL)?</strong><br><br>
-            Return Loss atau <strong>Optical Return Loss (ORL)</strong> adalah 
-            <strong>besaran sinyal yang dipantulkan kembali</strong> ke sumber.<br><br>
-            <strong>Nilai Normal:</strong><br>
-            • < -45 dB = Baik ✅<br>
-            • -45 s/d -35 dB = Perlu Diwaspadai 🟡<br>
-            • > -35 dB = Buruk 🔴<br><br>
-            <strong>Mengapa Return Loss Penting?</strong><br>
-            • Pantulan tinggi dapat merusak laser sumber<br>
-            • Mengganggu kualitas sinyal<br>
-            • Menandakan ada masalah di konektor atau sambungan<br><br>
-            <strong>Di OptiM:</strong><br>
-            Cek grafik <strong>"Return Loss per KM"</strong> di Dashboard.
-        """
-    },
-    "prx": {
-        "keywords": ["prx", "received power", "daya terima", "rx power"],
-        "response": """
-            <strong>Apa itu PRX (Received Power)?</strong><br><br>
-            PRX atau <strong>Received Power</strong> adalah <strong>daya sinyal yang diterima</strong> 
-            oleh perangkat penerima di ujung jaringan.<br><br>
-            <strong>Nilai Normal:</strong><br>
-            • -14 s/d -20 dBm = Sinyal Kuat ✅<br>
-            • -20 s/d -24 dBm = Sinyal Cukup 🟡<br>
-            • < -24 dBm = Sinyal Lemah 🔴<br><br>
-            <strong>Penyebab PRX Rendah:</strong><br>
-            • Loss tinggi di sepanjang jalur<br>
-            • Konektor kotor<br>
-            • Jarak terlalu jauh<br>
-            • Fiber Cut<br><br>
-            <strong>Di OptiM:</strong><br>
-            Cek grafik <strong>"Signal Power (PRX) Monitoring"</strong> di Dashboard.
-        """
-    },
-    "jenis_gangguan": {
-        "keywords": ["gangguan", "jenis gangguan", "klasifikasi", "fiber cut", "bending", "dirty", "splice", "gap", "nearly", "solusi", "perbaikan", "troubleshoot", "cara perbaiki", "atasi"],
-        "response": """
-            <strong>Jenis-Jenis Gangguan Fiber Optik & Solusi Perbaikan</strong><br><br>
-            
-            <strong>1. Bending (Tekukan Makro)</strong> 🔄<br>
-            <strong>Ciri-ciri:</strong> Loss meningkat drastis, biasanya di KM tertentu.<br>
-            <strong>Penyebab:</strong> Kabel tertekuk melebihi radius minimum (≤ 30mm).<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • Periksa jalur kabel fisik di OTB/ODP<br>
-            • Rapihkan tumpukan serat, jangan sampai tertekuk<br>
-            • Gunakan bend limiter atau cable tray<br>
-            • Jika permanent, ganti kabel segment<br><br>
-            
-            <strong>2. Dirty Connector (Konektor Kotor)</strong> 🧹<br>
-            <strong>Ciri-ciri:</strong> Loss naik tiba-tiba, Return Loss jelek.<br>
-            <strong>Penyebab:</strong> Debu/kotoran di ujung ferrule konektor.<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • Bersihkan dengan Fiber Cleaning Cassette (1-2x putar)<br>
-            • Jika masih kotor, gunakan isopropil alkohol + tissue optik<br>
-            • Jangan sentuh ujung ferrule dengan jari!<br>
-            • Periksa adapter/sc itu sendiri, kadang kotor di dalamnya<br><br>
-            
-            <strong>3. Fiber Cut (Kabel Putus)</strong> ❌<br>
-            <strong>Ciri-ciri:</strong> Loss 0 dB di salah satu KM (sinyal hilang total).<br>
-            <strong>Penyebab:</strong> Kabel tergigit hewan, tertimpa, atau putus.<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • Lakukan OTDR untuk mencari titik putus (event reflective)<br>
-            • Pastikan lokasi putus dengan hitung jarak dari OTDR<br>
-            • Lakukan splicing ulang di titik putus<br>
-            • Jika akses sulit, tarik kabel baru segment tersebut<br><br>
-            
-            <strong>4. Bad Splice (Sambungan Buruk)</strong> 🔗<br>
-            <strong>Ciri-ciri:</strong> Loss tinggi di titik sambung, biasanya loss > 0.1 dB.<br>
-            <strong>Penyebab:</strong> Fusion splicing tidak sempurna (kotor, sudut tidak pas).<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • Potong kembali serat di titik sambung<br>
+            <strong>Fiber Cut (Kabel Putus)</strong> ❌<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss 0 dB di salah satu KM (sinyal hilang total)<br>
+            • PRX sangat rendah atau hilang<br>
+            • Return Loss tidak terbaca<br><br>
+            <strong>Penyebab:</strong><br>
+            • Kabel tergigit hewan (tikus, tupai)<br>
+            • Kabel tertimpa pohon/batu<br>
+            • Kabel putus akibat galian proyek<br>
+            • Konektor rusak/lepas<br><br>
+            <strong>✅ Saran Perbaikan Fiber Cut:</strong><br>
+            1. <strong>Identifikasi Lokasi Putus:</strong><br>
+            • Lakukan pengukuran OTDR untuk mencari titik putus (event reflective)<br>
+            • Hitung jarak titik putus dari OTDR<br>
+            • Catat koordinat/lokasi fisik<br><br>
+            2. <strong>Persiapan Perbaikan:</strong><br>
+            • Siapkan mesin fusion splicer<br>
+            • Siapkan splice protector sleeve<br>
+            • Siapkan kabel pigtail/jumper jika perlu<br>
+            • Gunakan safety goggles<br><br>
+            3. <strong>Proses Perbaikan:</strong><br>
+            • Buka akses ke titik putus (manhole, tiang, duct)<br>
+            • Potong ujung kabel yang rusak<br>
             • Lakukan splicing ulang dengan mesin fusion<br>
-            • Pastikan gain/splice loss ≤ 0.05 dB<br>
-            • Gunakan splice protector sleeve baru<br><br>
-            
-            <strong>5. Air Gap (Celah Udara)</strong> 💨<br>
-            <strong>Ciri-ciri:</strong> Loss tinggi, Return Loss sangat tinggi (pantulan besar).<br>
-            <strong>Penyebab:</strong> Konektor tidak terkunci rapat, ada celah udara.<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • Pastikan konektor terkunci rapat (klik terdengar)<br>
-            • Cek adapter, mungkin sudah aus<br>
-            • Ganti adapter/sc jika perlu<br>
-            • Pastikan ferrule tidak tertekan/miring<br><br>
-            
-            <strong>6. Nearly Cut (Hampir Putus)</strong> ⚠️<br>
-            <strong>Ciri-ciri:</strong> Loss sangat tinggi (≥ 2 dB), sinyal melemah drastis.<br>
-            <strong>Penyebab:</strong> Kabel hampir putus, biasanya akibat tekanan fisik.<br>
-            <strong>✅ Saran Perbaikan:</strong><br>
-            • SEGERA jadwalkan pemeliharaan preventif!<br>
-            • Cek lokasi dengan OTDR untuk temukan titik hampir putus<br>
-            • Lakukan splicing ulang sebelum benar-benar putus<br>
-            • Jika kabel tua, pertimbangkan penggantian segment<br><br>
-            
-            <strong>📌 Panduan Umum Troubleshooting:</strong><br>
-            1. <strong>Cek PRX</strong> - Kalau < -24 dBm, sinyal lemah<br>
-            2. <strong>Cek Loss per KM</strong> - Di atas 1.2 dB = bermasalah<br>
-            3. <strong>Cek Return Loss</strong> - Di atas -35 dB = ada pantulan<br>
-            4. <strong>Bandingkan dengan data sebelumnya</strong> - Loss naik drastis = ada perubahan<br>
-            5. <strong>Gunakan OTDR</strong> - Untuk lokasi pasti gangguan<br><br>
-            
-            <strong>📱 Fitur OptiM yang membantu:</strong><br>
-            • <strong>Dashboard</strong> - Monitoring real-time semua parameter<br>
-            • <strong>Upload Foto OTDR</strong> - Analisis cepat dari printout<br>
-            • <strong>Manual Input</strong> - Simulasi dan verifikasi data<br>
-            • <strong>History</strong> - Lacak tren gangguan sebelumnya
+            • Pastikan splice loss ≤ 0.05 dB<br>
+            • Pasang splice protector dan panaskan<br><br>
+            4. <strong>Verifikasi:</strong><br>
+            • Lakukan pengukuran OTDR ulang<br>
+            • Cek Loss sudah normal (≤ 0.25 dB/km)<br>
+            • Cek PRX sudah normal (≥ -20 dBm)<br>
+            • Pastikan tidak ada pantulan tinggi<br><br>
+            <strong>⚠️ Peringatan:</strong><br>
+            • Jangan lihat langsung ke ujung kabel fiber (bahaya mata!)<br>
+            • Pastikan laser OTDR dimatikan sebelum membersihkan konektor<br>
+            • Gunakan alat yang tepat dan steril
+        """
+    },
+    "bending": {
+        "keywords": ["bending", "tekukan", "tekuk", "makro bending", "cara perbaiki bending"],
+        "response": """
+            <strong>Bending (Tekukan Makro)</strong> 🔄<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss meningkat drastis di KM tertentu<br>
+            • PRX turun tapi tidak hilang total<br>
+            • Return Loss biasanya normal<br><br>
+            <strong>Penyebab:</strong><br>
+            • Kabel tertekuk melebihi radius minimum (≤ 30mm)<br>
+            • Tumpukan serat di OTB/ODP tidak rapi<br>
+            • Kabel tertekan atau terjepit<br><br>
+            <strong>✅ Saran Perbaikan Bending:</strong><br>
+            1. Periksa jalur kabel fisik di OTB/ODP<br>
+            2. Rapihkan tumpukan serat, jangan sampai tertekuk<br>
+            3. Gunakan bend limiter atau cable tray<br>
+            4. Pastikan radius tekuk ≥ 30mm<br>
+            5. Jika permanent, ganti kabel segment<br><br>
+            <strong>Verifikasi:</strong><br>
+            • Cek Loss sudah turun di bawah 1.2 dB<br>
+            • Cek PRX kembali normal
+        """
+    },
+    "dirty_connector": {
+        "keywords": ["dirty", "konektor kotor", "connector kotor", "kotor", "cara perbaiki konektor", "perbaiki connector"],
+        "response": """
+            <strong>Dirty Connector (Konektor Kotor)</strong> 🧹<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss naik tiba-tiba (spike)<br>
+            • Return Loss jelek (pantulan tinggi)<br>
+            • PRX turun drastis<br><br>
+            <strong>Penyebab:</strong><br>
+            • Debu/kotoran di ujung ferrule konektor<br>
+            • Minyak dari jari saat menyentuh ujung konektor<br>
+            • Adapter/sc kotor di dalamnya<br><br>
+            <strong>✅ Saran Perbaikan Dirty Connector:</strong><br>
+            1. <strong>Bersihkan dengan Fiber Cleaning Cassette:</strong><br>
+            • Masukkan konektor ke cleaner<br>
+            • Putar 1-2 kali<br>
+            • Tarik keluar<br><br>
+            2. <strong>Jika masih kotor:</strong><br>
+            • Gunakan isopropil alkohol 99%<br>
+            • Gunakan tissue optik khusus (bukan tissue biasa!)<br>
+            • Usap dengan lembut 1 arah<br>
+            • Biarkan kering sebelum dipasang<br><br>
+            3. <strong>⚠️ Peringatan:</strong><br>
+            • JANGAN sentuh ujung ferrule dengan jari!<br>
+            • JANGAN gunakan tissue biasa (bisa menggores)<br>
+            • Periksa adapter/sc, kadang kotor di dalamnya<br><br>
+            4. <strong>Verifikasi:</strong><br>
+            • Cek Loss sudah normal<br>
+            • Cek Return Loss sudah di bawah -45 dB<br>
+            • Cek PRX kembali normal
+        """
+    },
+    "bad_splice": {
+        "keywords": ["bad splice", "splice", "sambungan buruk", "splicing", "cara perbaiki splice"],
+        "response": """
+            <strong>Bad Splice (Sambungan Buruk)</strong> 🔗<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss tinggi di titik sambung (loss > 0.1 dB)<br>
+            • Return Loss normal atau sedikit tinggi<br>
+            • PRX turun<br><br>
+            <strong>Penyebab:</strong><br>
+            • Fusion splicing tidak sempurna (kotor)<br>
+            • Sudut potong tidak pas<br>
+            • Arc power tidak sesuai<br><br>
+            <strong>✅ Saran Perbaikan Bad Splice:</strong><br>
+            1. Potong kembali serat di titik sambung<br>
+            2. Bersihkan serat dengan alkohol<br>
+            3. Lakukan splicing ulang dengan mesin fusion<br>
+            4. Pastikan gain/splice loss ≤ 0.05 dB<br>
+            5. Gunakan splice protector sleeve baru<br>
+            6. Panaskan splice protector dengan benar<br><br>
+            <strong>Verifikasi:</strong><br>
+            • Cek Loss sudah normal<br>
+            • Cek PRX kembali normal
+        """
+    },
+    "air_gap": {
+        "keywords": ["air gap", "celah udara", "gap", "cara perbaiki air gap"],
+        "response": """
+            <strong>Air Gap (Celah Udara)</strong> 💨<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss tinggi<br>
+            • Return Loss sangat tinggi (pantulan besar)<br>
+            • PRX turun<br><br>
+            <strong>Penyebab:</strong><br>
+            • Konektor tidak terkunci rapat<br>
+            • Ada celah udara di antara konektor<br>
+            • Adapter/sc aus<br>
+            • Ferrule tidak pas<br><br>
+            <strong>✅ Saran Perbaikan Air Gap:</strong><br>
+            1. Pastikan konektor terkunci rapat (klik terdengar)<br>
+            2. Cek adapter, mungkin sudah aus, ganti jika perlu<br>
+            3. Ganti adapter/sc jika sudah aus<br>
+            4. Pastikan ferrule tidak tertekan/miring<br>
+            5. Bersihkan konektor sebelum dipasang<br><br>
+            <strong>Verifikasi:</strong><br>
+            • Cek Loss sudah normal<br>
+            • Cek Return Loss sudah di bawah -45 dB<br>
+            • Cek PRX kembali normal
+        """
+    },
+    "nearly_cut": {
+        "keywords": ["nearly", "nearly cut", "hampir putus", "cara perbaiki nearly"],
+        "response": """
+            <strong>Nearly Cut (Hampir Putus)</strong> ⚠️<br><br>
+            <strong>Ciri-ciri:</strong><br>
+            • Loss sangat tinggi (≥ 2 dB)<br>
+            • Sinyal melemah drastis<br>
+            • PRX mendekati -30 dBm<br><br>
+            <strong>Penyebab:</strong><br>
+            • Kabel hampir putus akibat tekanan fisik<br>
+            • Kabel tergigit tapi belum putus total<br>
+            • Kabel tertekuk sangat parah<br><br>
+            <strong>✅ Saran Perbaikan Nearly Cut:</strong><br>
+            1. <strong>SEGERA!</strong> Jadwalkan pemeliharaan preventif<br>
+            2. Cek lokasi dengan OTDR untuk temukan titik hampir putus<br>
+            3. Lakukan splicing ulang sebelum benar-benar putus<br>
+            4. Jika kabel tua, pertimbangkan penggantian segment<br><br>
+            <strong>⚠️ Peringatan:</strong><br>
+            • Ini kondisi KRITIS!<br>
+            • Jangan tunda perbaikan<br>
+            • Bisa menjadi Fiber Cut kapan saja
         """
     },
     "troubleshoot": {
