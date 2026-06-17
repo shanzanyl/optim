@@ -650,6 +650,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
           />
         </section>
 
+
         {/* 🔥 PREDICTION RESULTS TABLE - VERSION DARI TEMAN (SUDAH COCOK) */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] p-8 w-full shadow-2xl overflow-hidden">
           <div className="flex justify-between items-center mb-8">
