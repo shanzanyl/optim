@@ -1722,13 +1722,15 @@ async def sync_from_sheets(
     
     df.columns = [c.strip() for c in df.columns]
 
-    df.columns = [c.strip() for c in df.columns]
-
     print("========== KOLOM GOOGLE SHEETS ==========")
     print(df.columns.tolist())
 
     print("========== CEK AVG-TOTAL BARIS PERTAMA ==========")
-    print(df.iloc[0]["Avg-Total"])
+    if 'Avg-Total' in df.columns:
+        print(f"Nilai: {df.iloc[0]['Avg-Total']}")
+    else:
+        print("⚠️ Kolom 'Avg-Total' TIDAK DITEMUKAN!")
+        print(f"Kolom yang tersedia: {df.columns.tolist()}")
     
     existing = await db.execute(
         select(OtdrResult).where(
@@ -1743,14 +1745,42 @@ async def sync_from_sheets(
     saved = 0
     errors = 0
     
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         try:
+            # 🔥 FUNGSI g() DIPERBAIKI DENGAN FALLBACK
             def g(col, default=0.0):
                 try:
+                    # Coba ambil langsung
                     val = row.get(col, default)
-                    return float(val) if pd.notna(val) else default
+                    if pd.notna(val) and val != '' and val != '-':
+                        return float(val)
+                    return default
                 except Exception:
                     return default
+            
+            # 🔥 AMBIL AVG-TOTAL DENGAN FALLBACK NAMA KOLOM
+            avg_total = 0.0
+            avg_total_cols = ['Avg-Total', 'Avg Total', 'AvgTotal', 'Average Total']
+            for col_name in avg_total_cols:
+                if col_name in df.columns:
+                    val = row.get(col_name, 0.0)
+                    try:
+                        if pd.notna(val) and val != '' and val != '-':
+                            avg_total = float(val)
+                            print(f"✅ ROW {idx}: Avg-Total dari '{col_name}' = {avg_total}")
+                            break
+                    except:
+                        continue
+            else:
+                # 🔥 FALLBACK: Hitung dari Avg-L
+                avg_l_values = []
+                for i in range(1, 5):
+                    val = g(f'Avg-L {i}', 0.0)
+                    if val > 0:
+                        avg_l_values.append(val)
+                if avg_l_values:
+                    avg_total = sum(avg_l_values) / len(avg_l_values)
+                    print(f"📊 ROW {idx}: Avg-Total dihitung dari Avg-L = {avg_total}")
             
             otdr_values = {
                 'Prx (dBm)': g('Prx (dBm)'),
@@ -1761,15 +1791,14 @@ async def sync_from_sheets(
                 'Total-L 3': g('Total-L 3'), 'Total-L 4': g('Total-L 4'),
                 'Avg-L 1': g('Avg-L 1'), 'Avg-L 2': g('Avg-L 2'),
                 'Avg-L 3': g('Avg-L 3'), 'Avg-L 4': g('Avg-L 4'),
-                'Avg-Total': g('Avg-Total'),
+                'Avg-Total': avg_total,  # 🔥 PAKAI avg_total YANG SUDAH DIPARSE
                 'Return 1': g('Return 1'), 'Return 2': g('Return 2'),
                 'Return 3': g('Return 3'), 'Return 4': g('Return 4'),
             }
             
             pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
 
-            print("AVG TOTAL RAW:", row.get("Avg-Total"))
-            print("AVG TOTAL SETELAH G:", g("Avg-Total"))
+            print(f"🔍 ROW {idx}: Avg-Total FINAL = {avg_total}")
             
             record = OtdrResult(
                 user_id=current_user.id,
@@ -1785,7 +1814,7 @@ async def sync_from_sheets(
                 total_l_3=g('Total-L 3'), total_l_4=g('Total-L 4'),
                 avg_l_1=g('Avg-L 1'), avg_l_2=g('Avg-L 2'),
                 avg_l_3=g('Avg-L 3'), avg_l_4=g('Avg-L 4'),
-                avg_total=g('Avg-Total'),
+                avg_total=avg_total,  # 🔥 PAKAI avg_total YANG SUDAH DIPARSE
                 return_1=g('Return 1'), return_2=g('Return 2'),
                 return_3=g('Return 3'), return_4=g('Return 4'),
                 klasifikasi=pred.get("prediction"),
