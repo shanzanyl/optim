@@ -2235,11 +2235,22 @@ async def handle_telegram_command(update: dict) -> str | None:
 async def get_telegram_status() -> str:
     """Ambil status dari DASHBOARD slide"""
     global last_dashboard_slide_index, last_dashboard_slide_data
-    try:        
-        if not last_dashboard_slide_data:
-            return "📡 Data dashboard belum tersedia. Coba lagi nanti."
+    
+    try:
+        # 🔥 CEK APAKAH ADA DATA SLIDE
+        if last_dashboard_slide_data is None:
+            return "📡 Belum ada data slide. Buka Dashboard dulu ya!"
         
-        # Ambil rekap hari ini
+        # 🔥 LANGSUNG PAKAI DATA DARI SLIDE
+        record = last_dashboard_slide_data
+        slide_info = f" (Dashboard Slide #{last_dashboard_slide_index + 1})"
+        source_label = {
+            'ocr': '📷 OCR',
+            'manual': '✏️ Manual',
+            'sheets': '📊 Sheets'
+        }.get(record.source, '📡 Unknown')
+        
+        # Ambil rekap hari ini (tetap dari database)
         async with AsyncSessionLocal() as db:
             result_today = await db.execute(
                 select(OtdrResult)
@@ -2299,7 +2310,7 @@ async def get_telegram_status() -> str:
             
     except Exception as e:
         logger.error(f"[TELEGRAM] Error get status from dashboard: {e}")
-        return "❌ Gagal mengambil data dashboard. Coba lagi nanti."
+        return f"❌ Gagal mengambil data dashboard. Error: {str(e)}"
 
 async def get_telegram_rekap() -> str:
     """Rekap gangguan hari ini"""
@@ -2370,7 +2381,7 @@ def get_telegram_help() -> str:
 
 <b>📋 Perintah yang tersedia:</b>
 
-• <b>/status</b> - Cek status pengukuran terakhir
+• <b>/status</b> - Cek status dari Dashboard (slide yang sedang ditampilkan)
 • <b>/rekap</b> - Lihat rekap gangguan hari ini
 • <b>/help</b> - Tampilkan bantuan ini
 
