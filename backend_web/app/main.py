@@ -1632,6 +1632,7 @@ async def detect_ocr(
             except Exception as tg_err:
                 logger.error(f"[TELEGRAM] Error: {tg_err}")
         
+        
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR: {e}")
         await db.rollback()
