@@ -159,6 +159,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       setImageStatus('error');
     }
   };
+  
 
   const {
     currentIndex,
