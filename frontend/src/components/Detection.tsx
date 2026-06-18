@@ -351,19 +351,19 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
       const result = await response.json();
 
-      if (result.extracted) {
-        if (!result.extracted.avg_ls && result.extracted.total_ls && result.extracted.distances) {
-          result.extracted.avg_ls = result.extracted.total_ls.map((total: number, i: number) => {
-            const dist = result.extracted.distances[i] || 1;
-            return total / dist;
-          });
-        }
-        if (!result.extracted.avg_total && result.extracted.total_ls && result.extracted.distances) {
-          const totalTotalL = result.extracted.total_ls[3] || 0;
-          const totalDistance = result.extracted.distances[3] || 1;
-          result.extracted.avg_total = totalTotalL / totalDistance;
-        }
-      }
+      // if (result.extracted) {
+      //   if (!result.extracted.avg_ls && result.extracted.total_ls && result.extracted.distances) {
+      //     result.extracted.avg_ls = result.extracted.total_ls.map((total: number, i: number) => {
+      //       const dist = result.extracted.distances[i] || 1;
+      //       return total / dist;
+      //     });
+      //   }
+      //   if (!result.extracted.avg_total && result.extracted.total_ls && result.extracted.distances) {
+      //     const totalTotalL = result.extracted.total_ls[3] || 0;
+      //     const totalDistance = result.extracted.distances[3] || 1;
+      //     result.extracted.avg_total = totalTotalL / totalDistance;
+      //   }
+      // }
 
       setLastResult(result);
       setImageStatus('success');
@@ -565,7 +565,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-white font-black text-sm">{lastResult.prx?.toFixed(1)} dBm</span>
+                    <span className="text-white font-black text-sm">{lastResult.prx?.toString()} dBm</span>
                     <span className="text-[10px] text-white ml-2">({lastResult.prx_source === 'manual' ? 'input manual' : lastResult.prx_source === 'ocr' ? 'dari OCR' : 'default'})</span>
                   </div>
                 </div>
@@ -602,7 +602,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString(2)} dB/km</span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toFixed(2)} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
