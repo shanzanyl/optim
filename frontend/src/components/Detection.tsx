@@ -602,7 +602,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString()} dB/km</span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString(2)} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">

@@ -2023,15 +2023,27 @@ async def detect_manual(
         except:
             return 0.0
     
-    d1 = g('distance_1', 1.00447)
-    d2 = g('distance_2', 2.00639)
-    d3 = g('distance_3', 3.01036)
-    d4 = g('distance_4', 4.01432)
+    d1 = g('distance_1', 0.0)
+    d2 = g('distance_2', 0.0)
+    d3 = g('distance_3', 0.0)
+    d4 = g('distance_4', 0.0)
     
     l1 = g('loss_1', 0.0)
     l2 = g('loss_2', 0.0)
     l3 = g('loss_3', 0.0)
-    l4 = get_loss_4()  # Bisa None
+    l4 = payload.get('loss_4')  # Bisa None
+    
+    tl1 = g('total_l_1', 0.0)
+    tl2 = g('total_l_2', 0.0)
+    tl3 = g('total_l_3', 0.0)
+    tl4 = g('total_l_4', 0.0)
+    
+    al1 = g('avg_l_1', 0.0)
+    al2 = g('avg_l_2', 0.0)
+    al3 = g('avg_l_3', 0.0)
+    al4 = g('avg_l_4', 0.0)
+    
+    avg_total = g('avg_total', 0.0)
     
     r1 = g('return_1', 0.0)
     r2 = g('return_2', 0.0)
@@ -2039,30 +2051,6 @@ async def detect_manual(
     r4 = g('return_4', 0.0)
     
     prx = g('prx', -15.6)
-    
-    # 🔥 Total-L: loss_4 None berarti tidak dihitung
-    tl1 = g('total_l_1', l1)
-    tl2 = g('total_l_2', l1 + l2)
-    tl3 = g('total_l_3', l1 + l2 + l3)
-    
-    # 🔥 Kalau l4 None, total_l_4 tetap pakai dari payload
-    if l4 is None:
-        tl4 = g('total_l_4', 0.0)
-    else:
-        tl4 = g('total_l_4', l1 + l2 + l3 + l4)
-    
-    # 🔥 Avg-L: kalau loss_4 None, avg_l_4 dihitung dari total_l_4 / distance_4
-    al1 = g('avg_l_1', tl1 / d1 if d1 > 0 else 0.0)
-    al2 = g('avg_l_2', tl2 / d2 if d2 > 0 else 0.0)
-    al3 = g('avg_l_3', tl3 / d3 if d3 > 0 else 0.0)
-    
-    # 🔥 Avg-L 4: pakai total_l_4 / distance_4
-    if l4 is None:
-        al4 = tl4 / d4 if d4 > 0 else 0.0
-    else:
-        al4 = g('avg_l_4', tl4 / d4 if d4 > 0 else 0.0)
-    
-    avg_total = round(g('avg_total', tl4 / d4 if d4 > 0 else 0.0), 2)  
     
     # 🔥 OTDR VALUES UNTUK ML: TIDAK PAKAI LOSS 4!
     # Karena ML tidak pakai Loss 4
