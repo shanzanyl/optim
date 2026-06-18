@@ -370,7 +370,7 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
             ? 'bg-red-500/10 border-red-500/20'
             : 'bg-amber-500/10 border-amber-500/20'
         }`}>
-          <p className={`text-[9px] md:text-[11px] text-center font-bold ${
+          <p className={`text-[11px] md:text-[13px] text-center font-bold ${
             isFiberCut ? 'text-red-400' : 'text-amber-400'
           }`}>
             {gangguanMessage}

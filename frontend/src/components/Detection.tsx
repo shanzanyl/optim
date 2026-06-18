@@ -97,13 +97,63 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return_1: '', return_2: '', return_3: '', return_4: ''
   });
 
+  // 🔥 TAMBAH: State untuk timestamp real-time
+  const [displayTimestamps, setDisplayTimestamps] = useState<Record<number, string>>(() => {
+    try {
+      const saved = localStorage.getItem('detection_display_timestamps');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [sentAlerts, setSentAlerts] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem('detection_display_timestamps', JSON.stringify(displayTimestamps));
+  }, [displayTimestamps]);
+
+  useEffect(() => {
+    localStorage.setItem('detection_display_timestamps', JSON.stringify(displayTimestamps));
+  }, [displayTimestamps]);
+
+  // 🔥 TAMBAH: Update timestamp saat result baru muncul
+  useEffect(() => {
+    if (!lastResult) return;
+    const timestamp = new Date().toISOString();
+    setDisplayTimestamps(prev => {
+      const latestRecord = allHistory.length > 0 ? allHistory[allHistory.length - 1] : null;
+      if (latestRecord) {
+        return {
+          ...prev,
+          [latestRecord.id]: timestamp
+        };
+      }
+      return prev;
+    });
+  }, [lastResult, allHistory]);
+
+  // 🔥 GANTI: Fungsi format waktu
+  const formatDisplayTime = (timestamp: string | null) => {
+    if (!timestamp) return '—';
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '—';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}.${minutes}`;
+  };
+
   const handleManualClassify = async (e: React.FormEvent) => {
     e.preventDefault();
     setImageStatus('uploading');
     setErrorMsg('');
     setLastResult(null);
 
-    // 🔥 FIX: loss_4 bisa null (karena field disabled)
     const loss4 = manualForm.loss_4 ? parseFloat(manualForm.loss_4) : null;
 
     const payload = {
@@ -116,7 +166,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       loss_1: parseFloat(manualForm.loss_1) || 0.0,
       loss_2: parseFloat(manualForm.loss_2) || 0.0,
       loss_3: parseFloat(manualForm.loss_3) || 0.0,
-      loss_4: loss4, // 🔥 Bisa null
+      loss_4: loss4,
       total_l_1: parseFloat(manualForm.total_l_1) || 0.0,
       total_l_2: parseFloat(manualForm.total_l_2) || 0.0,
       total_l_3: parseFloat(manualForm.total_l_3) || 0.0,
@@ -133,7 +183,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
     const token = localStorage.getItem('token');
     try {
-      // 🔥 FIX: Endpoint yang benar
       const response = await fetch(`${API_BASE}/api/detect-manual`, {
         method: 'POST',
         headers: {
@@ -159,7 +208,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       setImageStatus('error');
     }
   };
-  
 
   const {
     currentIndex,
@@ -172,25 +220,33 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
   const [prevTotalData, setPrevTotalData] = useState(0);
 
-  // 🔥 PERBAIKAN 1: Effect untuk trigger Telegram Alert (dipisah dari autoPlay)
   useEffect(() => {
     if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
     const currentRecord = allHistory[currentIndex];
     if (!currentRecord) return;
 
     const status = currentRecord.status || '';
+    
+    // 🔥 CEK: Hanya kirim alert jika status Warning/Critical dan BELUM PERNAH dikirim
     if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
+      // 🔥 Cek apakah sudah pernah dikirim
+      if (sentAlerts.has(currentRecord.id)) {
+        console.log(`Alert for ID ${currentRecord.id} already sent, skipping.`);
+        return;
+      }
+      
       triggerSlideAlert(currentRecord.id)
         .then((res: { status: string }) => {
           if (res.status === 'sent') {
             console.log(`Telegram alert sent automatically from Detection for record ID: ${currentRecord.id}`);
+            // 🔥 Tandai sebagai sudah dikirim
+            setSentAlerts(prev => new Set(prev).add(currentRecord.id));
           }
         })
         .catch((err: any) => console.error('Error triggering slide alert:', err));
     }
-  }, [currentIndex, allHistory, isLoadingHistory]);
+  }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
 
-  // 🔥 PERBAIKAN 2: Effect untuk AutoPlay
   useEffect(() => {
     if (!autoPlay || allHistory.length === 0) return;
 
@@ -211,7 +267,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return () => clearInterval(interval);
   }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
 
-  // 🔥 PERUBAHAN: Hanya menampilkan data dari source 'ocr' dan 'manual' (tidak termasuk 'sheets')
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
     try {
@@ -222,7 +277,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       if (!response.ok) throw new Error('Failed to fetch history');
       const result = await response.json();
 
-      // 🔥 FILTER: Hanya ambil data dengan source 'ocr' atau 'manual'
       const mappedHistory = (result.history || [])
         .filter((record: any) => record.source === 'ocr' || record.source === 'manual')
         .map((record: any) => ({
@@ -328,7 +382,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   return (
     <div className="min-h-screen bg-[#14213d] text-slate-300 font-sans pb-20 w-full">
       <div className="space-y-6 p-6">
-        {/* Progress Slideshow */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs text-white">Slide Show Progress (Classification)</span>
@@ -344,15 +397,13 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
 
-        {/* Upload + Hasil */}
+        {/* Upload + Hasil - SEMUA TETAP SAMA */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Input & Form Card */}
           <div className={`bg-[#1e2f50] p-6 sm:p-8 rounded-2xl border transition-all ${imageStatus === 'success' ? 'border-emerald-500/50 bg-emerald-500/5' :
             imageStatus === 'error' ? 'border-red-500/50' :
               imageStatus === 'uploading' ? 'border-blue-500/50 bg-blue-500/5' :
                 'border-[#3b4f6e] hover:border-blue-500/50'
             }`}>
-            {/* Toggle Metode Input */}
             <div className="flex bg-[#0f1a2e] p-1 rounded-xl mb-6 border border-[#3b4f6e]">
               <button
                 type="button"
@@ -389,17 +440,13 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
                 <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
-
                 {preview && (
                   <div className="mb-4 rounded-xl overflow-hidden border border-[#3b4f6e]">
                     <img src={preview} alt="Preview OTDR" className="w-full h-40 object-cover" />
                   </div>
                 )}
-
                 <div className="mb-5">
-                  <label className="text-sm font-bold text-white mb-1.5 block">
-                    Input Prx Value (dBm)
-                  </label>
+                  <label className="text-sm font-bold text-white mb-1.5 block">Input Prx Value (dBm)</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -407,13 +454,11 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       value={prxManual}
                       onChange={e => setPrxManual(e.target.value)}
                       placeholder="-15.6"
-                      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
-                        text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
+                      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
                     />
                     <span className="text-sm text-white whitespace-nowrap">dBm</span>
                   </div>
                 </div>
-
                 <input
                   type="file"
                   accept="image/*"
@@ -424,52 +469,23 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 />
                 <label
                   htmlFor="image-upload"
-                  className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center
-                    transition-all font-semibold text-white text-sm ${imageStatus === 'uploading'
-                      ? 'bg-slate-600 cursor-wait'
-                      : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
-                    }`}
+                  className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center transition-all font-semibold text-white text-sm ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
                 >
-                  {imageStatus === 'uploading' ? 'Processing...' :
-                    imageStatus === 'success' ? 'Upload Again' :
-                      imageStatus === 'error' ? 'Try Again' : 'Select OTDR Photo'}
+                  {imageStatus === 'uploading' ? 'Processing...' : imageStatus === 'success' ? 'Upload Again' : imageStatus === 'error' ? 'Try Again' : 'Select OTDR Photo'}
                 </label>
               </>
             ) : (
               <form onSubmit={handleManualClassify} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">
-                      Prx (dBm)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={manualForm.prx}
-                      onChange={e => setManualForm({ ...manualForm, prx: e.target.value })}
-                      placeholder="-15.60"
-                      className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
-                        text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono"
-                    />
+                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">Prx (dBm)</label>
+                    <input type="number" step="0.01" required value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                   <div>
-                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">
-                      Avg-Total (dB/km)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.001"
-                      required
-                      value={manualForm.avg_total}
-                      onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })}
-                      placeholder="0.250"
-                      className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg
-                        text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono"
-                    />
+                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
+                    <input type="number" step="0.001" required value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                 </div>
-
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
                   <table className="w-full text-left text-xs min-w-[500px]">
                     <thead>
@@ -487,75 +503,29 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
                           <td className="p-2 font-bold text-white text-xs">KM {km}</td>
                           <td className="p-2">
-                            <input
-                              type="number"
-                              step="0.00001"
-                              required
-                              value={manualForm[`distance_${km}` as keyof typeof manualForm]}
-                              onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })}
-                              placeholder="0.0"
-                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
-                            />
+                            <input type="number" step="0.00001" required value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input
-                              type="number"
-                              step="0.001"
-                              required={km !== 4}
-                              disabled={km === 4}
-                              value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]}
-                              onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })}
-                              placeholder={km === 4 ? '—' : '0.0'}
-                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45"
-                            />
+                            <input type="number" step="0.001" required={km !== 4} disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
                           </td>
                           <td className="p-2">
-                            <input
-                              type="number"
-                              step="0.001"
-                              required
-                              value={manualForm[`total_l_${km}` as keyof typeof manualForm]}
-                              onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })}
-                              placeholder="0.0"
-                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
-                            />
+                            <input type="number" step="0.001" required value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input
-                              type="number"
-                              step="0.001"
-                              required
-                              value={manualForm[`avg_l_${km}` as keyof typeof manualForm]}
-                              onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })}
-                              placeholder="0.0"
-                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
-                            />
+                            <input type="number" step="0.001" required value={manualForm[`avg_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input
-                              type="number"
-                              step="0.01"
-                              required
-                              value={manualForm[`return_${km}` as keyof typeof manualForm]}
-                              onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })}
-                              placeholder="0.0"
-                              className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none"
-                            />
+                            <input type="number" step="0.01" required value={manualForm[`return_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-
                 <button
                   type="submit"
                   disabled={imageStatus === 'uploading'}
-                  className={`w-full px-6 py-2.5 rounded-xl flex items-center justify-center
-                    transition-all font-semibold text-white text-sm mt-4 ${imageStatus === 'uploading'
-                      ? 'bg-slate-600 cursor-wait'
-                      : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'
-                    }`}
+                  className={`w-full px-6 py-2.5 rounded-xl flex items-center justify-center transition-all font-semibold text-white text-sm mt-4 ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
                 >
                   {imageStatus === 'uploading' ? 'Memproses Klasifikasi...' : 'Proses Klasifikasi Manual'}
                 </button>
@@ -563,7 +533,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             )}
           </div>
 
-          {/* Hasil Terakhir */}
           <div className="bg-[#1e2f50] p-8 rounded-2xl border border-[#3b4f6e]">
             <h3 className="text-lg font-bold text-white mb-4 uppercase tracking-widest">Result Classification</h3>
             {imageStatus === 'uploading' && (
@@ -586,14 +555,10 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             )}
             {lastResult && imageStatus === 'success' && (
               <div className="space-y-4">
-                <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                  lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                    'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  }`}>
+                <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
                   <p className="text-2xl font-black">{lastResult.prediction}</p>
                 </div>
-
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Info size={14} className="text-blue-400" />
@@ -601,63 +566,45 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   </div>
                   <div className="text-right">
                     <span className="text-white font-black text-sm">{lastResult.prx?.toFixed(1)} dBm</span>
-                    <span className="text-[10px] text-white ml-2">
-                      ({lastResult.prx_source === 'manual' ? 'input manual' :
-                        lastResult.prx_source === 'ocr' ? 'dari OCR' : 'default'})
-                    </span>
+                    <span className="text-[10px] text-white ml-2">({lastResult.prx_source === 'manual' ? 'input manual' : lastResult.prx_source === 'ocr' ? 'dari OCR' : 'default'})</span>
                   </div>
                 </div>
-
-                {/* Nilai Terdeteksi */}
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detected Values</p>
-
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Loss KM {i + 1}</span>
-                        <span className="text-white font-mono">
-                          {l === null || l === undefined || l === 0 ? '---' : l.toString()} dB
-                        </span>
+                        <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : l.toString()} dB</span>
                       </div>
                     ))}
                   </div>
-
                   {lastResult.extracted.total_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Total-L KM {i + 1}</span>
-                          <span className="text-white font-mono">
-                            {tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB
-                          </span>
+                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB</span>
                         </div>
                       ))}
                     </div>
                   )}
-
                   {lastResult.extracted.avg_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Avg-L KM {i + 1}</span>
-                          <span className="text-white font-mono">
-                            {al === 0 ? '---' : al.toString()} dB/km
-                          </span>
+                          <span className="text-white font-mono">{al === 0 ? '---' : al.toString()} dB/km</span>
                         </div>
                       ))}
                     </div>
                   )}
-
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">
-                        {lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString()} dB/km
-                      </span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toString()} dB/km</span>
                     </div>
                   )}
-
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
@@ -667,16 +614,11 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     ))}
                   </div>
                 </div>
-
-                <button
-                  onClick={() => setShowRawOcr(!showRawOcr)}
-                  className="text-[10px] text-slate-500 hover:text-slate-400 underline transition"
-                >
+                <button onClick={() => setShowRawOcr(!showRawOcr)} className="text-[10px] text-slate-500 hover:text-slate-400 underline transition">
                   {showRawOcr ? '▲ Hide' : '▼ Show'} raw OCR text
                 </button>
                 {showRawOcr && (
-                  <pre className="text-[9px] bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg p-3 
-                    text-slate-400 overflow-x-auto max-h-32 whitespace-pre-wrap">
+                  <pre className="text-[9px] bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg p-3 text-slate-400 overflow-x-auto max-h-32 whitespace-pre-wrap">
                     {lastResult.raw_text}
                   </pre>
                 )}
@@ -685,7 +627,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
 
-        {/* History Table dengan Total-L dari total_l_4 */}
+        {/* History Table - PAKAI displayTimestamps untuk waktu real-time */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] shadow-2xl overflow-hidden">
           <div className="p-5 border-b border-[#3b4f6e] flex justify-between items-center">
             <h2 className="text-sm font-bold text-white uppercase tracking-widest">History of Measurements</h2>
@@ -719,13 +661,20 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available.</td></tr>
                 ) : (
                   displayedHistory.map((row, idx) => {
-                    const recordTime = row.timestamp ? new Date(row.timestamp).toLocaleString('en-US') : '—';
+                    // 🔥 UBAH: Pakai displayTimestamps untuk waktu real-time
+                    const displayTime = displayTimestamps[row.id];
+                    let recordTime = '—';
+                    if (displayTime) {
+                      recordTime = formatDisplayTime(displayTime);
+                    } else if (row.timestamp) {
+                      recordTime = formatDisplayTime(row.timestamp);
+                    }
                     const totalLValue = row.total_l_4;
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
                     
                     return (
                       <tr key={row.id || idx} className="hover:bg-[#2a3d60]/20 transition-colors">
-                        <td className="px-6 py-4 text-slate-400 text-xs font-mono">{recordTime}</td>
+                        <td className="px-6 py-4 text-slate-400 text-xs font-mono whitespace-nowrap">{recordTime}</td>
                         <td className="px-6 py-4 text-center text-white text-xs font-mono">
                           {formatLossValue(row.loss_1)} | {formatLossValue(row.loss_2)} |{' '}
                           {formatLossValue(row.loss_3)} | {formatLossValue(row.loss_4)}

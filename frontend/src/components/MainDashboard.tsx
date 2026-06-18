@@ -112,7 +112,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         }
         return prev + 1;
       });
-    }, 300000); // 5 menit = 300000 ms
+    }, 1000 * 30); // 30 detik
     return () => clearInterval(interval);
   }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
 
@@ -292,25 +292,32 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const isGangguan = currentRecord?.klasifikasi && currentRecord.klasifikasi !== 'Normal';
 
   // 🔥 Helper function untuk format timestamp
-const formatTimeLabel = (timestamp: string | null) => {
-  if (!timestamp) return '--:--';
-  const date = new Date(timestamp);
-  if (isNaN(date.getTime())) return '--:--';
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12 || 12;
-  return `${String(hours).padStart(2, '0')}.${minutes} ${ampm}`;
+// 🔥 HAPUS getRealTimeLabels, ganti dengan fungsi ini
+const generateMinuteLabels = (count: number, intervalMinutes: number = 1) => {
+  const now = new Date();
+  const labels = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const time = new Date(now.getTime() - i * 60 * 1000);
+    let hours = time.getHours();
+    const minutes = String(time.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const hoursStr = String(hours).padStart(2, '0');
+    labels.push(`${hoursStr}.${minutes} ${ampm}`);
+  }
+  return labels;
 };
 
-// 🔥 Chart data dengan timestamp asli
-const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r) => ({
-  time: formatTimeLabel(r.timestamp),
+// 🔥 GANTI chartData dan miniChartData
+const minuteLabels6 = generateMinuteLabels(6, 15); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
+
+const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
+  time: minuteLabels6[idx],
   prx: r.prx || -14,
 }));
 
-const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r) => ({
-  time: formatTimeLabel(r.timestamp),
+const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
+  time: minuteLabels6[idx],
   loss_1: r.loss_1 || 0,
   loss_2: r.loss_2 || 0,
   loss_3: r.loss_3 || 0,
@@ -463,6 +470,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                     label={{ value: 'Loss (dB)', angle: -90, position: 'insideLeft', fill: '#ffffff', fontSize: 11, dx: 3 }} 
                   />
                         <CartesianGrid strokeDasharray="3 3" stroke="#3d4e6b" vertical={false} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e2f50', border: '1px solid #3b4f6e', borderRadius: '8px', fontSize: '10px' }} />
                         <ReferenceLine y={LOSS_THRESHOLD} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1.5} />
                         <Area type="monotone" dataKey="value" stroke={lossColors[km - 1]} strokeWidth={2} fill={`url(#lossGrad${km})`} dot={{ r: 2, fill: lossColors[km - 1], strokeWidth: 1, stroke: '#1e2f50' }} />
                       </AreaChart>

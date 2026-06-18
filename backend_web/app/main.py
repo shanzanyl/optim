@@ -598,7 +598,7 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
     avg_total = 0.0
     match_avg = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
     if match_avg:
-        avg_total = float(match_avg.group(1))
+        avg_total = round(float(match_avg.group(1)), 2)
     
     # 6. Normalisasi: pastikan 4 baris
     while len(rows) < 4:
@@ -1542,6 +1542,7 @@ async def detect_ocr(
     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
     
     rows, avg_total = parse_otdr_table_simple(raw_text)
+    avg_total = round(avg_total, 2)
     
     prx_from_ocr = extract_prx(raw_text)
     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
@@ -2061,7 +2062,7 @@ async def detect_manual(
     else:
         al4 = g('avg_l_4', tl4 / d4 if d4 > 0 else 0.0)
     
-    avg_total = g('avg_total', tl4 / d4 if d4 > 0 else 0.0)
+    avg_total = round(g('avg_total', tl4 / d4 if d4 > 0 else 0.0), 2)  
     
     # 🔥 OTDR VALUES UNTUK ML: TIDAK PAKAI LOSS 4!
     # Karena ML tidak pakai Loss 4
