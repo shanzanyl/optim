@@ -620,738 +620,6 @@ def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
     return rows, avg_total
 
 # ═══════════════════════════════════════════════════════════════════
-# GEMINI AI CHATBOT
-# ═══════════════════════════════════════════════════════════════════
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-gemini_client = None
-gemini_model_name = None
-
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
-
-try:
-    import google.genai as genai_new # type: ignore
-    if GEMINI_API_KEY:
-        gemini_client = genai_new.Client(api_key=GEMINI_API_KEY)
-        gemini_model_name = "gemini-2.5-flash"
-        logger.info(f"✅ Gemini AI configured: {gemini_model_name}")
-except ImportError:
-    try:
-        import google.generativeai as genai_old # type: ignore
-        if GEMINI_API_KEY:
-            genai_old.configure(api_key=GEMINI_API_KEY)
-            gemini_client = genai_old.GenerativeModel(model_name="gemini-2.5-flash")
-            gemini_model_name = "legacy"
-            logger.info("✅ Gemini AI configured via legacy")
-    except Exception as e:
-        logger.warning(f"⚠️ Gagal mengonfigurasi Gemini AI: {e}")
-except Exception as e:
-    logger.warning(f"⚠️ Gagal mengonfigurasi Gemini AI: {e}")
-
-SYSTEM_INSTRUCTION = (
-    "Anda adalah OptiM AI Assistant, asisten chatbot profesional dan ramah untuk website OptiM "
-    "(sistem monitoring & klasifikasi gangguan serat optik). Anda memiliki akses ke DATA REAL-TIME dari database monitoring.\n\n"
-    "KEMAMPUAN ANDA:\n"
-    "1. Menjawab pertanyaan seputar fiber optik, jenis gangguan, dan cara membaca parameter OTDR.\n"
-    "2. Merekap data monitoring: total pengukuran, jumlah dan jenis gangguan.\n"
-    "3. Memberikan analisis tren gangguan dan rekomendasi teknis.\n\n"
-    "ATURAN FORMAT JAWABAN:\n"
-    "1. Jawablah dalam bahasa Indonesia yang sopan, RINGKAS, INFORMATIF.\n"
-    "2. Gunakan tag HTML dasar langsung (<strong>, <br>, <ul>, <li>).\n"
-    "3. Jika tidak ada gangguan, sampaikan dengan jelas."
-)
-
-BOT_RESPONSES = {
-    "normal": "Kondisi <strong>Normal</strong> pada jaringan fiber optik ditandai dengan redaman (loss) transmisi yang sangat rendah, biasanya di bawah 0.22 dB/km.",
-    "bending": "<strong>Bending (Tekukan Makro)</strong> terjadi ketika kabel fiber optik tertekuk melebihi radius kelengkungan minimumnya.<br><br><strong>Solusi:</strong> Periksa jalur kabel fisik, rapihkan tumpukan serat di dalam OTB.",
-    "dirty": "<strong>Dirty Connector (Konektor Kotor)</strong> adalah masalah paling umum.<br><br><strong>Solusi:</strong> Bersihkan ferrule konektor menggunakan Fiber Cleaning Cassette.",
-    "cut": "<strong>Fiber Cut (Kabel Putus)</strong> adalah gangguan kritis.<br><br><strong>Solusi:</strong> Lakukan pengukuran OTDR untuk mencari titik putus, lalu sambung ulang.",
-    "splice": "<strong>Bad Splice (Penyambungan Buruk)</strong> terjadi saat proses fusion splicing tidak sempurna.<br><br><strong>Solusi:</strong> Potong kembali dan lakukan splicing ulang.",
-    "gap": "<strong>Air Gap (Celah Udara)</strong> terjadi ketika terdapat ruang udara di antara konektor.<br><br><strong>Solusi:</strong> Pastikan konektor terkunci rapat.",
-    "nearly": "<strong>Nearly Cut (Hampir Putus)</strong> adalah kondisi kritis.<br><br><strong>Solusi:</strong> Segera jadwalkan pemeliharaan preventif.",
-    "bantuan": "Saya dapat membantu Anda memberikan informasi tentang jaringan fiber optik. Silakan ketik nama gangguan: Bending, Dirty Connector, Fiber Cut, Bad Splice, Air Gap, Nearly Cut.",
-    "default": "Maaf, saya tidak begitu memahami pertanyaan tersebut. Coba tanyakan mengenai jenis gangguan jaringan fiber optik."
-}
-
-def get_local_chatbot_response(query: str) -> str:
-    clean_query = query.lower()
-    if "bending" in clean_query or "tekuk" in clean_query:
-        return BOT_RESPONSES["bending"]
-    elif "dirty" in clean_query or "kotor" in clean_query or "konektor" in clean_query:
-        return BOT_RESPONSES["dirty"]
-    elif "fiber cut" in clean_query or "putus" in clean_query or "cut" in clean_query:
-        return BOT_RESPONSES["cut"]
-    elif "splice" in clean_query or "sambung" in clean_query:
-        return BOT_RESPONSES["splice"]
-    elif "gap" in clean_query or "celah" in clean_query or "air gap" in clean_query:
-        return BOT_RESPONSES["gap"]
-    elif "nearly" in clean_query or "hampir" in clean_query:
-        return BOT_RESPONSES["nearly"]
-    elif "normal" in clean_query or "sehat" in clean_query:
-        return BOT_RESPONSES["normal"]
-    elif "bantuan" in clean_query or "tolong" in clean_query or "halo" in clean_query or "hai" in clean_query:
-        return BOT_RESPONSES["bantuan"]
-    return BOT_RESPONSES["default"]
-
-def format_markdown_to_html(text: str) -> str:
-    text = re.sub(r'```html\s*', '', text)
-    text = re.sub(r'```\s*', '', text)
-    html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
-    html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
-    html = html.replace('\n', '<br>')
-    html = re.sub(r'(<ul>|<ol>|<li>)\s*<br>', r'\1', html)
-    html = re.sub(r'<br>\s*(</ul>|</ol>|</li>)', r'\1', html)
-    html = re.sub(r'</li>\s*<br>\s*<li>', r'</li><li>', html)
-    html = re.sub(r'</ul>\s*<br>\s*<ul>', r'</ul><ul>', html)
-    html = re.sub(r'(<br>\s*){2,}', r'<br>', html)
-    return html.strip()
-
-def make_db_aware_response(user_message: str, today_total: int, today_g: int, today_detail: str,
-                            week_total: int, week_g: int, week_detail: str,
-                            month_total: int, month_g: int, month_detail: str,
-                            total_data: int, all_g_total: int, all_detail: str,
-                            latest, daily_records: list = None, history_records: list = None) -> str:
-    q = user_message.lower()
-    
-    # Rekap hari ini
-    if any(x in q for x in ["hari ini", "today", "hari", "sekarang"]):
-        return (
-            f"<strong>Rekap Monitoring Hari Ini</strong><br>"
-            f"Total Pengukuran: <strong>{today_total}</strong><br>"
-            f"Total Gangguan: <strong>{today_g}</strong><br>"
-            f"Rincian: {today_detail if today_detail else 'Tidak ada gangguan'}"
-        )
-    # Rekap 7 hari
-    elif any(x in q for x in ["minggu", "7 hari", "seminggu", "week"]):
-        return (
-            f"<strong>Rekap Monitoring 7 Hari Terakhir</strong><br>"
-            f"Total Pengukuran: <strong>{week_total}</strong><br>"
-            f"Total Gangguan: <strong>{week_g}</strong><br>"
-            f"Rincian: {week_detail if week_detail else 'Tidak ada gangguan'}"
-        )
-    # Rekap 30 hari
-    elif any(x in q for x in ["bulan", "30 hari", "sebulan", "month"]):
-        return (
-            f"<strong>Rekap Monitoring Bulan Ini (30 Hari Terakhir)</strong><br>"
-            f"Total Pengukuran: <strong>{month_total}</strong><br>"
-            f"Total Gangguan: <strong>{month_g}</strong><br>"
-            f"Rincian: {month_detail if month_detail else 'Tidak ada gangguan'}"
-        )
-    # Rekap keseluruhan
-    elif any(x in q for x in ["semua", "keseluruhan", "total", "rekap", "laporan", "berapa", "gangguan"]):
-        return (
-            f"<strong>Rekap Keseluruhan Sistem OptiM</strong><br>"
-            f"Total Seluruh Pengukuran: <strong>{total_data}</strong><br>"
-            f"Total Seluruh Gangguan: <strong>{all_g_total}</strong><br>"
-            f"Rincian: {all_detail if all_detail else 'Tidak ada gangguan'}"
-        )
-    else:
-        return get_local_chatbot_response(user_message)
-
-# ═══════════════════════════════════════════════════════════════════
-# LOCAL KNOWLEDGE BASE (FALLBACK UNTUK CHATBOT)
-# ═══════════════════════════════════════════════════════════════════
-
-LOCAL_KNOWLEDGE = {
-    # ... (loss, return_loss, prx tetap sama) ...
-    
-    # 🔥 GANTI: response khusus untuk setiap jenis gangguan
-    "fiber_cut": {
-        "keywords": ["fiber cut", "kabel putus", "putus", "cut", "cara perbaiki fiber cut", "perbaiki fiber cut"],
-        "response": """
-            <strong>Fiber Cut (Kabel Putus)</strong> ❌<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss 0 dB di salah satu KM (sinyal hilang total)<br>
-            • PRX sangat rendah atau hilang<br>
-            • Return Loss tidak terbaca<br><br>
-            <strong>Penyebab:</strong><br>
-            • Kabel tergigit hewan (tikus, tupai)<br>
-            • Kabel tertimpa pohon/batu<br>
-            • Kabel putus akibat galian proyek<br>
-            • Konektor rusak/lepas<br><br>
-            <strong>✅ Saran Perbaikan Fiber Cut:</strong><br>
-            1. <strong>Identifikasi Lokasi Putus:</strong><br>
-            • Lakukan pengukuran OTDR untuk mencari titik putus (event reflective)<br>
-            • Hitung jarak titik putus dari OTDR<br>
-            • Catat koordinat/lokasi fisik<br><br>
-            2. <strong>Persiapan Perbaikan:</strong><br>
-            • Siapkan mesin fusion splicer<br>
-            • Siapkan splice protector sleeve<br>
-            • Siapkan kabel pigtail/jumper jika perlu<br>
-            • Gunakan safety goggles<br><br>
-            3. <strong>Proses Perbaikan:</strong><br>
-            • Buka akses ke titik putus (manhole, tiang, duct)<br>
-            • Potong ujung kabel yang rusak<br>
-            • Lakukan splicing ulang dengan mesin fusion<br>
-            • Pastikan splice loss ≤ 0.05 dB<br>
-            • Pasang splice protector dan panaskan<br><br>
-            4. <strong>Verifikasi:</strong><br>
-            • Lakukan pengukuran OTDR ulang<br>
-            • Cek Loss sudah normal (≤ 0.25 dB/km)<br>
-            • Cek PRX sudah normal (≥ -20 dBm)<br>
-            • Pastikan tidak ada pantulan tinggi<br><br>
-            <strong>⚠️ Peringatan:</strong><br>
-            • Jangan lihat langsung ke ujung kabel fiber (bahaya mata!)<br>
-            • Pastikan laser OTDR dimatikan sebelum membersihkan konektor<br>
-            • Gunakan alat yang tepat dan steril
-        """
-    },
-    "bending": {
-        "keywords": ["bending", "tekukan", "tekuk", "makro bending", "cara perbaiki bending"],
-        "response": """
-            <strong>Bending (Tekukan Makro)</strong> 🔄<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss meningkat drastis di KM tertentu<br>
-            • PRX turun tapi tidak hilang total<br>
-            • Return Loss biasanya normal<br><br>
-            <strong>Penyebab:</strong><br>
-            • Kabel tertekuk melebihi radius minimum (≤ 30mm)<br>
-            • Tumpukan serat di OTB/ODP tidak rapi<br>
-            • Kabel tertekan atau terjepit<br><br>
-            <strong>✅ Saran Perbaikan Bending:</strong><br>
-            1. Periksa jalur kabel fisik di OTB/ODP<br>
-            2. Rapihkan tumpukan serat, jangan sampai tertekuk<br>
-            3. Gunakan bend limiter atau cable tray<br>
-            4. Pastikan radius tekuk ≥ 30mm<br>
-            5. Jika permanent, ganti kabel segment<br><br>
-            <strong>Verifikasi:</strong><br>
-            • Cek Loss sudah turun di bawah 1.2 dB<br>
-            • Cek PRX kembali normal
-        """
-    },
-    "dirty_connector": {
-        "keywords": ["dirty", "konektor kotor", "connector kotor", "kotor", "cara perbaiki konektor", "perbaiki connector"],
-        "response": """
-            <strong>Dirty Connector (Konektor Kotor)</strong> 🧹<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss naik tiba-tiba (spike)<br>
-            • Return Loss jelek (pantulan tinggi)<br>
-            • PRX turun drastis<br><br>
-            <strong>Penyebab:</strong><br>
-            • Debu/kotoran di ujung ferrule konektor<br>
-            • Minyak dari jari saat menyentuh ujung konektor<br>
-            • Adapter/sc kotor di dalamnya<br><br>
-            <strong>✅ Saran Perbaikan Dirty Connector:</strong><br>
-            1. <strong>Bersihkan dengan Fiber Cleaning Cassette:</strong><br>
-            • Masukkan konektor ke cleaner<br>
-            • Putar 1-2 kali<br>
-            • Tarik keluar<br><br>
-            2. <strong>Jika masih kotor:</strong><br>
-            • Gunakan isopropil alkohol 99%<br>
-            • Gunakan tissue optik khusus (bukan tissue biasa!)<br>
-            • Usap dengan lembut 1 arah<br>
-            • Biarkan kering sebelum dipasang<br><br>
-            3. <strong>⚠️ Peringatan:</strong><br>
-            • JANGAN sentuh ujung ferrule dengan jari!<br>
-            • JANGAN gunakan tissue biasa (bisa menggores)<br>
-            • Periksa adapter/sc, kadang kotor di dalamnya<br><br>
-            4. <strong>Verifikasi:</strong><br>
-            • Cek Loss sudah normal<br>
-            • Cek Return Loss sudah di bawah -45 dB<br>
-            • Cek PRX kembali normal
-        """
-    },
-    "bad_splice": {
-        "keywords": ["bad splice", "splice", "sambungan buruk", "splicing", "cara perbaiki splice"],
-        "response": """
-            <strong>Bad Splice (Sambungan Buruk)</strong> 🔗<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss tinggi di titik sambung (loss > 0.1 dB)<br>
-            • Return Loss normal atau sedikit tinggi<br>
-            • PRX turun<br><br>
-            <strong>Penyebab:</strong><br>
-            • Fusion splicing tidak sempurna (kotor)<br>
-            • Sudut potong tidak pas<br>
-            • Arc power tidak sesuai<br><br>
-            <strong>✅ Saran Perbaikan Bad Splice:</strong><br>
-            1. Potong kembali serat di titik sambung<br>
-            2. Bersihkan serat dengan alkohol<br>
-            3. Lakukan splicing ulang dengan mesin fusion<br>
-            4. Pastikan gain/splice loss ≤ 0.05 dB<br>
-            5. Gunakan splice protector sleeve baru<br>
-            6. Panaskan splice protector dengan benar<br><br>
-            <strong>Verifikasi:</strong><br>
-            • Cek Loss sudah normal<br>
-            • Cek PRX kembali normal
-        """
-    },
-    "air_gap": {
-        "keywords": ["air gap", "celah udara", "gap", "cara perbaiki air gap"],
-        "response": """
-            <strong>Air Gap (Celah Udara)</strong> 💨<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss tinggi<br>
-            • Return Loss sangat tinggi (pantulan besar)<br>
-            • PRX turun<br><br>
-            <strong>Penyebab:</strong><br>
-            • Konektor tidak terkunci rapat<br>
-            • Ada celah udara di antara konektor<br>
-            • Adapter/sc aus<br>
-            • Ferrule tidak pas<br><br>
-            <strong>✅ Saran Perbaikan Air Gap:</strong><br>
-            1. Pastikan konektor terkunci rapat (klik terdengar)<br>
-            2. Cek adapter, mungkin sudah aus, ganti jika perlu<br>
-            3. Ganti adapter/sc jika sudah aus<br>
-            4. Pastikan ferrule tidak tertekan/miring<br>
-            5. Bersihkan konektor sebelum dipasang<br><br>
-            <strong>Verifikasi:</strong><br>
-            • Cek Loss sudah normal<br>
-            • Cek Return Loss sudah di bawah -45 dB<br>
-            • Cek PRX kembali normal
-        """
-    },
-    "nearly_cut": {
-        "keywords": ["nearly", "nearly cut", "hampir putus", "cara perbaiki nearly"],
-        "response": """
-            <strong>Nearly Cut (Hampir Putus)</strong> ⚠️<br><br>
-            <strong>Ciri-ciri:</strong><br>
-            • Loss sangat tinggi (≥ 2 dB)<br>
-            • Sinyal melemah drastis<br>
-            • PRX mendekati -30 dBm<br><br>
-            <strong>Penyebab:</strong><br>
-            • Kabel hampir putus akibat tekanan fisik<br>
-            • Kabel tergigit tapi belum putus total<br>
-            • Kabel tertekuk sangat parah<br><br>
-            <strong>✅ Saran Perbaikan Nearly Cut:</strong><br>
-            1. <strong>SEGERA!</strong> Jadwalkan pemeliharaan preventif<br>
-            2. Cek lokasi dengan OTDR untuk temukan titik hampir putus<br>
-            3. Lakukan splicing ulang sebelum benar-benar putus<br>
-            4. Jika kabel tua, pertimbangkan penggantian segment<br><br>
-            <strong>⚠️ Peringatan:</strong><br>
-            • Ini kondisi KRITIS!<br>
-            • Jangan tunda perbaikan<br>
-            • Bisa menjadi Fiber Cut kapan saja
-        """
-    },
-    "troubleshoot": {
-        "keywords": ["troubleshoot", "cara perbaiki", "solusi", "atasi", "bagaimana cara", "langkah perbaikan", "perbaikan"],
-        "response": """
-            <strong>Panduan Troubleshooting Gangguan Fiber Optik</strong><br><br>
-            
-            <strong>🔍 Langkah-langkah Umum:</strong><br>
-            <strong>1. Identifikasi Gejala:</strong><br>
-            • Cek <strong>Loss per KM</strong> - KM mana yang nilainya tinggi?<br>
-            • Cek <strong>PRX</strong> - Apakah di bawah -24 dBm?<br>
-            • Cek <strong>Return Loss</strong> - Apakah ada pantulan tinggi?<br>
-            • Bandingkan dengan data normal sebelumnya<br><br>
-            
-            <strong>2. Kategorikan Gangguan:</strong><br>
-            • <strong>Loss tinggi tapi PRX normal</strong> → Mungkin Bending/Dirty<br>
-            • <strong>Loss 0 dB dan PRX hilang</strong> → Fiber Cut<br>
-            • <strong>Return Loss jelek</strong> → Konektor kotor/Air Gap<br><br>
-            
-            <strong>3. Tindakan Berdasarkan Jenis:</strong><br>
-            • <strong>Bending</strong> → Rapihkan kabel, cek radius tekuk<br>
-            • <strong>Dirty</strong> → Bersihkan konektor dengan fiber cleaner<br>
-            • <strong>Fiber Cut</strong> → OTDR, cari titik putus, splicing<br>
-            • <strong>Bad Splice</strong> → Splicing ulang<br>
-            • <strong>Air Gap</strong> → Kunci konektor rapat<br>
-            • <strong>Nearly Cut</strong> → Splicing preventif segera<br><br>
-            
-            <strong>4. Verifikasi Perbaikan:</strong><br>
-            • Lakukan pengukuran ulang<br>
-            • Cek Loss sudah turun di bawah 1.2 dB<br>
-            • Cek PRX sudah kembali normal (≥ -20 dBm)<br>
-            • Cek Return Loss sudah di bawah -45 dB<br><br>
-            
-            <strong>5. Dokumentasi:</strong><br>
-            • Catat lokasi gangguan<br>
-            • Simpan data sebelum-sesudah perbaikan<br>
-            • Update di sistem monitoring<br><br>
-            
-            <strong>⚠️ Peringatan Keamanan:</strong><br>
-            • Jangan lihat langsung ke ujung kabel fiber (bahaya mata!)<br>
-            • Gunakan safety goggles saat handling fiber<br>
-            • Matikan laser OTDR sebelum membersihkan konektor<br>
-            • Gunakan alat yang tepat, jangan paksa
-        """
-    },
-    "upload_foto": {
-        "keywords": ["upload", "foto", "gambar", "ocr", "detection", "cara pakai", "tutorial"],
-        "response": """
-            <strong>Cara Menggunakan Fitur Upload Foto OTDR</strong><br><br>
-            <strong>Langkah 1:</strong> Buka halaman <strong>Detection</strong><br>
-            <strong>Langkah 2:</strong> Klik tombol <strong>"Upload Foto OTDR"</strong><br>
-            <strong>Langkah 3:</strong> Pilih foto hasil printout OTDR<br>
-            <strong>Langkah 4:</strong> Tunggu sistem memproses dengan OCR & ML<br>
-            <strong>Langkah 5:</strong> Hasil klasifikasi akan muncul otomatis<br><br>
-            <strong>Tips:</strong><br>
-            • Pastikan foto <strong>jelas</strong> dan <strong>terang</strong><br>
-            • Tabel OTDR harus <strong>terbaca</strong> (tidak terpotong)<br>
-            • Hasil terbaik: foto dari <strong>printout OTDR</strong> langsung<br><br>
-            <strong>Fitur ini berguna untuk:</strong><br>
-            • Teknisi di lapangan yang ingin cepat cek hasil OTDR<br>
-            • Analisis cepat tanpa input manual
-        """
-    },
-    "input_manual": {
-        "keywords": ["manual input", "input manual", "detection manual", "isi manual"],
-        "response": """
-            <strong>Cara Menggunakan Fitur Input Manual</strong><br><br>
-            <strong>Langkah 1:</strong> Buka halaman <strong>Detection</strong><br>
-            <strong>Langkah 2:</strong> Pilih tab <strong>"Manual Input"</strong><br>
-            <strong>Langkah 3:</strong> Isi semua parameter OTDR:<br>
-            • PRX (dBm)<br>
-            • Loss 1-4 (dB)<br>
-            • Return 1-4 (dB)<br>
-            • Distance 1-4 (km)<br>
-            <strong>Langkah 4:</strong> Klik <strong>"Proses Data"</strong><br><br>
-            <strong>Kapan pakai fitur ini?</strong><br>
-            • Saat foto OTDR tidak jelas<br>
-            • Ingin menguji data tertentu<br>
-            • Ingin mensimulasikan skenario gangguan
-        """
-    },
-    "dashboard": {
-        "keywords": ["dashboard", "monitoring", "data", "statistik"],
-        "response": """
-            <strong>Fitur Dashboard OptiM</strong><br><br>
-            <strong>1. Total Measurement</strong><br>
-            Menampilkan jumlah total data yang sudah diproses.<br><br>
-            <strong>2. Status Normal vs Gangguan</strong><br>
-            Memisahkan data normal dan yang terdeteksi gangguan.<br><br>
-            <strong>3. Loss per KM</strong><br>
-            Grafik redaman di setiap kilometer (1-4).<br>
-            Garis merah = batas aman 1.2 dB.<br><br>
-            <strong>4. Return Loss per KM</strong><br>
-            Grafik pantulan sinyal di setiap kilometer.<br><br>
-            <strong>5. Signal Power (PRX)</strong><br>
-            Grafik daya terima. Garis merah = batas aman -24 dBm.<br><br>
-            <strong>6. Fault Distribution</strong><br>
-            Pie chart distribusi jenis gangguan.<br><br>
-            <strong>7. Network Topology</strong><br>
-            Visualisasi jaringan fiber optik.<br><br>
-            <strong>8. Prediction Results Table</strong><br>
-            Tabel detail semua hasil prediksi.
-        """
-    }
-}
-
-def format_fault_detail(faults_map: dict) -> str:
-    """Format detail gangguan menjadi HTML"""
-    if not faults_map:
-        return "✅ Tidak ada gangguan terdeteksi"
-    
-    html = "<ul style='margin: 4px 0; padding-left: 20px;'>"
-    for (klasifikasi, status), count in faults_map.items():
-        emoji = "🔴" if status == "Critical" else "🟡" if status == "Warning" else "🟢"
-        html += f"<li><strong>{klasifikasi}</strong> ({status}): {count} kali {emoji}</li>"
-    html += "</ul>"
-    return html
-
-def get_rekap_response(query: str, all_records: list = None) -> str | None:
-    """Buat response rekap dari data database (bukan dari context)"""
-    if all_records is None:
-        return None
-    
-    query_lower = query.lower()
-    
-    # 🔥 URUTAN: YANG LEBIH SPESIFIK DULUAN
-    if any(x in query_lower for x in ["30 hari", "30 hari terakhir", "bulan ini", "sebulan", "last 30 days", "month"]):
-        rekap_type = "30_hari"
-    elif any(x in query_lower for x in ["7 hari", "minggu ini", "seminggu", "last 7 days", "week"]):
-        rekap_type = "7_hari"
-    elif any(x in query_lower for x in ["kemarin", "yesterday"]):
-        rekap_type = "kemarin"
-    elif any(x in query_lower for x in ["hari ini", "today", "sekarang"]):
-        rekap_type = "hari_ini"
-    elif any(x in query_lower for x in ["semua", "keseluruhan", "total", "all", "laporan"]):
-        rekap_type = "semua"
-    else:
-        return None
-    
-    # 🔥 HITUNG DARI DATABASE
-    now_wib = datetime.utcnow() + timedelta(hours=7)
-    today_date = now_wib.date()
-    week_start_date = today_date - timedelta(days=6)
-    month_start_date = today_date.replace(day=1)
-    yesterday_date = today_date - timedelta(days=1)
-    
-    total = 0
-    normal = 0
-    gangguan = 0
-    faults = {}
-    
-    for rec in all_records:
-        if not rec.timestamp:
-            continue
-        rec_wib = rec.timestamp + timedelta(hours=7)
-        rec_date = rec_wib.date()
-        
-        is_fault = (rec.klasifikasi != "Normal")
-        
-        should_include = False
-        
-        if rekap_type == "hari_ini" and rec_date == today_date:
-            should_include = True
-        elif rekap_type == "kemarin" and rec_date == yesterday_date:
-            should_include = True
-        elif rekap_type == "7_hari" and rec_date >= week_start_date:
-            should_include = True
-        elif rekap_type == "30_hari" and rec_date >= month_start_date:
-            should_include = True
-        elif rekap_type == "semua":
-            should_include = True
-        
-        if should_include:
-            total += 1
-            if is_fault:
-                gangguan += 1
-                faults[(rec.klasifikasi, rec.status)] = faults.get((rec.klasifikasi, rec.status), 0) + 1
-            else:
-                normal += 1
-    
-    # Format detail
-    detail = format_fault_detail(faults)
-    
-    # Status
-    status = "🟢 Normal" if gangguan == 0 else "🟡 Ada Gangguan" if gangguan < 5 else "🔴 Banyak Gangguan"
-    
-    # Trend
-    trend = ""
-    performance = ""
-    
-    if rekap_type in ["7_hari", "30_hari"]:
-        if gangguan > 0:
-            trend = "⚠️ Masih ada gangguan yang perlu ditangani"
-            if gangguan > 5:
-                trend = "🚨 Gangguan cukup tinggi, perlu evaluasi menyeluruh"
-        else:
-            trend = "✅ Kondisi jaringan stabil, tidak ada gangguan"
-    
-    if rekap_type == "semua":
-        if total > 0:
-            if gangguan == 0:
-                performance = "✅ Sistem berjalan dengan sangat baik!"
-            elif gangguan < total * 0.1:
-                performance = "🟢 Performa baik, gangguan minimal (< 10%)"
-            elif gangguan < total * 0.2:
-                performance = "🟡 Perlu perhatian, gangguan sedang (10-20%)"
-            else:
-                performance = "🔴 Perlu evaluasi serius, gangguan tinggi (> 20%)"
-    
-    # Nama rekap
-    rekap_names = {
-        "hari_ini": "Hari Ini",
-        "kemarin": "Kemarin",
-        "7_hari": "7 Hari Terakhir",
-        "30_hari": "30 Hari Terakhir",
-        "semua": "Keseluruhan Sistem OptiM"
-    }
-    
-    rekap_name = rekap_names.get(rekap_type, "Rekap")
-    
-    # Bangun response
-    response = f"""
-        <strong>📊 Rekap Gangguan {rekap_name}</strong><br><br>
-        Total Pengukuran: <strong>{total}</strong><br>
-        Gangguan Terdeteksi: <strong>{gangguan}</strong><br>
-        Normal: <strong>{normal}</strong><br><br>
-        <strong>📋 Rincian Gangguan:</strong><br>
-        {detail}
-    """
-    
-    if trend:
-        response += f"<br><strong>📈 Trend:</strong> {trend}"
-    
-    if performance:
-        response += f"<br><strong>📈 Kinerja:</strong> {performance}"
-    
-    if not trend and not performance:
-        response += f"<br><br><strong>📈 Status:</strong> {status}"
-    
-    return response
-
-def get_local_knowledge_response(query: str, all_records: list = None) -> str | None:
-    """Cari jawaban dari local knowledge base berdasarkan kata kunci"""
-    query_lower = query.lower()
-    
-    # 🔥 CEK REKAP GANGGUAN DARI DATABASE (prioritas tinggi)
-    if all_records is not None:
-        rekap_response = get_rekap_response(query, all_records)
-        if rekap_response:
-            return rekap_response
-    
-    # Cek knowledge lainnya
-    for key, data in LOCAL_KNOWLEDGE.items():
-        for keyword in data["keywords"]:
-            if keyword in query_lower:
-                return data["response"]
-    
-    return None
-
-# ═══════════════════════════════════════════════════════════════════
-# CHAT ENDPOINT (DIPERBAIKI - DENGAN LOCAL KNOWLEDGE BASE)
-# ═══════════════════════════════════════════════════════════════════
-
-@app.post("/api/chat")
-async def chat(
-    request: dict,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_user)
-):
-    user_message = request.get("message", "").strip()
-    context_state = request.get("context_state", {})
-    
-    if not user_message:
-        return {"response": "Pesan tidak boleh kosong.", "source": "error"}
-    
-    # 🔥 AMBIL DATA DARI DATABASE
-    try:
-        if current_user:
-            stmt_all = select(OtdrResult).where(
-                (OtdrResult.source == "sheets") | 
-                (OtdrResult.user_id == current_user.id)
-            ).order_by(OtdrResult.timestamp.asc())
-        else:
-            stmt_all = select(OtdrResult).where(
-                OtdrResult.source == "sheets"
-            ).order_by(OtdrResult.timestamp.asc())
-        
-        result_all = await db.execute(stmt_all)
-        all_records = result_all.scalars().all()
-        logger.info(f"[CHAT] Total records fetched: {len(all_records)}")
-    except Exception as e:
-        logger.error(f"[CHAT] Gagal ambil data: {e}")
-        all_records = []
-    
-    # 🔥 CEK LOCAL KNOWLEDGE BASE DENGAN DATA DATABASE
-    local_response = get_local_knowledge_response(user_message, all_records)
-    if local_response:
-        logger.info(f"[CHAT] Menggunakan Local Knowledge untuk: {user_message[:50]}")
-        return {"response": local_response, "source": "local_knowledge"}
-    
-    # 🔥 COBA GEMINI AI (tetap pakai context_state)
-    try:
-        if gemini_client and GEMINI_API_KEY:
-            try:
-                prompt = f"""
-                Anda adalah asisten OptiM. Jawab pertanyaan ini dengan ringkas dan informatif.
-                Pertanyaan: {user_message}
-                Context: {json.dumps(context_state, indent=2)}
-                """
-                
-                if gemini_model_name == "gemini-2.5-flash":
-                    response = gemini_client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt
-                    )
-                    reply = response.text
-                else:
-                    reply = gemini_client.generate_content(prompt).text
-                
-                if reply:
-                    logger.info(f"[CHAT] Gemini AI berhasil merespon")
-                    return {"response": reply, "source": "gemini_ai"}
-                    
-            except Exception as e:
-                logger.warning(f"[CHAT] Gemini AI error: {e}")
-    
-    except Exception as e:
-        logger.warning(f"[CHAT] Gemini AI tidak tersedia: {e}")
-    
-    # 🔥 FALLBACK: DB Aware Response (tetap pakai yang sudah ada)
-    try:
-        now_wib = datetime.utcnow() + timedelta(hours=7)
-        
-        # 🔥 HAPUS filter current_index - biar semua data terbaca
-        # current_index = request.get("current_index", None)
-        # if current_index is not None:
-        #     try:
-        #         idx = int(current_index)
-        #         if 0 <= idx < len(all_records):
-        #             all_records = all_records[:idx + 1]
-        #     except Exception:
-        #         pass
-        
-        today_date = now_wib.date()
-        week_start_date = today_date - timedelta(days=6)
-        month_start_date = today_date.replace(day=1)
-        
-        today_total = 0
-        today_g = 0
-        today_faults = {}
-        
-        week_total = 0
-        week_g = 0
-        week_faults = {}
-        
-        month_total = 0
-        month_g = 0
-        month_faults = {}
-        
-        total_data = len(all_records)
-        all_g_total = 0
-        all_faults = {}
-        
-        latest = all_records[-1] if all_records else None
-        
-        for rec in all_records:
-            if not rec.timestamp:
-                continue
-            rec_wib = rec.timestamp + timedelta(hours=7)
-            rec_date = rec_wib.date()
-            
-            is_fault = (rec.klasifikasi != "Normal")
-            
-            if is_fault:
-                all_g_total += 1
-                all_faults[(rec.klasifikasi, rec.status)] = all_faults.get((rec.klasifikasi, rec.status), 0) + 1
-            
-            if rec_date == today_date:
-                today_total += 1
-                if is_fault:
-                    today_g += 1
-                    today_faults[(rec.klasifikasi, rec.status)] = today_faults.get((rec.klasifikasi, rec.status), 0) + 1
-            
-            if rec_date >= week_start_date:
-                week_total += 1
-                if is_fault:
-                    week_g += 1
-                    week_faults[(rec.klasifikasi, rec.status)] = week_faults.get((rec.klasifikasi, rec.status), 0) + 1
-            
-            if rec_date >= month_start_date:
-                month_total += 1
-                if is_fault:
-                    month_g += 1
-                    month_faults[(rec.klasifikasi, rec.status)] = month_faults.get((rec.klasifikasi, rec.status), 0) + 1
-        
-        def fmt_detail(faults_map):
-            if not faults_map:
-                return "Tidak ada gangguan"
-            return ", ".join([f"{k} ({s}): {c} kali" for (k, s), c in faults_map.items()])
-        
-        today_detail = fmt_detail(today_faults)
-        week_detail = fmt_detail(week_faults)
-        month_detail = fmt_detail(month_faults)
-        all_detail = fmt_detail(all_faults)
-        
-    except Exception as db_err:
-        logger.error(f"[CHAT] DB error: {db_err}")
-        return {"response": get_local_chatbot_response(user_message), "source": "local_fallback"}
-    
-    reply = make_db_aware_response(
-        user_message, today_total, today_g, today_detail,
-        week_total, week_g, week_detail,
-        month_total, month_g, month_detail,
-        total_data, all_g_total, all_detail, latest,
-        None, None
-    )
-    
-    if reply == BOT_RESPONSES["default"]:
-        reply = """
-            <strong>Maaf, saya tidak bisa menjawab pertanyaan tersebut.</strong><br><br>
-            Saya bisa membantu Anda dengan:<br>
-            • Penjelasan <strong>Loss</strong>, <strong>Return Loss</strong>, dan <strong>PRX</strong><br>
-            • Jenis-jenis <strong>gangguan</strong> fiber optik<br>
-            • Cara menggunakan fitur <strong>Upload Foto</strong> dan <strong>Input Manual</strong><br>
-            • Analisis <strong>data dashboard</strong> dan <strong>statistik</strong>
-        """
-    
-    return {"response": reply, "source": "db_fallback"}
-
-# ═══════════════════════════════════════════════════════════════════
 # AUTH ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1483,24 +751,208 @@ async def reject_user(
 # DETECTION OCR - MAIN ENDPOINT
 # ═══════════════════════════════════════════════════════════════════
 
-@app.post("/api/detect")
-async def detect_ocr(
+# @app.post("/api/detect")
+# async def detect_ocr(
+#     file: UploadFile = File(...),
+#     prx_manual: float = Form(None),
+#     db: AsyncSession = Depends(get_db),
+#     current_user: User = Depends(get_optional_user),
+# ):
+#     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
+#     if file.content_type not in allowed:
+#         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
+    
+#     content = await file.read()
+#     raw_text = ""
+#     logger.info(f"📝 RAW TEXT FULL:\n{raw_text}")
+#     ocr_method = "none"
+    
+#     logger.info("=" * 70)
+#     logger.info("🔄 Starting OCR process...")
+    
+#     try:
+#         results = {}
+        
+#         try:
+#             results['tesseract'] = await asyncio.wait_for(
+#                 asyncio.to_thread(tesseract_extract, content), timeout=25.0)
+#         except asyncio.TimeoutError:
+#             logger.warning("Tesseract timed out")
+#             results['tesseract'] = ""
+
+#         try:
+#             results['ocr.space'] = await asyncio.wait_for(
+#                 asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
+#         except asyncio.TimeoutError:
+#             logger.warning("OCR.space timed out")
+#             results['ocr.space'] = ""
+
+#         best_score = 0
+#         for method, text in results.items():
+#             if text:
+#                 score = len(re.findall(r'\d+\.\d{3,}', text))
+#                 if score > best_score:
+#                     best_score = score
+#                     raw_text = text
+#                     ocr_method = method
+
+#         logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
+
+#     except Exception as e:
+#         logger.error(f"OCR error: {e}")
+    
+#     if not raw_text or len(raw_text.strip()) < 20:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat."
+#         )
+    
+#     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
+    
+#     rows, avg_total = parse_otdr_table_simple(raw_text)
+#     avg_total = round(avg_total, 2)
+    
+#     prx_from_ocr = extract_prx(raw_text)
+#     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
+    
+#     logger.info(f"📊 Parsed rows: {len(rows)}")
+#     for i, row in enumerate(rows):
+#         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
+    
+#     valid = [r for r in rows if r['distance'] > 0.5]
+#     if len(valid) < 2:
+#         raise HTTPException(
+#             status_code=400,
+#             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
+#         )
+    
+#     logger.info("=" * 50)
+#     logger.info("Starting ML Prediction...")
+    
+#     otdr_values = {
+#         'Prx (dBm)': final_prx,
+#         'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
+#         'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
+#         'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
+#         'Total-L 1': rows[0]['total_l'], 'Total-L 2': rows[1]['total_l'],
+#         'Total-L 3': rows[2]['total_l'], 'Total-L 4': rows[3]['total_l'],
+#         'Avg-L 1': rows[0]['avg_l'], 'Avg-L 2': rows[1]['avg_l'],
+#         'Avg-L 3': rows[2]['avg_l'], 'Avg-L 4': rows[3]['avg_l'],
+#         'Avg-Total': avg_total,
+#         'Return 1': rows[0]['return'], 'Return 2': rows[1]['return'],
+#         'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
+#     }
+    
+#     try:
+#         pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+#         logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')}")
+#     except Exception as e:
+#         logger.error(f"❌ ML prediction FAILED: {e}")
+#         pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+    
+#     logger.info("=" * 50)
+#     logger.info("💾 Saving to Database...")
+#     user_id = current_user.id if current_user else 1
+    
+#     try:
+#         record = OtdrResult(
+#             user_id=user_id,
+#             timestamp=datetime.now(),
+#             prx=final_prx,
+#             loss_1=rows[0]['loss'], loss_2=rows[1]['loss'],
+#             loss_3=rows[2]['loss'], loss_4=None,
+#             return_1=rows[0]['return'], return_2=rows[1]['return'],
+#             return_3=rows[2]['return'], return_4=rows[3]['return'],
+#             distance_1=rows[0]['distance'], distance_2=rows[1]['distance'],
+#             distance_3=rows[2]['distance'], distance_4=rows[3]['distance'],
+#             total_l_1=rows[0]['total_l'], total_l_2=rows[1]['total_l'],
+#             total_l_3=rows[2]['total_l'], total_l_4=rows[3]['total_l'],
+#             avg_l_1=rows[0]['avg_l'], avg_l_2=rows[1]['avg_l'],
+#             avg_l_3=rows[2]['avg_l'], avg_l_4=rows[3]['avg_l'],
+#             avg_total=avg_total,
+#             klasifikasi=pred.get("prediction"),
+#             status=pred.get("status"),
+#             confidence=pred.get("confidence"),
+#             source="ocr",
+#             raw_text=raw_text[:1000],
+#         )
+        
+#         db.add(record)
+#         await db.commit()
+#         await db.refresh(record)
+#         logger.info(f"✅ Saved to DB: ID={record.id}")
+    
+#         status_str = pred.get("status", "Normal")
+#         if status_str.lower() in ["warning", "critical"]:
+#             logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')}")
+#             try:
+#                 await asyncio.to_thread(
+#                     send_telegram_alert,
+#                     classification=pred.get("prediction"),
+#                     status=status_str,
+#                     loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
+#                     rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
+#                     prx=final_prx,
+#                     distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
+#                     timestamp=record.timestamp
+#                 )
+#                 record.telegram_alert_sent = True
+#                 await db.commit()
+#             except Exception as tg_err:
+#                 logger.error(f"[TELEGRAM] Error: {tg_err}")
+        
+
+#     except Exception as e:
+#         logger.error(f"❌ DATABASE ERROR: {e}")
+#         await db.rollback()
+#         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+#     logger.info("=" * 70)
+    
+#     return {
+#         "message": "Gambar berhasil diproses",
+#         "raw_text": raw_text[:500],
+#         "extracted": {
+#             "distances": [rows[i]['distance'] for i in range(4)],
+#             "losses": [rows[i]['loss'] for i in range(4)],
+#             "total_ls": [rows[i]['total_l'] for i in range(4)],
+#             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
+#             "returns": [rows[i]['return'] for i in range(4)],
+#             "avg_total": round(avg_total, 2),
+#         },
+#         "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
+#         "prx": final_prx,
+#         "avg_total": round(avg_total, 2),
+#         "prediction": pred.get("prediction"),
+#         "confidence": pred.get("confidence"),
+#         "status": pred.get("status"),
+#         "id": record.id,
+#         "ocr_method": ocr_method,
+#     }
+
+# ═══════════════════════════════════════════════════════════════════
+# OCR PARSER ONLY - TANPA KLASIFIKASI ML
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/parse-ocr")
+async def parse_ocr_only(
     file: UploadFile = File(...),
     prx_manual: float = Form(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_user),
 ):
+    """
+    Endpoint untuk OCR parsing SAJA - tanpa klasifikasi ML.
+    Mengembalikan data mentah hasil ekstraksi untuk diedit user.
+    """
     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
     if file.content_type not in allowed:
         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
     
     content = await file.read()
     raw_text = ""
-    logger.info(f"📝 RAW TEXT FULL:\n{raw_text}")
     ocr_method = "none"
     
     logger.info("=" * 70)
-    logger.info("🔄 Starting OCR process...")
+    logger.info("🔄 Starting OCR Parser (NO ML)...")
     
     try:
         results = {}
@@ -1558,108 +1010,23 @@ async def detect_ocr(
             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
         )
     
-    logger.info("=" * 50)
-    logger.info("Starting ML Prediction...")
-    
-    otdr_values = {
-        'Prx (dBm)': final_prx,
-        'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
-        'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
-        'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
-        'Total-L 1': rows[0]['total_l'], 'Total-L 2': rows[1]['total_l'],
-        'Total-L 3': rows[2]['total_l'], 'Total-L 4': rows[3]['total_l'],
-        'Avg-L 1': rows[0]['avg_l'], 'Avg-L 2': rows[1]['avg_l'],
-        'Avg-L 3': rows[2]['avg_l'], 'Avg-L 4': rows[3]['avg_l'],
-        'Avg-Total': avg_total,
-        'Return 1': rows[0]['return'], 'Return 2': rows[1]['return'],
-        'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
-    }
-    
-    try:
-        pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-        logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')}")
-    except Exception as e:
-        logger.error(f"❌ ML prediction FAILED: {e}")
-        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-    
-    logger.info("=" * 50)
-    logger.info("💾 Saving to Database...")
-    user_id = current_user.id if current_user else 1
-    
-    try:
-        record = OtdrResult(
-            user_id=user_id,
-            timestamp=datetime.now(),
-            prx=final_prx,
-            loss_1=rows[0]['loss'], loss_2=rows[1]['loss'],
-            loss_3=rows[2]['loss'], loss_4=None,
-            return_1=rows[0]['return'], return_2=rows[1]['return'],
-            return_3=rows[2]['return'], return_4=rows[3]['return'],
-            distance_1=rows[0]['distance'], distance_2=rows[1]['distance'],
-            distance_3=rows[2]['distance'], distance_4=rows[3]['distance'],
-            total_l_1=rows[0]['total_l'], total_l_2=rows[1]['total_l'],
-            total_l_3=rows[2]['total_l'], total_l_4=rows[3]['total_l'],
-            avg_l_1=rows[0]['avg_l'], avg_l_2=rows[1]['avg_l'],
-            avg_l_3=rows[2]['avg_l'], avg_l_4=rows[3]['avg_l'],
-            avg_total=avg_total,
-            klasifikasi=pred.get("prediction"),
-            status=pred.get("status"),
-            confidence=pred.get("confidence"),
-            source="ocr",
-            raw_text=raw_text[:1000],
-        )
-        
-        db.add(record)
-        await db.commit()
-        await db.refresh(record)
-        logger.info(f"✅ Saved to DB: ID={record.id}")
-    
-        status_str = pred.get("status", "Normal")
-        if status_str.lower() in ["warning", "critical"]:
-            logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')}")
-            try:
-                await asyncio.to_thread(
-                    send_telegram_alert,
-                    classification=pred.get("prediction"),
-                    status=status_str,
-                    loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
-                    rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
-                    prx=final_prx,
-                    distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
-                    timestamp=record.timestamp
-                )
-                record.telegram_alert_sent = True
-                await db.commit()
-            except Exception as tg_err:
-                logger.error(f"[TELEGRAM] Error: {tg_err}")
-        
-
-    except Exception as e:
-        logger.error(f"❌ DATABASE ERROR: {e}")
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
     logger.info("=" * 70)
+    logger.info("✅ OCR parsing completed (NO ML classification)")
     
     return {
-        "message": "Gambar berhasil diproses",
+        "message": "OCR berhasil diekstrak. Silakan periksa dan edit data sebelum klasifikasi.",
         "raw_text": raw_text[:500],
+        "ocr_method": ocr_method,
         "extracted": {
             "distances": [rows[i]['distance'] for i in range(4)],
             "losses": [rows[i]['loss'] for i in range(4)],
             "total_ls": [rows[i]['total_l'] for i in range(4)],
             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
             "returns": [rows[i]['return'] for i in range(4)],
-            "avg_total": round(avg_total, 2),
+            "avg_total": avg_total,
         },
-        "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
         "prx": final_prx,
-        "avg_total": round(avg_total, 2),
-        "prediction": pred.get("prediction"),
-        "confidence": pred.get("confidence"),
-        "status": pred.get("status"),
-        "id": record.id,
-        "ocr_method": ocr_method,
+        "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
     }
 
 # ═══════════════════════════════════════════════════════════════════

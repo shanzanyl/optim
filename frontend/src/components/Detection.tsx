@@ -1,6 +1,6 @@
 // frontend/src/components/Detection.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, RefreshCw, AlertTriangle, Info, Edit3 } from 'lucide-react';
+import { Camera, RefreshCw, AlertTriangle, Info, Edit3, CheckCircle, Send } from 'lucide-react';
 import { useSlide } from '../Context/SlideContext';
 import { triggerSlideAlert } from '../services/api';
 
@@ -45,6 +45,22 @@ interface LastResult {
   raw_text: string;
 }
 
+interface OcrParseResult {
+  message: string;
+  raw_text: string;
+  ocr_method: string;
+  extracted: {
+    distances: number[];
+    losses: (number | null)[];
+    total_ls: number[];
+    avg_ls: number[];
+    returns: number[];
+    avg_total: number;
+  };
+  prx: number;
+  per_km: any;
+}
+
 const StatusBadge = ({ status }: { status: string | null }) => {
   const cfg: Record<string, string> = {
     'Normal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -87,6 +103,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [activeInputMethod, setActiveInputMethod] = useState<'ocr' | 'manual'>('ocr');
+  
   const [manualForm, setManualForm] = useState({
     prx: '',
     avg_total: '',
@@ -97,7 +114,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return_1: '', return_2: '', return_3: '', return_4: ''
   });
 
-  // 🔥 TAMBAH: State untuk timestamp real-time
+  const [ocrParseResult, setOcrParseResult] = useState<OcrParseResult | null>(null);
+  const [isOcrParsed, setIsOcrParsed] = useState(false);
+
   const [displayTimestamps, setDisplayTimestamps] = useState<Record<number, string>>(() => {
     try {
       const saved = localStorage.getItem('detection_display_timestamps');
@@ -114,11 +133,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   }, [displayTimestamps]);
 
   useEffect(() => {
-    localStorage.setItem('detection_display_timestamps', JSON.stringify(displayTimestamps));
-  }, [displayTimestamps]);
-
-  // 🔥 TAMBAH: Update timestamp saat result baru muncul
-  useEffect(() => {
     if (!lastResult) return;
     const timestamp = new Date().toISOString();
     setDisplayTimestamps(prev => {
@@ -133,7 +147,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     });
   }, [lastResult, allHistory]);
 
-  // 🔥 GANTI: Fungsi format waktu
   const formatDisplayTime = (timestamp: string | null) => {
     if (!timestamp) return '—';
     const date = new Date(timestamp);
@@ -148,8 +161,90 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  const handleManualClassify = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 🔥 POPULATE FORM DARI OCR
+  const populateFormFromOcr = (ocrData: OcrParseResult) => {
+    const { extracted, prx } = ocrData;
+    
+    setManualForm({
+      prx: prx !== undefined && prx !== null ? prx.toString() : '',
+      avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
+      distance_1: extracted.distances[0]?.toString() || '',
+      distance_2: extracted.distances[1]?.toString() || '',
+      distance_3: extracted.distances[2]?.toString() || '',
+      distance_4: extracted.distances[3]?.toString() || '',
+      loss_1: extracted.losses[0]?.toString() || '',
+      loss_2: extracted.losses[1]?.toString() || '',
+      loss_3: extracted.losses[2]?.toString() || '',
+      loss_4: extracted.losses[3] !== null && extracted.losses[3] !== undefined && extracted.losses[3] !== 0 
+        ? extracted.losses[3].toString() 
+        : '',
+      total_l_1: extracted.total_ls[0]?.toString() || '',
+      total_l_2: extracted.total_ls[1]?.toString() || '',
+      total_l_3: extracted.total_ls[2]?.toString() || '',
+      total_l_4: extracted.total_ls[3]?.toString() || '',
+      avg_l_1: extracted.avg_ls[0]?.toString() || '',
+      avg_l_2: extracted.avg_ls[1]?.toString() || '',
+      avg_l_3: extracted.avg_ls[2]?.toString() || '',
+      avg_l_4: extracted.avg_ls[3]?.toString() || '',
+      return_1: extracted.returns[0]?.toString() || '',
+      return_2: extracted.returns[1]?.toString() || '',
+      return_3: extracted.returns[2]?.toString() || '',
+      return_4: extracted.returns[3]?.toString() || '',
+    });
+    
+    setIsOcrParsed(true);
+  };
+
+  // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
+  const handleOcrParse = async (file: File) => {
+    setImageStatus('uploading');
+    setErrorMsg('');
+    setLastResult(null);
+    setShowRawOcr(false);
+    setOcrParseResult(null);
+    setIsOcrParsed(false);
+
+    const reader = new FileReader();
+    reader.onload = (e) => setPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (prxManual.trim() !== '') {
+      const prxVal = parseFloat(prxManual);
+      if (!isNaN(prxVal)) {
+        formData.append('prx_manual', String(prxVal));
+      }
+    }
+
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`${API_BASE}/api/parse-ocr`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || 'Failed to parse OCR');
+      }
+
+      const result: OcrParseResult = await response.json();
+      setOcrParseResult(result);
+      populateFormFromOcr(result);
+      setImageStatus('success');
+      setErrorMsg('OCR berhasil! Silakan periksa dan edit nilai yang salah, lalu klik "Proses Klasifikasi".');
+      
+    } catch (error: any) {
+      console.error('OCR parse error:', error);
+      setErrorMsg(error.message || 'Gagal memproses OCR.');
+      setImageStatus('error');
+    }
+  };
+
+  // 🔥 HANDLE KLASIFIKASI - KIRIM DATA KE /api/detect-manual
+  const handleClassify = async () => {
     setImageStatus('uploading');
     setErrorMsg('');
     setLastResult(null);
@@ -200,24 +295,18 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
       const result = await response.json();
       setLastResult(result);
       setImageStatus('success');
+      setErrorMsg('');
+      setIsOcrParsed(false);
       await fetchHistory();
       if (onDataChange) onDataChange();
     } catch (error: any) {
-      console.error('Manual classification error:', error);
+      console.error('Classification error:', error);
       setErrorMsg(error.message || 'Failed to connect to server.');
       setImageStatus('error');
     }
   };
 
-  const {
-    currentIndex,
-    setCurrentIndex,
-    totalData,
-    setTotalData,
-    autoPlay,
-    setAutoPlay
-  } = useSlide();
-
+  const { currentIndex, setCurrentIndex, totalData, autoPlay } = useSlide();
   const [prevTotalData, setPrevTotalData] = useState(0);
 
   useEffect(() => {
@@ -227,19 +316,12 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
     const status = currentRecord.status || '';
     
-    // 🔥 CEK: Hanya kirim alert jika status Warning/Critical dan BELUM PERNAH dikirim
     if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-      // 🔥 Cek apakah sudah pernah dikirim
-      if (sentAlerts.has(currentRecord.id)) {
-        console.log(`Alert for ID ${currentRecord.id} already sent, skipping.`);
-        return;
-      }
+      if (sentAlerts.has(currentRecord.id)) return;
       
       triggerSlideAlert(currentRecord.id)
         .then((res: { status: string }) => {
           if (res.status === 'sent') {
-            console.log(`Telegram alert sent automatically from Detection for record ID: ${currentRecord.id}`);
-            // 🔥 Tandai sebagai sudah dikirim
             setSentAlerts(prev => new Set(prev).add(currentRecord.id));
           }
         })
@@ -318,62 +400,16 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   }, [refreshTrigger]);
 
   const handleImageUpload = async (file: File) => {
-    setImageStatus('uploading');
-    setErrorMsg('');
+    await handleOcrParse(file);
+  };
+
+  const handleResetOcr = () => {
+    setIsOcrParsed(false);
+    setOcrParseResult(null);
+    setPreview(null);
+    setImageStatus('idle');
     setLastResult(null);
-    setShowRawOcr(false);
-
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target?.result as string);
-    reader.readAsDataURL(file);
-
-    const formData = new FormData();
-    formData.append('file', file);
-    if (prxManual.trim() !== '') {
-      const prxVal = parseFloat(prxManual);
-      if (!isNaN(prxVal)) {
-        formData.append('prx_manual', String(prxVal));
-      }
-    }
-
-    const token = localStorage.getItem('token');
-    try {
-      const response = await fetch(`${API_BASE}/api/detect`, {
-        method: 'POST',
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.detail || 'Failed to process image');
-      }
-
-      const result = await response.json();
-
-      // if (result.extracted) {
-      //   if (!result.extracted.avg_ls && result.extracted.total_ls && result.extracted.distances) {
-      //     result.extracted.avg_ls = result.extracted.total_ls.map((total: number, i: number) => {
-      //       const dist = result.extracted.distances[i] || 1;
-      //       return total / dist;
-      //     });
-      //   }
-      //   if (!result.extracted.avg_total && result.extracted.total_ls && result.extracted.distances) {
-      //     const totalTotalL = result.extracted.total_ls[3] || 0;
-      //     const totalDistance = result.extracted.distances[3] || 1;
-      //     result.extracted.avg_total = totalTotalL / totalDistance;
-      //   }
-      // }
-
-      setLastResult(result);
-      setImageStatus('success');
-      await fetchHistory();
-      if (onDataChange) onDataChange();
-    } catch (error: any) {
-      console.error('OCR error:', error);
-      setErrorMsg(error.message || 'Failed to connect. Ensure backend is running on port 8000');
-      setImageStatus('error');
-    }
+    setErrorMsg('');
   };
 
   const displayedHistory = [...allHistory].reverse();
@@ -397,7 +433,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
 
-        {/* Upload + Hasil - SEMUA TETAP SAMA */}
+        {/* Upload + Hasil */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className={`bg-[#1e2f50] p-6 sm:p-8 rounded-2xl border transition-all ${imageStatus === 'success' ? 'border-emerald-500/50 bg-emerald-500/5' :
             imageStatus === 'error' ? 'border-red-500/50' :
@@ -411,6 +447,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   setActiveInputMethod('ocr');
                   setImageStatus('idle');
                   setErrorMsg('');
+                  setIsOcrParsed(false);
+                  setOcrParseResult(null);
+                  setLastResult(null);
                 }}
                 className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeInputMethod === 'ocr'
                   ? 'bg-blue-600 text-white shadow-lg'
@@ -425,6 +464,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   setActiveInputMethod('manual');
                   setImageStatus('idle');
                   setErrorMsg('');
+                  setIsOcrParsed(false);
                 }}
                 className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeInputMethod === 'manual'
                   ? 'bg-blue-600 text-white shadow-lg'
@@ -440,11 +480,30 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
                 <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
-                {preview && (
-                  <div className="mb-4 rounded-xl overflow-hidden border border-[#3b4f6e]">
-                    <img src={preview} alt="Preview OTDR" className="w-full h-40 object-cover" />
+                
+                {isOcrParsed && ocrParseResult && (
+                  <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                    <p className="text-emerald-400 text-xs flex items-center gap-2">
+                      <CheckCircle size={14} />
+                      OCR berhasil! Silakan periksa dan edit nilai di bawah.
+                    </p>
+                    <p className="text-slate-500 text-[10px] mt-1">
+                      Metode: {ocrParseResult.ocr_method || 'Unknown'}
+                    </p>
                   </div>
                 )}
+                
+                {preview && (
+                  <div className="mb-4 rounded-xl overflow-hidden border border-[#3b4f6e] relative">
+                    <img src={preview} alt="Preview OTDR" className="w-full h-40 object-cover" />
+                    {isOcrParsed && (
+                      <div className="absolute top-2 right-2 bg-emerald-500/80 text-white text-[10px] px-2 py-1 rounded-full flex items-center gap-1">
+                        <CheckCircle size={10} /> Parsed
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="mb-5">
                   <label className="text-sm font-bold text-white mb-1.5 block">Input Prx Value (dBm)</label>
                   <div className="flex items-center gap-2">
@@ -459,6 +518,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <span className="text-sm text-white whitespace-nowrap">dBm</span>
                   </div>
                 </div>
+                
                 <input
                   type="file"
                   accept="image/*"
@@ -467,15 +527,36 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   ref={imageInputRef}
                   onChange={e => e.target.files?.[0] && handleImageUpload(e.target.files[0])}
                 />
-                <label
-                  htmlFor="image-upload"
-                  className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center transition-all font-semibold text-white text-sm ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
-                >
-                  {imageStatus === 'uploading' ? 'Processing...' : imageStatus === 'success' ? 'Upload Again' : imageStatus === 'error' ? 'Try Again' : 'Select OTDR Photo'}
-                </label>
+                
+                {!isOcrParsed ? (
+                  <label
+                    htmlFor="image-upload"
+                    className={`w-full px-6 py-2.5 rounded-xl cursor-pointer flex items-center justify-center transition-all font-semibold text-white text-sm ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
+                  >
+                    {imageStatus === 'uploading' ? 'Processing OCR...' : imageStatus === 'success' ? 'Upload Again' : imageStatus === 'error' ? 'Try Again' : 'Select OTDR Photo'}
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleResetOcr}
+                    className="w-full px-6 py-2.5 rounded-xl bg-slate-600 hover:bg-slate-500 transition-all font-semibold text-white text-sm"
+                  >
+                    Upload Ulang
+                  </button>
+                )}
               </>
             ) : (
-              <form onSubmit={handleManualClassify} className="space-y-4">
+              // 🔥 TAB INPUT MANUAL - TETAP PERTAHANKAN
+              <form onSubmit={(e) => { e.preventDefault(); handleClassify(); }} className="space-y-4">
+                {isOcrParsed && ocrParseResult && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-3">
+                    <p className="text-emerald-400 text-xs flex items-center gap-2">
+                      <CheckCircle size={14} />
+                      Data dari OCR sudah diisi. Silakan periksa dan edit jika perlu.
+                    </p>
+                  </div>
+                )}
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">Prx (dBm)</label>
@@ -525,39 +606,217 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <button
                   type="submit"
                   disabled={imageStatus === 'uploading'}
-                  className={`w-full px-6 py-2.5 rounded-xl flex items-center justify-center transition-all font-semibold text-white text-sm mt-4 ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
+                  className={`w-full px-6 py-2.5 rounded-xl flex items-center justify-center transition-all font-semibold text-white text-sm mt-4 gap-2 ${imageStatus === 'uploading' ? 'bg-slate-600 cursor-wait' : isOcrParsed ? 'bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
                 >
-                  {imageStatus === 'uploading' ? 'Memproses Klasifikasi...' : 'Proses Klasifikasi Manual'}
+                  {imageStatus === 'uploading' ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={16} />
+                      {isOcrParsed ? 'Proses Klasifikasi (Data dari OCR)' : 'Proses Klasifikasi Manual'}
+                    </>
+                  )}
                 </button>
+                
+                {isOcrParsed && (
+                  <p className="text-[10px] text-emerald-400 text-center">
+                    ✓ Menggunakan data dari OCR yang sudah diedit
+                  </p>
+                )}
               </form>
             )}
           </div>
 
+          {/* 🔥 RESULT CLASSIFICATION - DENGAN DETECTED VALUES YANG BISA DIEDIT */}
           <div className="bg-[#1e2f50] p-8 rounded-2xl border border-[#3b4f6e]">
             <h3 className="text-lg font-bold text-white mb-4 uppercase tracking-widest">Result Classification</h3>
+            
             {imageStatus === 'uploading' && (
               <div className="flex flex-col items-center justify-center h-52 gap-3">
                 <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
-                <p className="text-sm text-slate-400">OCR is reading the image...</p>
+                <p className="text-sm text-slate-400">Processing...</p>
               </div>
             )}
-            {imageStatus === 'idle' && !lastResult && (
+            
+            {imageStatus === 'idle' && !lastResult && !isOcrParsed && (
               <div className="flex flex-col items-center justify-center h-52 gap-2 text-slate-500">
                 <Camera className="w-8 h-8" />
-                <p className="text-sm italic">Upload photo OTDR to view results</p>
+                <p className="text-sm italic">Upload photo or input manual data to view results</p>
               </div>
             )}
-            {errorMsg && (
+            
+            {errorMsg && imageStatus !== 'success' && !lastResult && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex gap-3">
                 <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-red-400">{errorMsg}</p>
               </div>
             )}
+
+            {/* 🔥 TAMPILKAN DETECTED VALUES EDITABLE SAAT OCR PARSED (BELUM KLASIFIKASI) */}
+            {isOcrParsed && ocrParseResult && !lastResult && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DETECTED VALUES</p>
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <Edit3 size={10} /> Editable
+                  </span>
+                </div>
+                
+                {/* Signal Power - Editable */}
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Info size={14} className="text-blue-400" />
+                    <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualForm.prx}
+                      onChange={(e) => setManualForm({ ...manualForm, prx: e.target.value })}
+                      className="w-20 px-2 py-1 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-sm outline-none focus:ring-1 focus:ring-blue-500/50"
+                    />
+                    <span className="text-white text-sm font-black">dBm</span>
+                    <span className="text-[10px] text-white ml-1">(input manual)</span>
+                  </div>
+                </div>
+
+                {/* Loss Values - Editable */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
+                      <span className="text-white">Loss KM {i}</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={i === 4 ? (manualForm.loss_4 || '') : manualForm[`loss_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (i === 4) {
+                              setManualForm({ ...manualForm, loss_4: val });
+                            } else {
+                              setManualForm({ ...manualForm, [`loss_${i}`]: val });
+                            }
+                          }}
+                          disabled={i === 4}
+                          placeholder={i === 4 ? '---' : '0.00'}
+                          className={`w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50 ${i === 4 ? 'opacity-45' : ''}`}
+                        />
+                        <span className="text-white text-[10px]">dB</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total-L Values - Editable */}
+                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
+                      <span className="text-white">Total-L KM {i}</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualForm[`total_l_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`total_l_${i}`]: e.target.value })}
+                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                        <span className="text-white text-[10px]">dB</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Avg-L Values - Editable */}
+                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
+                      <span className="text-white">Avg-L KM {i}</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualForm[`avg_l_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`avg_l_${i}`]: e.target.value })}
+                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                        <span className="text-white text-[10px]">dB/km</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Avg-Total - Editable */}
+                <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center text-xs">
+                  <span className="text-white">Avg-Total</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualForm.avg_total}
+                      onChange={(e) => setManualForm({ ...manualForm, avg_total: e.target.value })}
+                      className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                    />
+                    <span className="text-white text-[10px]">dB/km</span>
+                  </div>
+                </div>
+
+                {/* Return Values - Editable */}
+                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
+                      <span className="text-white">Return KM {i}</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualForm[`return_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`return_${i}`]: e.target.value })}
+                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                        <span className="text-white text-[10px]">dB</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Tombol Proses Klasifikasi */}
+                <button
+                  onClick={handleClassify}
+                  disabled={imageStatus === 'uploading'}
+                  className="w-full mt-4 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+                >
+                  {imageStatus === 'uploading' ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={16} />
+                      Proses Klasifikasi
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-slate-500 text-center">
+                  Pastikan semua nilai sudah benar sebelum klasifikasi
+                </p>
+              </div>
+            )}
+
+            {/* 🔥 TAMPILKAN HASIL KLASIFIKASI (SETELAH KLIK PROSES) */}
             {lastResult && imageStatus === 'success' && (
               <div className="space-y-4">
                 <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
                   <p className="text-2xl font-black">{lastResult.prediction}</p>
+                  {lastResult.confidence && (
+                    <p className="text-[10px] opacity-60 mt-1">Confidence: {lastResult.confidence.toFixed(1)}%</p>
+                  )}
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -627,7 +886,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
 
-        {/* History Table - PAKAI displayTimestamps untuk waktu real-time */}
+        {/* History Table */}
         <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] shadow-2xl overflow-hidden">
           <div className="p-5 border-b border-[#3b4f6e] flex justify-between items-center">
             <h2 className="text-sm font-bold text-white uppercase tracking-widest">History of Measurements</h2>
@@ -661,7 +920,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available.</td></tr>
                 ) : (
                   displayedHistory.map((row, idx) => {
-                    // 🔥 UBAH: Pakai displayTimestamps untuk waktu real-time
                     const displayTime = displayTimestamps[row.id];
                     let recordTime = '—';
                     if (displayTime) {

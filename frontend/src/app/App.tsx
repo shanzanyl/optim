@@ -11,7 +11,7 @@ import MainDashboard from "../components/MainDashboard";
 import Detection from "../components/Detection";
 import Overview from "../components/Overview";
 import Adminpage from "../components/Adminpage";
-import Chatbot from "../components/chatbot";
+// import Chatbot from "../components/chatbot";
 import { SlideProvider } from '../Context/SlideContext';
 
 interface UserData {
@@ -228,7 +228,6 @@ export default function App() {
             {activeTab === 'admin' && isAdmin && <Adminpage />}
           </main>
 
-          <Chatbot />
         </div>
       </Router>
     </SlideProvider>
