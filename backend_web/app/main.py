@@ -338,23 +338,45 @@ def preprocess_image_simple(image_bytes: bytes) -> list:
     
     results = []
     
-    y_start = int(h * 0.25)
-    y_end = int(h * 0.98)
+    # 🔥 Potong lebih presisi (20% atas, 5% bawah)
+    y_start = int(h * 0.20)
+    y_end = int(h * 0.95)
     cropped = img[y_start:y_end, 0:w]
-    resized = cv2.resize(cropped, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    
+    # 🔥 Perbesar 4x (lebih besar dari 3x)
+    resized = cv2.resize(cropped, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    
+    # 🔥 Grayscale
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4,4))
+    # 🔥 CLAHE lebih agresif
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
     enhanced = clahe.apply(gray)
-    denoised = cv2.fastNlMeansDenoising(enhanced, h=30)
+    
+    # 🔥 Sharpening
+    kernel = np.array([[-1,-1,-1],
+                       [-1, 9,-1],
+                       [-1,-1,-1]])
+    sharpened = cv2.filter2D(enhanced, -1, kernel)
+    
+    # 🔥 Denoising
+    denoised = cv2.fastNlMeansDenoising(sharpened, h=30)
+    
+    # 🔥 Adaptive threshold
     binary = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                     cv2.THRESH_BINARY, 15, 8)
+    
+    # 🔥 Morphology
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
     cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
     
+    # 🔥 Tambahkan beberapa variasi
     results.append(Image.fromarray(cleaned))
     results.append(Image.fromarray(cv2.bitwise_not(cleaned)))
     results.append(Image.fromarray(enhanced))
+    results.append(Image.fromarray(sharpened))
+    results.append(Image.fromarray(denoised))
     
     return results
 
@@ -377,6 +399,9 @@ def tesseract_extract(image_bytes: bytes) -> str:
             "--oem 3 --psm 11",
             "--oem 1 --psm 6",
             "--oem 3 --psm 3",
+            "--oem 3 --psm 7",      # 🔥 TAMBAH: single text line
+            "--oem 3 --psm 12",     # 🔥 TAMBAH: sparse text
+            "--oem 3 --psm 13",     # 🔥 TAMBAH: raw line
         ]
 
         for img in images:
