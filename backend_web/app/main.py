@@ -442,181 +442,174 @@ def ocr_space_extract(image_bytes: bytes) -> str:
 # OTDR PARSER (DIPERBAIKI)
 # ═══════════════════════════════════════════════════════════════════
 
-def parse_otdr_table_simple(raw_text: str) -> tuple[list, float]:
+import re
+from typing import List, Dict, Tuple
+
+def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR secara global dan dinamis.
-    Versi improved dengan anchor-based detection.
+    Parse teks OCR OTDR menggunakan pendekatan line-based.
+    Setiap baris adalah satu event/row tabel.
+    TIDAK ADA PERHITUNGAN - semua nilai diambil langsung dari OCR.
     """
-    text = raw_text.replace(',', '.')
-    
-    # 1. Tokenisasi teks menjadi token numerik
-    raw_tokens = []
-    for t in text.replace('\t', ' ').split():
-        # Lewati token yang berisi huruf alfabet murni
-        t_alpha = re.sub(r'[^a-zA-Z\u0400-\u04FF]', '', t)
-        if t_alpha and t_alpha.isalpha() and t_alpha not in ('dB', 'km'):
-            continue
-            
-        t_clean = t.replace('km', '').replace('dB', '').replace('/km', '').strip()
-        if re.match(r'^[-–—]+$', t_clean) or t_clean == '':
-            raw_tokens.append('---')
-        else:
-            t_clean2 = re.sub(r'[^\d\.\-]', '', t_clean)
-            if t_clean2 and t_clean2 not in ('-', '.'):
-                try:
-                    raw_tokens.append(float(t_clean2))
-                except ValueError:
-                    pass
-    
-    logger.info(f"Raw numeric/dash tokens parsed: {raw_tokens[:30]}")
-    
-    # 2. Cari posisi indeks anchor distance (KM1, KM2, KM3, KM4)
-    anchors = {}
-    last_idx = -1
-    for i in range(1, 5):
-        best_idx = -1
-        for idx in range(last_idx + 1, len(raw_tokens)):
-            val = raw_tokens[idx]
-            if isinstance(val, float) and (i - 0.25 <= val <= i + 0.25):
-                best_idx = idx
-                break
-        if best_idx != -1:
-            anchors[i] = best_idx
-            last_idx = best_idx
-    
-    # Taksir posisi anchor yang hilang
-    for i in range(1, 5):
-        if i not in anchors:
-            if i - 1 in anchors:
-                anchors[i] = min(anchors[i-1] + 6, len(raw_tokens) - 1)
-            elif i + 1 in anchors:
-                anchors[i] = max(anchors[i+1] - 6, 0)
-            else:
-                anchors[i] = min((i - 1) * 6, len(raw_tokens) - 1)
-    
-    logger.info(f"Distance anchors: {anchors}")
-    
-    # 3. Slicing token berdasarkan anchor
-    slices = {}
-    sorted_anchors = sorted(anchors.items())
-    for idx_item, (i, start_idx) in enumerate(sorted_anchors):
-        end_idx = len(raw_tokens)
-        if idx_item + 1 < len(sorted_anchors):
-            end_idx = sorted_anchors[idx_item + 1][1]
-        slices[i] = raw_tokens[start_idx:end_idx]
-    
-    # 4. Klasifikasi field per baris
-    rows = []
-    for i in range(1, 5):
-        row_tokens = list(slices.get(i, []))
-        if not row_tokens:
-            rows.append({
-                'distance': float(i),
-                'loss': None if i == 4 else 0.0,
-                'total_l': 0.0,
-                'avg_l': 0.0,
-                'return': -45.0
-            })
-            continue
-        
-        # Token pertama adalah distance
-        dist = row_tokens[0]
-        
-        # Ekstrak return loss (angka antara 25-65)
-        ret = -45.0
-        ret_idx = -1
-        for idx, val in enumerate(row_tokens):
-            if isinstance(val, float) and (25.0 <= abs(val) <= 65.0):
-                ret = -abs(val)
-                ret_idx = idx
-                break
-        if ret_idx != -1:
-            row_tokens.pop(ret_idx)
-        
-        # Ekstrak section (nilai sekitar 1.0)
-        sect = 1.0
-        sect_idx = -1
-        for idx, val in enumerate(row_tokens[1:], start=1):
-            if isinstance(val, float) and 0.8 <= val <= 1.2:
-                sect = val
-                sect_idx = idx
-                break
-        if sect_idx != -1:
-            row_tokens.pop(sect_idx)
-        
-        # Hapus token distance
-        row_tokens.pop(0)
-        
-        # Sisa token dipetakan ke loss, total_l, avg_l
-        remaining = [v for v in row_tokens if isinstance(v, float) or v == '---']
-        
-        if i == 4:  # KM4 khusus
-            loss = None
-            # Cari total_l dan avg_l dari remaining
-            pos_vals = [v for v in remaining if isinstance(v, float) and v > 0]
-            if len(pos_vals) >= 2:
-                total_l = pos_vals[0]
-                avg_l = pos_vals[1]
-            elif len(pos_vals) == 1:
-                total_l = pos_vals[0]
-                avg_l = 0.0
-            else:
-                total_l = 0.0
-                avg_l = 0.0
-        else:
-            # KM1, KM2, KM3
-            if len(remaining) >= 3:
-                loss = remaining[0] if isinstance(remaining[0], float) else 0.0
-                total_l = remaining[1] if isinstance(remaining[1], float) else 0.0
-                avg_l = remaining[2] if isinstance(remaining[2], float) else 0.0
-            elif len(remaining) == 2:
-                # Kasus: loss dan total_l aja, avg_l dihitung
-                loss = remaining[0] if isinstance(remaining[0], float) else 0.0
-                total_l = remaining[1] if isinstance(remaining[1], float) else 0.0
-                avg_l = total_l / dist if dist > 0 else 0.0
-            elif len(remaining) == 1:
-                # Kasus: cuma total_l
-                loss = 0.0
-                total_l = remaining[0] if isinstance(remaining[0], float) else 0.0
-                avg_l = total_l / dist if dist > 0 else 0.0
-            else:
-                loss = 0.0
-                total_l = 0.0
-                avg_l = 0.0
-        
-        # Format row data
-        row_data = {
-            'distance': round(float(dist), 5),
-            'loss': round(float(loss), 3) if loss is not None and loss != '---' else (0.0 if i != 4 else 0.0),
-            'total_l': round(float(total_l), 3) if isinstance(total_l, float) else 0.0,
-            'avg_l': round(float(avg_l), 3) if isinstance(avg_l, float) else 0.0,
-            'return': round(float(ret), 2)
-        }
-        rows.append(row_data)
-    
-    # 5. Hitung avg_total dari header
+    text = raw_text.replace(",", ".")
+
+    # =====================================================
+    # 1. AVG TOTAL - Ambil dari header (SATU-SATUNYA PERHITUNGAN)
+    # =====================================================
     avg_total = 0.0
-    match_avg = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
-    if match_avg:
-        avg_total = float(match_avg.group(1))
-    
-    # 6. Normalisasi: pastikan 4 baris
-    while len(rows) < 4:
+    m = re.search(r'Avg\.?\s*L?\s*[:=]?\s*(\d+\.\d{2,})\s*dB/km', text, re.IGNORECASE)
+    if m:
+        avg_total = round(float(m.group(1)), 2)
+    else:
+        # Fallback: cari pola "1.23 dB/km" di header
+        m2 = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
+        if m2:
+            avg_total = round(float(m2.group(1)), 2)
+
+    # =====================================================
+    # 2. CLEAN LINES
+    # =====================================================
+    lines = []
+    for line in text.splitlines():
+        line = re.sub(r'\s+', ' ', line).strip()
+        if line:
+            lines.append(line)
+
+    # =====================================================
+    # 3. DETECT EVENT LINES (harus ada distance 1.xxx - 4.xxx)
+    # =====================================================
+    event_lines = []
+    for line in lines:
+        if re.search(r'\b[1-4]\.\d{3,5}\b', line):
+            event_lines.append(line)
+
+    # =====================================================
+    # 4. MERGE OCR BROKEN ROW (jika baris terpotong)
+    # =====================================================
+    merged = []
+    i = 0
+    while i < len(event_lines):
+        row = event_lines[i]
+        nums = re.findall(r'\d+\.\d+', row)
+        # Normal event minimal 5 angka, kalau kurang gabung
+        while len(nums) < 5 and i + 1 < len(event_lines):
+            i += 1
+            row += " " + event_lines[i]
+            nums = re.findall(r'\d+\.\d+', row)
+        merged.append(row)
+        i += 1
+
+    # =====================================================
+    # 5. PARSE EACH ROW (LANGSUNG AMBIL DARI OCR, TANPA PERHITUNGAN)
+    # =====================================================
+    rows = []
+    for idx, row in enumerate(merged):
+        # Ambil semua angka dari baris
+        nums = [
+            float(x) for x in re.findall(r'-?\d+\.?\d*', row)
+            if abs(float(x)) < 100  # skip nilai aneh
+        ]
+
+        if not nums:
+            continue
+
+        # Cari indeks distance (nilai 1.xxx - 4.xxx)
+        distance_idx = None
+        for j, val in enumerate(nums):
+            if 0.8 <= val <= 4.5 and val not in [4.0, 4.1, 4.2, 4.3, 4.4]:
+                distance_idx = j
+                break
+
+        if distance_idx is None:
+            continue
+
+        nums = nums[distance_idx:]
+
+        # =====================================
+        # NORMAL ROW (6 angka)
+        # =====================================
+        if len(nums) >= 6:
+            distance = nums[0]
+            section = nums[1]
+            loss = nums[2] if nums[2] is not None else 0.0
+            total_l = nums[3] if nums[3] is not None else 0.0
+            avg_l = nums[4] if nums[4] is not None else 0.0
+            return_db = nums[5] if nums[5] is not None else 0.0
+
+        # =====================================
+        # LAST ROW / BROKEN ROW (5 angka)
+        # =====================================
+        elif len(nums) == 5:
+            distance = nums[0]
+            section = nums[1]
+            loss = 0.0
+            total_l = nums[2] if nums[2] is not None else 0.0
+            avg_l = nums[3] if nums[3] is not None else 0.0
+            return_db = nums[4] if nums[4] is not None else 0.0
+
+        else:
+            continue
+
+        # 🔥 TIDAK ADA PERHITUNGAN - nilai langsung dari OCR
         rows.append({
-            'distance': float(len(rows) + 1),
-            'loss': 0.0,
-            'total_l': 0.0,
-            'avg_l': 0.0,
-            'return': -45.0
+            "distance": round(distance, 5),
+            "section": round(section, 5),
+            "loss": round(loss, 3) if loss != 0 else 0.0,
+            "total_l": round(total_l, 3) if total_l != 0 else 0.0,
+            "avg_l": round(avg_l, 3) if avg_l != 0 else 0.0,
+            "return_db": -abs(return_db) if return_db != 0 else -45.0
         })
-    
-    # Log hasil
+
+    # =====================================================
+    # 6. SORT BY DISTANCE
+    # =====================================================
+    rows = sorted(rows, key=lambda x: x["distance"])
+
+    # =====================================================
+    # 7. FIX: KM4 loss harus None
+    # =====================================================
+    if len(rows) >= 4:
+        # KM4 loss = None
+        rows[3]["loss"] = None
+    elif len(rows) == 3:
+        # Tambah KM4 default
+        rows.append({
+            "distance": 4.0,
+            "section": 0.0,
+            "loss": None,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return_db": -45.0
+        })
+
+    # =====================================================
+    # 8. Normalisasi: pastikan 4 baris
+    # =====================================================
+    while len(rows) < 4:
+        km = len(rows) + 1
+        rows.append({
+            "distance": float(km),
+            "section": 0.0,
+            "loss": None if km == 4 else 0.0,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return_db": -45.0
+        })
+
+    # =====================================================
+    # 9. LOG HASIL
+    # =====================================================
     logger.info("===== FINAL PARSED ROWS =====")
-    for i, row in enumerate(rows):
-        logger.info(f"  KM{i+1}: dist={row['distance']}, loss={row['loss']}, total_l={row['total_l']}, avg_l={row['avg_l']}, return={row['return']}")
-    
+    for i, r in enumerate(rows, start=1):
+        logger.info(
+            f"  KM{i}: dist={r['distance']}, "
+            f"loss={r['loss']}, "
+            f"total_l={r['total_l']}, "
+            f"avg_l={r['avg_l']}, "
+            f"return={r['return_db']}"
+        )
     logger.info(f"AVG TOTAL = {avg_total}")
-    
+
     return rows, avg_total
 
 # ═══════════════════════════════════════════════════════════════════
