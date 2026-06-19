@@ -403,7 +403,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
         {/* Loss per KM */}
         <section className="space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Loss per KM (dB)</h3>
+            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Loss per Km (dB)</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map(km => {
@@ -418,7 +418,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div key={km} className="group bg-[#1e2f50] border border-red-500/30 p-5 rounded-[2rem] opacity-70">
                     <div className="text-center py-8">
                       <p className="text-red-400 text-xs font-bold animate-pulse">FIBER CUT</p>
-                      <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di KM {cutKM}</p>
+                      <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di Km {cutKM}</p>
                       <p className="text-slate-500 text-[8px] mt-2">Prx: {currentRecord?.prx} dBm</p>
                     </div>
                   </div>
@@ -430,12 +430,12 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div className="absolute -top-10 -right-10 w-32 h-32 blur-[80px] opacity-10 rounded-full" style={{ backgroundColor: lossColors[km - 1] }} />
                   <div className="flex justify-between items-start mb-3 relative z-10">
                     <div>
-                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Loss KM {km}</p>
+                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Loss Km {km}</p>
                       <div className="flex items-baseline gap-1">
                         <h4 className={`text-2xl font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}`}>
                           {lossValue === 0 && km === 4 ? '---' : lossValue}
                         </h4>
-                        {!(lossValue === 0 && km === 4) && <span className="text-[10px] font-bold text-white uppercase">dB</span>}
+                        {!(lossValue === 0 && km === 4) && <span className="text-[12px] font-bold text-white">dB</span>}
                       </div>
                       {isAboveThreshold && <p className="text-[12px] text-red-400 mt-1 animate-pulse">Melebihi batas!</p>}
                     </div>
@@ -485,7 +485,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
         {/* Return Loss per KM */}
         <section className="space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Return Loss per KM (dB)</h3>
+            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Return Loss per Km (dB)</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map(km => {
@@ -500,7 +500,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div key={km} className="group bg-[#1e2f50] border border-red-500/30 p-5 rounded-[2rem] opacity-70">
                     <div className="text-center py-8">
                       <p className="text-red-400 text-xs font-bold animate-pulse">FIBER CUT</p>
-                      <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di KM {cutKM}</p>
+                      <p className="text-slate-400 text-[10px] mt-1">Sinyal terputus di Km {cutKM}</p>
                     </div>
                   </div>
                 );
@@ -511,10 +511,10 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div className="absolute -top-10 -right-10 w-32 h-32 blur-[80px] opacity-10 rounded-full" style={{ backgroundColor: returnColors[km - 1] }} />
                   <div className="flex justify-between items-start mb-3 relative z-10">
                     <div>
-                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Return KM {km}</p>
+                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Return Km {km}</p>
                       <div className="flex items-baseline gap-1">
                         <h4 className={`text-2xl font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}`}>{returnValue}</h4>
-                        <span className="text-[10px] font-bold text-white uppercase">dB</span>
+                        <span className="text-[12px] font-bold text-white">dB</span>
                       </div>
                       {isAboveThreshold && <p className="text-[12px] text-red-400 mt-1 animate-pulse">Melebihi batas!</p>}
                     </div>

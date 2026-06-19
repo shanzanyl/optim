@@ -582,7 +582,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <tbody className="divide-y divide-[#3b4f6e]/30">
                       {[1, 2, 3, 4].map(km => (
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
-                          <td className="p-2 font-bold text-white text-xs">KM {km}</td>
+                          <td className="p-2 font-bold text-white text-xs">Km {km}</td>
                           <td className="p-2">
                             <input type="number" step="0.00001" required value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
@@ -656,157 +656,158 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             )}
 
             {/* 🔥 TAMPILKAN DETECTED VALUES EDITABLE SAAT OCR PARSED (BELUM KLASIFIKASI) */}
-            {isOcrParsed && ocrParseResult && !lastResult && (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DETECTED VALUES</p>
-                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                    <Edit3 size={10} /> Editable
-                  </span>
-                </div>
-                
-                {/* Signal Power - Editable */}
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Info size={14} className="text-blue-400" />
-                    <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={manualForm.prx}
-                      onChange={(e) => setManualForm({ ...manualForm, prx: e.target.value })}
-                      className="w-20 px-2 py-1 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-sm outline-none focus:ring-1 focus:ring-blue-500/50"
-                    />
-                    <span className="text-white text-sm font-black">dBm</span>
-                    <span className="text-[10px] text-white ml-1">(input manual)</span>
-                  </div>
-                </div>
+{isOcrParsed && ocrParseResult && !lastResult && (
+  <div className="space-y-3">
+    <div className="flex justify-between items-center">
+      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DETECTED VALUES</p>
+      <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+        <Edit3 size={10} /> Editable
+      </span>
+    </div>
+    
+    {/* Signal Power - Editable */}
+    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Info size={14} className="text-blue-400" />
+        <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          inputMode="decimal"
+          step="0.01"
+          value={manualForm.prx}
+          onChange={(e) => setManualForm({ ...manualForm, prx: e.target.value })}
+          className="w-20 px-2 py-1 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+        />
+        <span className="text-white text-sm font-black">dBm</span>
+        <span className="text-[10px] text-white ml-1">(input manual)</span>
+      </div>
+    </div>
 
-                {/* Loss Values - Editable */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
-                      <span className="text-white">Loss KM {i}</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={i === 4 ? (manualForm.loss_4 || '') : manualForm[`loss_${i}` as keyof typeof manualForm]}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (i === 4) {
-                              setManualForm({ ...manualForm, loss_4: val });
-                            } else {
-                              setManualForm({ ...manualForm, [`loss_${i}`]: val });
-                            }
-                          }}
-                          disabled={i === 4}
-                          placeholder={i === 4 ? '---' : '0.00'}
-                          className={`w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50 ${i === 4 ? 'opacity-45' : ''}`}
-                        />
-                        <span className="text-white text-[10px]">dB</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+    {/* Loss Values - Style Monitoring NOC */}
+    <div className="grid grid-cols-2 gap-2 text-sm">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={`loss-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+          <span className="text-white font-medium">Loss Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="decimal"
+              step="0.01"
+              value={i === 4 ? (manualForm.loss_4 || '') : manualForm[`loss_${i}` as keyof typeof manualForm]}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (i === 4) {
+                  setManualForm({ ...manualForm, loss_4: val });
+                } else {
+                  setManualForm({ ...manualForm, [`loss_${i}`]: val });
+                }
+              }}
+              disabled={i === 4}
+              placeholder={i === 4 ? '---' : '0.00'}
+              className={`w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50 ${i === 4 ? 'opacity-45 cursor-not-allowed' : ''}`}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
 
-                {/* Total-L Values - Editable */}
-                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
-                      <span className="text-white">Total-L KM {i}</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={manualForm[`total_l_${i}` as keyof typeof manualForm]}
-                          onChange={(e) => setManualForm({ ...manualForm, [`total_l_${i}`]: e.target.value })}
-                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
-                        />
-                        <span className="text-white text-[10px]">dB</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+    {/* Total-L Values */}
+    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={`total-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+          <span className="text-white font-medium">Total-L Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="decimal"
+              step="0.01"
+              value={manualForm[`total_l_${i}` as keyof typeof manualForm]}
+              onChange={(e) => setManualForm({ ...manualForm, [`total_l_${i}`]: e.target.value })}
+              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
 
-                {/* Avg-L Values - Editable */}
-                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
-                      <span className="text-white">Avg-L KM {i}</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={manualForm[`avg_l_${i}` as keyof typeof manualForm]}
-                          onChange={(e) => setManualForm({ ...manualForm, [`avg_l_${i}`]: e.target.value })}
-                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
-                        />
-                        <span className="text-white text-[10px]">dB/km</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+    {/* Avg-L Values */}
+    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={`avg-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+          <span className="text-white font-medium">Avg-L Km {i} <span className="text-white text-[13px]">(dB/km)</span></span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="decimal"
+              step="0.01"
+              value={manualForm[`avg_l_${i}` as keyof typeof manualForm]}
+              onChange={(e) => setManualForm({ ...manualForm, [`avg_l_${i}`]: e.target.value })}
+              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
 
-                {/* Avg-Total - Editable */}
-                <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center text-xs">
-                  <span className="text-white">Avg-Total</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={manualForm.avg_total}
-                      onChange={(e) => setManualForm({ ...manualForm, avg_total: e.target.value })}
-                      className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
-                    />
-                    <span className="text-white text-[10px]">dB/km</span>
-                  </div>
-                </div>
+    {/* Avg-Total */}
+    <div className="bg-[#0f1a2e]/70 rounded-lg p-2 flex justify-between items-center text-sm border border-[#3b4f6e]/50">
+      <span className="text-white font-bold">Avg-Total<span className="text-white text-[13px] ml-1">(dB/km)</span></span>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          inputMode="decimal"
+          step="0.01"
+          value={manualForm.avg_total}
+          onChange={(e) => setManualForm({ ...manualForm, avg_total: e.target.value })}
+          className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+        />
+      </div>
+    </div>
 
-                {/* Return Values - Editable */}
-                <div className="grid grid-cols-2 gap-2 text-xs mt-1">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between items-center">
-                      <span className="text-white">Return KM {i}</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={manualForm[`return_${i}` as keyof typeof manualForm]}
-                          onChange={(e) => setManualForm({ ...manualForm, [`return_${i}`]: e.target.value })}
-                          className="w-16 px-1.5 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500/50"
-                        />
-                        <span className="text-white text-[10px]">dB</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+    {/* Return Values */}
+    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={`ret-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+          <span className="text-white font-medium">Return Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="decimal"
+              step="0.01"
+              value={manualForm[`return_${i}` as keyof typeof manualForm]}
+              onChange={(e) => setManualForm({ ...manualForm, [`return_${i}`]: e.target.value })}
+              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
 
-                {/* Tombol Proses Klasifikasi */}
-                <button
-                  onClick={handleClassify}
-                  disabled={imageStatus === 'uploading'}
-                  className="w-full mt-4 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
-                >
-                  {imageStatus === 'uploading' ? (
-                    <>
-                      <RefreshCw size={16} className="animate-spin" />
-                      Memproses...
-                    </>
-                  ) : (
-                    <>
-                      <Send size={16} />
-                      Proses Klasifikasi
-                    </>
-                  )}
-                </button>
-                <p className="text-[10px] text-slate-500 text-center">
-                  Pastikan semua nilai sudah benar sebelum klasifikasi
-                </p>
-              </div>
-            )}
+    {/* Tombol Proses Klasifikasi */}
+    <button
+      onClick={handleClassify}
+      disabled={imageStatus === 'uploading'}
+      className="w-full mt-4 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {imageStatus === 'uploading' ? (
+        <>
+          <RefreshCw size={16} className="animate-spin" />
+          Memproses...
+        </>
+      ) : (
+        <>
+          <Send size={16} />
+          Proses Klasifikasi
+        </>
+      )}
+    </button>
+    <p className="text-[12px] text-white text-center">
+      Pastikan semua nilai sudah benar sebelum klasifikasi
+    </p>
+  </div>
+)}
 
             {/* 🔥 TAMPILKAN HASIL KLASIFIKASI (SETELAH KLIK PROSES) */}
             {lastResult && imageStatus === 'success' && (
@@ -814,9 +815,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
                   <p className="text-2xl font-black">{lastResult.prediction}</p>
-                  {lastResult.confidence && (
-                    <p className="text-[10px] opacity-60 mt-1">Confidence: {lastResult.confidence.toFixed(1)}%</p>
-                  )}
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -825,15 +823,14 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   </div>
                   <div className="text-right">
                     <span className="text-white font-black text-sm">{lastResult.prx?.toString()} dBm</span>
-                    <span className="text-[10px] text-white ml-2">({lastResult.prx_source === 'manual' ? 'input manual' : lastResult.prx_source === 'ocr' ? 'dari OCR' : 'default'})</span>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detected Values</p>
+                  <p className="text-[12px] font-bold text-white uppercase tracking-widest">Detected Values</p>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-white">Loss KM {i + 1}</span>
+                        <span className="text-white">Loss Km {i + 1}</span>
                         <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : l.toString()} dB</span>
                       </div>
                     ))}
@@ -842,7 +839,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-white">Total-L KM {i + 1}</span>
+                          <span className="text-white">Total-L Km {i + 1}</span>
                           <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB</span>
                         </div>
                       ))}
@@ -852,7 +849,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-white">Avg-L KM {i + 1}</span>
+                          <span className="text-white">Avg-L Km {i + 1}</span>
                           <span className="text-white font-mono">{al === 0 ? '---' : al.toString()} dB/km</span>
                         </div>
                       ))}
@@ -867,7 +864,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-white">Return KM {i + 1}</span>
+                        <span className="text-white">Return Km {i + 1}</span>
                         <span className="text-white font-mono">{r.toString()} dB</span>
                       </div>
                     ))}
@@ -905,9 +902,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
                 <tr className="bg-[#1e2f50] text-white text-[13px] font-black uppercase tracking-widest border-b border-[#3b4f6e]">
                   <th className="px-6 py-4">Time</th>
-                  <th className="px-6 py-4 text-center">Loss KM1-4 (dB)</th>
+                  <th className="px-6 py-4 text-center">Loss Km 1-4 (dB)</th>
                   <th className="px-6 py-4 text-center">Total-L (dB)</th>
-                  <th className="px-6 py-4 text-center">Return KM1-4 (dB)</th>
+                  <th className="px-6 py-4 text-center">Return Km 1-4 (dB)</th>
                   <th className="px-6 py-4 text-center">PRX (dBm)</th>
                   <th className="px-6 py-4">Classification</th>
                   <th className="px-6 py-4 text-center">Status</th>
