@@ -980,14 +980,14 @@ async def parse_ocr_only(
         
         try:
             results['tesseract'] = await asyncio.wait_for(
-                asyncio.to_thread(tesseract_extract, content), timeout=25.0)
+                asyncio.to_thread(tesseract_extract, content), timeout=40.0)
         except asyncio.TimeoutError:
             logger.warning("Tesseract timed out")
             results['tesseract'] = ""
 
         try:
             results['ocr.space'] = await asyncio.wait_for(
-                asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
+                asyncio.to_thread(ocr_space_extract, content), timeout=30.0)
         except asyncio.TimeoutError:
             logger.warning("OCR.space timed out")
             results['ocr.space'] = ""
