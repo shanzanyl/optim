@@ -444,6 +444,9 @@ def ocr_space_extract(image_bytes: bytes) -> str:
 
 import re
 from typing import List, Dict, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
@@ -534,7 +537,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             loss = nums[2] if nums[2] is not None else 0.0
             total_l = nums[3] if nums[3] is not None else 0.0
             avg_l = nums[4] if nums[4] is not None else 0.0
-            return_db = nums[5] if nums[5] is not None else 0.0
+            return_val = nums[5] if nums[5] is not None else 0.0
 
         # =====================================
         # LAST ROW / BROKEN ROW (5 angka)
@@ -545,7 +548,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             loss = 0.0
             total_l = nums[2] if nums[2] is not None else 0.0
             avg_l = nums[3] if nums[3] is not None else 0.0
-            return_db = nums[4] if nums[4] is not None else 0.0
+            return_val = nums[4] if nums[4] is not None else 0.0
 
         else:
             continue
@@ -557,7 +560,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             "loss": round(loss, 3) if loss != 0 else 0.0,
             "total_l": round(total_l, 3) if total_l != 0 else 0.0,
             "avg_l": round(avg_l, 3) if avg_l != 0 else 0.0,
-            "return_db": -abs(return_db) if return_db != 0 else -45.0
+            "return": -abs(return_val) if return_val != 0 else -45.0
         })
 
     # =====================================================
@@ -579,7 +582,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             "loss": None,
             "total_l": 0.0,
             "avg_l": 0.0,
-            "return_db": -45.0
+            "return": -45.0
         })
 
     # =====================================================
@@ -593,7 +596,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             "loss": None if km == 4 else 0.0,
             "total_l": 0.0,
             "avg_l": 0.0,
-            "return_db": -45.0
+            "return": -45.0
         })
 
     # =====================================================
@@ -606,7 +609,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             f"loss={r['loss']}, "
             f"total_l={r['total_l']}, "
             f"avg_l={r['avg_l']}, "
-            f"return={r['return_db']}"
+            f"return={r['return']}"
         )
     logger.info(f"AVG TOTAL = {avg_total}")
 
