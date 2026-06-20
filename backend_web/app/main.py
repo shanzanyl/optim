@@ -328,8 +328,16 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # OCR PREPROCESSING (DIPERBAIKI)
 # ═══════════════════════════════════════════════════════════════════
 
+import re
+import asyncio
+import logging
+import numpy as np
+import cv2
+import pytesseract
+import requests
 from PIL import Image, ImageEnhance
 from typing import List, Dict, Tuple
+from fastapi import UploadFile, File, Form, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -528,15 +536,23 @@ def parse_otdr_horizontal(raw_text: str) -> Tuple[List[Dict], float]:
     
     # Skip index 0 (starting point)
     for i in range(1, min(5, len(data['distance']))):
+        # 🔥 PERBAIKI: KM4 loss = None (End of Fiber)
+        is_km4 = (i == 4)
+        loss_value = None if is_km4 else (data['loss'][i-1] if i-1 < len(data['loss']) else 0.0)
+        
         row = {
             'distance': data['distance'][i] if i < len(data['distance']) else float(i),
             'section': data['section'][i] if i < len(data['section']) else 0.0,
-            'loss': data['loss'][i-1] if i-1 < len(data['loss']) else 0.0,
+            'loss': loss_value,  # 🔥 KM4 = None
             'total_l': data['total_l'][i] if i < len(data['total_l']) else 0.0,
             'avg_l': data['avg_l'][i-1] if i-1 < len(data['avg_l']) else 0.0,
             'return': -abs(data['return'][i]) if i < len(data['return']) else -45.0
         }
         rows.append(row)
+    
+    # 🔥 PASTIKAN KM4 loss = None
+    if len(rows) >= 4:
+        rows[3]['loss'] = None
     
     # Cari Avg Total
     avg_total = 0.0
@@ -580,7 +596,7 @@ def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
             distances.append(fnum)
     distances.sort()
     
-    # Cari loss (0.1 - 5.0)
+    # Cari loss (0.1 - 5.0) - hanya untuk KM1-KM3
     losses = []
     for num in all_numbers:
         fnum = float(num)
@@ -601,17 +617,25 @@ def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
     # Build rows
     for i in range(1, 5):
         dist = distances[i-1] if i-1 < len(distances) else float(i)
-        loss = losses[i-1] if i-1 < len(losses) else 0.0
+        
+        # 🔥 PERBAIKI: KM4 loss = None (End of Fiber)
+        is_km4 = (i == 4)
+        loss = None if is_km4 else (losses[i-1] if i-1 < len(losses) else 0.0)
+        
         total_l = total_ls[i] if i < len(total_ls) else 0.0
         
         rows.append({
             'distance': dist,
             'section': 0.0,
-            'loss': loss,
+            'loss': loss,  # 🔥 KM4 = None
             'total_l': total_l,
             'avg_l': total_l / dist if dist > 0 else 0.0,
             'return': -45.0
         })
+    
+    # 🔥 PASTIKAN KM4 loss = None
+    if len(rows) >= 4:
+        rows[3]['loss'] = None
     
     # Cari avg total
     avg_total = 0.0
@@ -623,26 +647,39 @@ def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# VALIDASI HASIL PARSING
+# VALIDASI HASIL PARSING (DIPERBAIKI)
 # ═══════════════════════════════════════════════════════════════════
 
 def is_valid_parsed_rows(rows: list) -> bool:
     """
     Cek apakah hasil parsing valid (minimal 3 dari 4 baris punya data)
+    KM4 tidak dihitung untuk loss karena End of Fiber
     """
     if len(rows) < 4:
         return False
     
     valid_count = 0
-    for row in rows:
-        if row.get('loss', 0) > 0 or row.get('total_l', 0) > 0:
-            valid_count += 1
+    for i, row in enumerate(rows):
+        # 🔥 PERBAIKI: handle None values dengan aman
+        loss_val = row.get('loss')
+        total_val = row.get('total_l', 0)
+        
+        # KM4: cek total_l saja (loss selalu None)
+        if i == 3:  # KM4 (index 3)
+            if total_val > 0:
+                valid_count += 1
+        else:
+            # KM1-KM3: cek loss atau total_l
+            # 🔥 PERBAIKIAN: loss bisa None, cek dengan aman
+            if (loss_val is not None and loss_val > 0) or total_val > 0:
+                valid_count += 1
     
+    # Minimal 3 dari 4 valid (termasuk KM4 yang hanya perlu total_l)
     return valid_count >= 3
 
 
 # ═══════════════════════════════════════════════════════════════════
-# HYBRID PARSER (MENGGABUNGKAN 3 STRATEGI)
+# HYBRID PARSER (MENGGABUNGKAN 3 STRATEGI) - DIPERBAIKI
 # ═══════════════════════════════════════════════════════════════════
 
 def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
@@ -655,39 +692,54 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
     try:
         logger.info("📊 Trying vertical parser...")
         rows, avg = parse_otdr_table_simple(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Vertical parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            logger.info(f"✅ Vertical parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
         else:
-            logger.info(f"⚠️ Vertical parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+            logger.info(f"⚠️ Vertical parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
         logger.warning(f"Vertical parser failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
     
     # Strategy 2: Horizontal (format transpose)
     try:
         logger.info("📊 Trying horizontal parser...")
         rows, avg = parse_otdr_horizontal(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Horizontal parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            logger.info(f"✅ Horizontal parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
         else:
-            logger.info(f"⚠️ Horizontal parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+            logger.info(f"⚠️ Horizontal parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
         logger.warning(f"Horizontal parser failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
     
     # Strategy 3: Manual extraction
     try:
         logger.info("📊 Trying manual parser...")
         rows, avg = parse_otdr_manual(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Manual parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            logger.info(f"✅ Manual parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
         else:
-            logger.info(f"⚠️ Manual parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+            logger.info(f"⚠️ Manual parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
         logger.warning(f"Manual parser failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
     
-    # Fallback: return empty rows
+    # Fallback: return empty rows dengan KM4 loss = None
     logger.warning("❌ All parsers failed, returning empty rows")
     return [
         {'distance': 1.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
@@ -822,7 +874,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 7. FIX: KM4 loss harus None
+    # 7. FIX: KM4 loss harus None (End of Fiber)
     # =====================================================
     if len(rows) >= 4:
         # KM4 loss = None
@@ -954,6 +1006,10 @@ async def parse_ocr_only(
     
     # 🔥 GUNAKAN HYBRID PARSER
     rows, avg_total = parse_otdr_hybrid(raw_text)
+    
+    # 🔥 PASTIKAN KM4 loss = None (End of Fiber)
+    if len(rows) >= 4:
+        rows[3]['loss'] = None
     
     # 🔥 HAPUS ROUND
     avg_total = avg_total
