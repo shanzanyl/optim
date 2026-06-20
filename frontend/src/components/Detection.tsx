@@ -416,22 +416,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-[#14213d] text-slate-300 font-sans pb-20 w-full">
-      <div className="space-y-6 p-6">
-        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xs text-white">Slide Show Progress (Classification)</span>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-white font-mono">{currentIndex + 1} / {totalData}</span>
-            </div>
-          </div>
-          <div className="w-full bg-slate-600 rounded-full h-2">
-            <div
-              className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
+    <div className="p-6 sm:p-8 bg-[#1e2f50] rounded-2xl border border-[#3b4f6e]"> 
 
         {/* Upload + Hasil */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -479,7 +464,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               <>
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
-                <p className="text-xs text-slate-500 mb-5 text-center">Format: JPG, PNG</p>
+                <p className="text-xs text-slate-100 mb-5 text-center">Format: JPG, PNG</p>
                 
                 {isOcrParsed && ocrParseResult && (
                   <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
@@ -487,7 +472,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       <CheckCircle size={14} />
                       OCR berhasil! Silakan periksa dan edit nilai di bawah.
                     </p>
-                    <p className="text-slate-500 text-[10px] mt-1">
+                    <p className="text-slate-100 text-[10px] mt-1">
                       Metode: {ocrParseResult.ocr_method || 'Unknown'}
                     </p>
                   </div>
@@ -513,7 +498,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       value={prxManual}
                       onChange={e => setPrxManual(e.target.value)}
                       placeholder="-15.6"
-                      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500"
+                      className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100"
                     />
                     <span className="text-sm text-white whitespace-nowrap">dBm</span>
                   </div>
@@ -559,12 +544,12 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">Prx (dBm)</label>
+                    <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Prx (dBm)</label>
                     <input type="number" step="0.01" required value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                   <div>
-                    <label className="text-[12px] font-bold text-white uppercase tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
-                    <input type="number" step="0.001" required value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
+                    <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
+                    <input type="number" step="0.001" required value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
                   </div>
                 </div>
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
@@ -900,14 +885,14 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
-                <tr className="bg-[#1e2f50] text-white text-[13px] font-black uppercase tracking-widest border-b border-[#3b4f6e]">
-                  <th className="px-6 py-4">Time</th>
-                  <th className="px-6 py-4 text-center">Loss Km 1-4 (dB)</th>
-                  <th className="px-6 py-4 text-center">Total-L (dB)</th>
-                  <th className="px-6 py-4 text-center">Return Km 1-4 (dB)</th>
-                  <th className="px-6 py-4 text-center">PRX (dBm)</th>
-                  <th className="px-6 py-4">Classification</th>
-                  <th className="px-6 py-4 text-center">Status</th>
+                <tr className="bg-[#1e2f50] text-white text-[13px] font-black tracking-widest border-b border-[#3b4f6e]">
+                  <th className="px-6 py-4 text-center">TIME</th>
+                  <th className="px-6 py-4 text-center">LOSS Km 1-4 (dB)</th>
+                  <th className="px-6 py-4 text-center">TOTAL-L (dB)</th>
+                  <th className="px-6 py-4 text-center">RETURN Km 1-4 (dB)</th>
+                  <th className="px-6 py-4 text-center">Prx (dBm)</th>
+                  <th className="px-6 py-4">CLASSIFICATION</th>
+                  <th className="px-6 py-4 text-center">STATUS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#3b4f6e]/50">
@@ -929,7 +914,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     
                     return (
                       <tr key={row.id || idx} className="hover:bg-[#2a3d60]/20 transition-colors">
-                        <td className="px-6 py-4 text-slate-400 text-xs font-mono whitespace-nowrap">{recordTime}</td>
+                        <td className="px-6 py-4 text-center text-white text-xs font-mono">{recordTime}</td>
                         <td className="px-6 py-4 text-center text-white text-xs font-mono">
                           {formatLossValue(row.loss_1)} | {formatLossValue(row.loss_2)} |{' '}
                           {formatLossValue(row.loss_3)} | {formatLossValue(row.loss_4)}
@@ -964,7 +949,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           </div>
         </div>
       </div>
-    </div>
   );
 };
 

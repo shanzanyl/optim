@@ -403,7 +403,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
         {/* Loss per KM */}
         <section className="space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Loss per Km (dB)</h3>
+            <h3 className="text-sm font-black text-white tracking-[0.2em]">LOSS Km (dB)</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map(km => {
@@ -485,7 +485,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
         {/* Return Loss per KM */}
         <section className="space-y-4">
           <div className="flex justify-between items-center px-2">
-            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Return Loss per Km (dB)</h3>
+            <h3 className="text-sm font-black text-white tracking-[0.2em]">RETURN Km (dB)</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map(km => {
@@ -570,7 +570,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <div className="w-1.5 h-4 bg-blue-500 rounded-full" />
-                  Signal Power (Prx) Monitoring
+                  Signal Power (Prx) 
                 </h3>
                 <div className="mt-3">
                   <p className="text-2xl text-white font-black leading-none">
@@ -696,14 +696,14 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 bg-[#1e2f50] z-10">
-                <tr className="border-b border-[#3b4f6e] text-white text-[13px] font-black uppercase tracking-widest bg-[#1e2f50]">
-                  <th className="pb-4 px-4">Time</th>
-                  <th className="pb-4 px-4 text-center">Loss KM1-4 (dB)</th>
-                  <th className="pb-4 px-4 text-center">Total-L (dB)</th>
-                  <th className="pb-4 px-4 text-center">Return KM1-4 (dB)</th>
-                  <th className="pb-4 px-4 text-center">PRX (dBm)</th>
-                  <th className="pb-4 px-4">Classification</th>
-                  <th className="pb-4 px-4 text-center">Status</th>
+                <tr className="border-b border-[#3b4f6e] text-white text-[14px] font-black tracking-widest bg-[#1e2f50]">
+                  <th className="pb-4 px-4">TIME</th>
+                  <th className="pb-4 px-4 text-center">LOSS Km1-4 (dB)</th>
+                  <th className="pb-4 px-4 text-center">TOTAL-L (dB)</th>
+                  <th className="pb-4 px-4 text-center">RETURN Km1-4 (dB)</th>
+                  <th className="pb-4 px-4 text-center">Prx (dBm)</th>
+                  <th className="pb-4 px-4">CLASSIFICATION</th>
+                  <th className="pb-4 px-4 text-center">STATUS</th>
                 </tr>
               </thead>
               <tbody>

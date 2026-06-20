@@ -191,10 +191,10 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
           {/* OLS */}
           <div className="text-center">
             <div className="w-12 h-12 mx-auto bg-gradient-to-br from-blue-600 to-blue-800 rounded-full flex items-center justify-center shadow-lg border border-blue-400/30">
-              <span className="text-white font-bold text-xs">OLS</span>
+              <span className="text-white font-bold text-sm">OLS</span>
             </div>
-            <p className="text-[9px] font-bold text-blue-400 mt-1">OLS</p>
-            <p className="text-[7px] text-slate-400">Light Source</p>
+            <p className="text-[15px] font-bold text-blue-400 mt-1">OLS</p>
+            <p className="text-[13px] text-slate-400">Light Source</p>
           </div>
           
           {/* Vertical line */}
@@ -250,11 +250,9 @@ const NetworkTopology: React.FC<NetworkTopologyProps> = ({
           {/* OPM */}
           <div className="text-center">
             <div className="w-12 h-12 mx-auto bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-full flex items-center justify-center shadow-lg border border-emerald-400/30">
-              <span className="text-white font-bold text-xs">OPM</span>
+              <span className="text-white font-bold text-lg">OPM</span>
             </div>
-            <p className="text-[9px] font-bold text-emerald-400 mt-1">OPM</p>
-            <p className="text-[7px] text-slate-400">Power Meter</p>
-            <p className="text-[8px] font-mono text-emerald-400 mt-0.5">{prx?.toFixed(1)} dBm</p>
+            <p className="text-[20px] text-white">Power Meter</p>
           </div>
         </div>
       ) : (

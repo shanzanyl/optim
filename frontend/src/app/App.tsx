@@ -122,10 +122,10 @@ export default function App() {
                     <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" strokeWidth={1.5} />
                   </div>
                   <div>
-                    <h1 className="text-base sm:text-xl md:text-2xl font-light tracking-wide text-white leading-tight">
+                    <h1 className="text-base sm:text-xl md:text-3xl font-light tracking-wide text-white leading-tight">
                       Opti<span className="font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">M</span>
                     </h1>
-                    <p className="text-[6px] sm:text-[8px] md:text-[9px] lg:text-[10px] text-slate-400 font-medium tracking-[0.15em] uppercase mt-0.5">
+                    <p className="text-[10px] sm:text-[10px] md:text-[11px] lg:text-[12px] text-white font-medium tracking-[0.15em] uppercase mt-0.5">
                       Optical Monitoring
                     </p>
                   </div>
@@ -178,10 +178,10 @@ export default function App() {
                   {/* ========== USER INFO ========== */}
                   <div className="flex items-center gap-1 sm:gap-2 md:gap-3 pl-2 sm:pl-3 md:pl-4 border-l border-[#3b4f6e]">
                     <div className="text-right hidden sm:block">
-                      <p className="text-xs sm:text-sm font-semibold text-white leading-tight truncate max-w-[100px] sm:max-w-[120px]">
+                      <p className="text-md sm:text-md font-semibold text-white leading-tight">
                         {user?.name || 'User'}
                       </p>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 hidden md:block">{user?.email || ''}</p>
+                      <p className="text-[12px] sm:text-[13px] text-slate-100 hidden md:block">{user?.email || ''}</p>
                       {isAdmin && (
                         <span className="inline-block mt-0.5 px-1 sm:px-1.5 py-0.5 bg-purple-500/20 rounded-md text-[7px] sm:text-[8px] font-semibold text-purple-400 uppercase tracking-wider">
                           Admin

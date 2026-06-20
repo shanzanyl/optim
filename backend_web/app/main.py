@@ -19,7 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from PIL import Image
 import pytesseract
 import cv2
 import requests
@@ -40,7 +39,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-
 
 
 # Tesseract path - auto detect (keep for fallback)
@@ -330,6 +328,11 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # OCR PREPROCESSING (DIPERBAIKI)
 # ═══════════════════════════════════════════════════════════════════
 
+from PIL import Image, ImageEnhance
+from typing import List, Dict, Tuple
+
+logger = logging.getLogger(__name__)
+
 def preprocess_image_simple(image_bytes: bytes) -> list:
     """Preprocessing lebih agresif untuk OCR"""
     arr = np.frombuffer(image_bytes, np.uint8)
@@ -451,7 +454,7 @@ def ocr_space_extract(image_bytes: bytes) -> str:
                 'scale': True,
                 'OCREngine': 2,
             },
-            timeout=15,
+            timeout=30,  # 🔥 DINAIIKKAN dari 15 ke 30
         )
         result = response.json()
         if result.get('ParsedResults') and len(result['ParsedResults']) > 0:
@@ -463,15 +466,240 @@ def ocr_space_extract(image_bytes: bytes) -> str:
         logger.error(f"OCR.space error: {e}")
         return ""
 
+
 # ═══════════════════════════════════════════════════════════════════
-# OTDR PARSER (DIPERBAIKI)
+# PARSER HORIZONTAL (UNTUK FORMAT TRANSPOSE)
 # ═══════════════════════════════════════════════════════════════════
 
-import re
-from typing import List, Dict, Tuple
-import logging
+def parse_otdr_horizontal(raw_text: str) -> Tuple[List[Dict], float]:
+    """
+    Parse OCR OTDR format horizontal (transpose)
+    """
+    lines = raw_text.split('\n')
+    
+    data = {
+        'distance': [],
+        'section': [],
+        'loss': [],
+        'total_l': [],
+        'avg_l': [],
+        'return': []
+    }
+    
+    for line in lines:
+        if 'Distance km' in line or 'Distance' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['distance'] = [float(n) for n in nums if float(n) > 0]
+                
+        elif 'Section km' in line or 'Section' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['section'] = [float(n) for n in nums if float(n) > 0]
+                
+        elif 'Loss dB' in line or 'Loss' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['loss'] = [float(n) for n in nums if float(n) >= 0]
+                
+        elif 'Total-L' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['total_l'] = [float(n) for n in nums if float(n) >= 0]
+                
+        elif 'Avg.L' in line or 'Avg.L dB/km' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['avg_l'] = [float(n) for n in nums if float(n) > 0]
+                
+        elif 'Return dB' in line or 'Return' in line:
+            nums = re.findall(r'(\d+\.\d+)', line)
+            if nums:
+                data['return'] = [float(n) for n in nums]
+    
+    logger.info(f"Extracted horizontal data:")
+    logger.info(f"  Distance: {data['distance']}")
+    logger.info(f"  Loss: {data['loss']}")
+    logger.info(f"  Total-L: {data['total_l']}")
+    logger.info(f"  Avg-L: {data['avg_l']}")
+    logger.info(f"  Return: {data['return']}")
+    
+    rows = []
+    
+    # Skip index 0 (starting point)
+    for i in range(1, min(5, len(data['distance']))):
+        row = {
+            'distance': data['distance'][i] if i < len(data['distance']) else float(i),
+            'section': data['section'][i] if i < len(data['section']) else 0.0,
+            'loss': data['loss'][i-1] if i-1 < len(data['loss']) else 0.0,
+            'total_l': data['total_l'][i] if i < len(data['total_l']) else 0.0,
+            'avg_l': data['avg_l'][i-1] if i-1 < len(data['avg_l']) else 0.0,
+            'return': -abs(data['return'][i]) if i < len(data['return']) else -45.0
+        }
+        rows.append(row)
+    
+    # Cari Avg Total
+    avg_total = 0.0
+    match_avg = re.search(r'Avg\.L\s+(\d+\.\d+)dB/km', raw_text)
+    if match_avg:
+        avg_total = float(match_avg.group(1))
+    
+    if avg_total == 0.0:
+        match_avg = re.search(r'Avg\.L\s+(\d+\.\d+)', raw_text)
+        if match_avg:
+            avg_total = float(match_avg.group(1))
+    
+    if avg_total == 0.0 and rows:
+        total_losses = [row['total_l'] for row in rows if row['total_l'] > 0]
+        if total_losses:
+            avg_total = sum(total_losses) / len(total_losses)
+    
+    return rows, avg_total
 
-logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════
+# PARSER MANUAL (LAST RESORT)
+# ═══════════════════════════════════════════════════════════════════
+
+def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
+    """
+    Parse manual dengan ekstraksi nilai langsung dari teks
+    """
+    rows = []
+    
+    # Ekstrak semua angka desimal
+    all_numbers = re.findall(r'(\d+\.\d+)', raw_text)
+    
+    logger.info(f"Manual extraction - all numbers: {all_numbers[:20]}")
+    
+    # Cari distance (1.x, 2.x, 3.x, 4.x)
+    distances = []
+    for num in all_numbers:
+        fnum = float(num)
+        if 0.8 <= fnum <= 4.2 and fnum not in distances:
+            distances.append(fnum)
+    distances.sort()
+    
+    # Cari loss (0.1 - 5.0)
+    losses = []
+    for num in all_numbers:
+        fnum = float(num)
+        if 0.1 <= fnum <= 5.0 and fnum not in distances:
+            losses.append(fnum)
+    
+    # Cari total_l (0.5 - 10.0)
+    total_ls = []
+    for num in all_numbers:
+        fnum = float(num)
+        if 0.5 <= fnum <= 10.0 and fnum not in distances and fnum not in losses:
+            total_ls.append(fnum)
+    
+    logger.info(f"Manual extraction - distances: {distances[:5]}")
+    logger.info(f"Manual extraction - losses: {losses[:5]}")
+    logger.info(f"Manual extraction - total_ls: {total_ls[:5]}")
+    
+    # Build rows
+    for i in range(1, 5):
+        dist = distances[i-1] if i-1 < len(distances) else float(i)
+        loss = losses[i-1] if i-1 < len(losses) else 0.0
+        total_l = total_ls[i] if i < len(total_ls) else 0.0
+        
+        rows.append({
+            'distance': dist,
+            'section': 0.0,
+            'loss': loss,
+            'total_l': total_l,
+            'avg_l': total_l / dist if dist > 0 else 0.0,
+            'return': -45.0
+        })
+    
+    # Cari avg total
+    avg_total = 0.0
+    match_avg = re.search(r'Avg\.L\s+(\d+\.\d+)', raw_text)
+    if match_avg:
+        avg_total = float(match_avg.group(1))
+    
+    return rows, avg_total
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VALIDASI HASIL PARSING
+# ═══════════════════════════════════════════════════════════════════
+
+def is_valid_parsed_rows(rows: list) -> bool:
+    """
+    Cek apakah hasil parsing valid (minimal 3 dari 4 baris punya data)
+    """
+    if len(rows) < 4:
+        return False
+    
+    valid_count = 0
+    for row in rows:
+        if row.get('loss', 0) > 0 or row.get('total_l', 0) > 0:
+            valid_count += 1
+    
+    return valid_count >= 3
+
+
+# ═══════════════════════════════════════════════════════════════════
+# HYBRID PARSER (MENGGABUNGKAN 3 STRATEGI)
+# ═══════════════════════════════════════════════════════════════════
+
+def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
+    """
+    Hybrid parser dengan 3 strategi: vertical, horizontal, manual
+    """
+    logger.info("🔄 Starting hybrid parser...")
+    
+    # Strategy 1: Vertical (format tabel normal)
+    try:
+        logger.info("📊 Trying vertical parser...")
+        rows, avg = parse_otdr_table_simple(raw_text)
+        if is_valid_parsed_rows(rows):
+            logger.info(f"✅ Vertical parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            return rows, avg
+        else:
+            logger.info(f"⚠️ Vertical parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+    except Exception as e:
+        logger.warning(f"Vertical parser failed: {e}")
+    
+    # Strategy 2: Horizontal (format transpose)
+    try:
+        logger.info("📊 Trying horizontal parser...")
+        rows, avg = parse_otdr_horizontal(raw_text)
+        if is_valid_parsed_rows(rows):
+            logger.info(f"✅ Horizontal parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            return rows, avg
+        else:
+            logger.info(f"⚠️ Horizontal parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+    except Exception as e:
+        logger.warning(f"Horizontal parser failed: {e}")
+    
+    # Strategy 3: Manual extraction
+    try:
+        logger.info("📊 Trying manual parser...")
+        rows, avg = parse_otdr_manual(raw_text)
+        if is_valid_parsed_rows(rows):
+            logger.info(f"✅ Manual parser success: {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 rows valid")
+            return rows, avg
+        else:
+            logger.info(f"⚠️ Manual parser only {sum(1 for r in rows if r.get('loss', 0) > 0 or r.get('total_l', 0) > 0)}/4 valid")
+    except Exception as e:
+        logger.warning(f"Manual parser failed: {e}")
+    
+    # Fallback: return empty rows
+    logger.warning("❌ All parsers failed, returning empty rows")
+    return [
+        {'distance': 1.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 2.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 3.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 4.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0}
+    ], 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# OTDR PARSER (DIPERBAIKI - TANPA ROUND)
+# ═══════════════════════════════════════════════════════════════════
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
@@ -487,12 +715,12 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     avg_total = 0.0
     m = re.search(r'Avg\.?\s*L?\s*[:=]?\s*(\d+\.\d{2,})\s*dB/km', text, re.IGNORECASE)
     if m:
-        avg_total = round(float(m.group(1)), 2)
+        avg_total = float(m.group(1))  # 🔥 HAPUS ROUND
     else:
         # Fallback: cari pola "1.23 dB/km" di header
         m2 = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
         if m2:
-            avg_total = round(float(m2.group(1)), 2)
+            avg_total = float(m2.group(1))  # 🔥 HAPUS ROUND
 
     # =====================================================
     # 2. CLEAN LINES
@@ -578,14 +806,14 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         else:
             continue
 
-        # 🔥 TIDAK ADA PERHITUNGAN - nilai langsung dari OCR
+        # 🔥 TIDAK ADA ROUND - nilai langsung dari OCR
         rows.append({
-            "distance": round(distance, 5),
-            "section": round(section, 5),
-            "loss": round(loss, 3) if loss != 0 else 0.0,
-            "total_l": round(total_l, 3) if total_l != 0 else 0.0,
-            "avg_l": round(avg_l, 3) if avg_l != 0 else 0.0,
-            "return": -abs(return_val) if return_val != 0 else -45.0
+            "distance": distance,  # 🔥 HAPUS ROUND
+            "section": section,  # 🔥 HAPUS ROUND
+            "loss": loss,  # 🔥 HAPUS ROUND
+            "total_l": total_l,  # 🔥 HAPUS ROUND
+            "avg_l": avg_l,  # 🔥 HAPUS ROUND
+            "return": -abs(return_val) if return_val != 0 else -45.0  # 🔥 HAPUS ROUND
         })
 
     # =====================================================
@@ -639,6 +867,133 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     logger.info(f"AVG TOTAL = {avg_total}")
 
     return rows, avg_total
+
+
+# ═══════════════════════════════════════════════════════════════════
+# EKSTRAK PRX
+# ═══════════════════════════════════════════════════════════════════
+
+def extract_prx(text: str) -> float:
+    """Ekstrak Prx value dari teks"""
+    m = re.search(r'Prx\s*[:=]?\s*([-\d.]+)\s*dBm', text, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# OCR PARSER ONLY - TANPA KLASIFIKASI ML (DIPERBAIKI)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/parse-ocr")
+async def parse_ocr_only(
+    file: UploadFile = File(...),
+    prx_manual: float = Form(None),
+):
+    """
+    Endpoint untuk OCR parsing SAJA - tanpa klasifikasi ML.
+    Mengembalikan data mentah hasil ekstraksi untuk diedit user.
+    """
+    allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
+    if file.content_type not in allowed:
+        return {
+            "success": False,
+            "error": "Format gambar tidak didukung. Gunakan JPG atau PNG."
+        }
+    
+    content = await file.read()
+    raw_text = ""
+    ocr_method = "none"
+    
+    logger.info("=" * 70)
+    logger.info("🔄 Starting OCR Parser (NO ML)...")
+    
+    try:
+        results = {}
+        
+        # 🔥 TIMEOUT DINAIKKAN dari 40 ke 60
+        try:
+            results['tesseract'] = await asyncio.wait_for(
+                asyncio.to_thread(tesseract_extract, content), timeout=60.0)
+        except asyncio.TimeoutError:
+            logger.warning("Tesseract timed out")
+            results['tesseract'] = ""
+
+        # 🔥 TIMEOUT DINAIKKAN dari 30 ke 45
+        try:
+            results['ocr.space'] = await asyncio.wait_for(
+                asyncio.to_thread(ocr_space_extract, content), timeout=45.0)
+        except asyncio.TimeoutError:
+            logger.warning("OCR.space timed out")
+            results['ocr.space'] = ""
+
+        best_score = 0
+        for method, text in results.items():
+            if text:
+                score = len(re.findall(r'\d+\.\d{3,}', text))
+                if score > best_score:
+                    best_score = score
+                    raw_text = text
+                    ocr_method = method
+
+        logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
+
+    except Exception as e:
+        logger.error(f"OCR error: {e}")
+    
+    # 🔥 RETURN 200 BUKAN 400
+    if not raw_text or len(raw_text.strip()) < 20:
+        return {
+            "success": False,
+            "error": "Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat.",
+            "needs_manual": True,
+            "message": "OCR gagal membaca gambar. Silakan input data secara manual."
+        }
+    
+    logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
+    
+    # 🔥 GUNAKAN HYBRID PARSER
+    rows, avg_total = parse_otdr_hybrid(raw_text)
+    
+    # 🔥 HAPUS ROUND
+    avg_total = avg_total
+    
+    prx_from_ocr = extract_prx(raw_text)
+    final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
+    
+    logger.info(f"📊 Parsed rows: {len(rows)}")
+    for i, row in enumerate(rows):
+        logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
+    
+    # 🔥 RETURN 200 BUKAN 400
+    valid = [r for r in rows if r['distance'] > 0.5]
+    if len(valid) < 2:
+        return {
+            "success": False,
+            "error": f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2).",
+            "needs_manual": True,
+            "message": "Data yang terdeteksi tidak lengkap. Silakan input data secara manual."
+        }
+    
+    logger.info("=" * 70)
+    logger.info("✅ OCR parsing completed (NO ML classification)")
+    
+    return {
+        "success": True,
+        "message": "OCR berhasil diekstrak. Silakan periksa dan edit data sebelum klasifikasi.",
+        "raw_text": raw_text[:500],
+        "ocr_method": ocr_method,
+        "extracted": {
+            "distances": [rows[i]['distance'] for i in range(4)],
+            "losses": [rows[i]['loss'] for i in range(4)],
+            "total_ls": [rows[i]['total_l'] for i in range(4)],
+            "avg_ls": [rows[i]['avg_l'] for i in range(4)],
+            "returns": [rows[i]['return'] for i in range(4)],
+            "avg_total": avg_total,
+        },
+        "prx": final_prx,
+        "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
+    }
 
 # ═══════════════════════════════════════════════════════════════════
 # AUTH ENDPOINTS
@@ -950,105 +1305,6 @@ async def reject_user(
 #         "id": record.id,
 #         "ocr_method": ocr_method,
 #     }
-
-# ═══════════════════════════════════════════════════════════════════
-# OCR PARSER ONLY - TANPA KLASIFIKASI ML
-# ═══════════════════════════════════════════════════════════════════
-
-@app.post("/api/parse-ocr")
-async def parse_ocr_only(
-    file: UploadFile = File(...),
-    prx_manual: float = Form(None),
-):
-    """
-    Endpoint untuk OCR parsing SAJA - tanpa klasifikasi ML.
-    Mengembalikan data mentah hasil ekstraksi untuk diedit user.
-    """
-    allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
-    if file.content_type not in allowed:
-        raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
-    
-    content = await file.read()
-    raw_text = ""
-    ocr_method = "none"
-    
-    logger.info("=" * 70)
-    logger.info("🔄 Starting OCR Parser (NO ML)...")
-    
-    try:
-        results = {}
-        
-        try:
-            results['tesseract'] = await asyncio.wait_for(
-                asyncio.to_thread(tesseract_extract, content), timeout=40.0)
-        except asyncio.TimeoutError:
-            logger.warning("Tesseract timed out")
-            results['tesseract'] = ""
-
-        try:
-            results['ocr.space'] = await asyncio.wait_for(
-                asyncio.to_thread(ocr_space_extract, content), timeout=30.0)
-        except asyncio.TimeoutError:
-            logger.warning("OCR.space timed out")
-            results['ocr.space'] = ""
-
-        best_score = 0
-        for method, text in results.items():
-            if text:
-                score = len(re.findall(r'\d+\.\d{3,}', text))
-                if score > best_score:
-                    best_score = score
-                    raw_text = text
-                    ocr_method = method
-
-        logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
-
-    except Exception as e:
-        logger.error(f"OCR error: {e}")
-    
-    if not raw_text or len(raw_text.strip()) < 20:
-        raise HTTPException(
-            status_code=400,
-            detail="Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat."
-        )
-    
-    logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
-    
-    rows, avg_total = parse_otdr_table_simple(raw_text)
-    avg_total = round(avg_total, 2)
-    
-    prx_from_ocr = extract_prx(raw_text)
-    final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
-    
-    logger.info(f"📊 Parsed rows: {len(rows)}")
-    for i, row in enumerate(rows):
-        logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
-    
-    valid = [r for r in rows if r['distance'] > 0.5]
-    if len(valid) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
-        )
-    
-    logger.info("=" * 70)
-    logger.info("✅ OCR parsing completed (NO ML classification)")
-    
-    return {
-        "message": "OCR berhasil diekstrak. Silakan periksa dan edit data sebelum klasifikasi.",
-        "raw_text": raw_text[:500],
-        "ocr_method": ocr_method,
-        "extracted": {
-            "distances": [rows[i]['distance'] for i in range(4)],
-            "losses": [rows[i]['loss'] for i in range(4)],
-            "total_ls": [rows[i]['total_l'] for i in range(4)],
-            "avg_ls": [rows[i]['avg_l'] for i in range(4)],
-            "returns": [rows[i]['return'] for i in range(4)],
-            "avg_total": avg_total,
-        },
-        "prx": final_prx,
-        "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
-    }
 
 # ═══════════════════════════════════════════════════════════════════
 # DASHBOARD & HISTORY

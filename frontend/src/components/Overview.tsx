@@ -114,7 +114,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
         <h1 className="text-3xl md:text-5xl font-light tracking-wide text-white">
           Opti<span className="font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">M</span>
         </h1>
-        <p className="text-[9px] md:text-[13px] text-slate-400 font-medium tracking-[0.2em] uppercase mt-0.5">Optical Monitoring</p>
+        <p className="text-[11px] md:text-[15px] text-white font-medium tracking-[0.2em] uppercase mt-0.5">Optical Monitoring</p>
       </div>
     </div>
 
@@ -125,8 +125,8 @@ const Overview = ({ onLogin }: OverviewProps) => {
       Gangguan <span className="font-semibold text-blue-400">Serat Optik</span>
     </h2>
     
-    <p className="text-slate-300 text-xs md:text-sm leading-relaxed max-w-md text-center md:text-left mx-auto md:mx-0">
-      Platform cerdas berbasis AI untuk mengklasifikasikan 
+    <p className="text-slate-100 text-sm md:text-base leading-relaxed max-w-md text-center md:text-left mx-auto md:mx-0">
+      Platform berbasis Machine Learning untuk mengklasifikasikan 
       gangguan pada jaringan fiber optik secara akurat.
     </p>
   </div>
@@ -143,12 +143,12 @@ const Overview = ({ onLogin }: OverviewProps) => {
                   {/* Title Section */}
                   <div className="mb-8 text-center">
                     <h3 className="text-2xl font-semibold text-white mb-2 tracking-tight">
-                      {isLoginMode ? 'Selamat Datang' : 'Buat Akun Baru'}
+                      {isLoginMode ? 'Welcome Back' : 'Create New Account'}
                     </h3>
-                    <p className="text-white text-sm">
+                    <p className="text-white text-md opacity-80">
                       {isLoginMode 
-                        ? 'Masuk untuk mengakses dashboard monitoring Anda' 
-                        : 'Daftar untuk mulai memonitor jaringan fiber optik'}
+                        ? 'Sign in to access your monitoring dashboard' 
+                        : 'Sign up to start monitoring your fiber network'}
                     </p>
                   </div>
 
@@ -156,7 +156,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                   <div className="flex gap-1 mb-8 bg-slate-800/50 rounded-xl p-1">
                     <button
                       onClick={() => { setIsLoginMode(true); setError(''); setEmail(''); setPassword(''); setName(''); }}
-                      className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      className={`flex-1 py-2.5 rounded-lg text-md font-medium transition-all duration-200 ${
                         isLoginMode 
                           ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
                           : 'text-slate-400 hover:text-slate-200'
@@ -166,13 +166,13 @@ const Overview = ({ onLogin }: OverviewProps) => {
                     </button>
                     <button
                       onClick={() => { setIsLoginMode(false); setError(''); setEmail(''); setPassword(''); setName(''); }}
-                      className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      className={`flex-1 py-2.5 rounded-lg text-md font-medium transition-all duration-200 ${
                         !isLoginMode 
                           ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      Daftar
+                      Sign Up
                     </button>
                   </div>
 
@@ -180,7 +180,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                     {/* Nama Lengkap */}
                     {!isLoginMode && (
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-white ml-1">Nama Lengkap</label>
+                        <label className="text-sm font-medium text-white ml-1">Full Name</label>
                         <div className={`relative transition-all duration-200 ${
                           focusedField === 'name' ? 'scale-[1.01]' : ''
                         }`}>
@@ -199,7 +199,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                               borderColor: focusedField === 'name' ? 'rgba(59,130,246,0.5)' : 'rgba(255,255,255,0.1)',
                               boxShadow: focusedField === 'name' ? '0 0 0 3px rgba(59,130,246,0.1)' : 'none'
                             }}
-                            placeholder="Masukkan nama lengkap Anda"
+                            placeholder="Enter your full name"
                           />
                         </div>
                       </div>
@@ -208,7 +208,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
 
                     {/* Email Field */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white ml-1">Alamat Email</label>
+                      <label className="text-sm font-medium text-white ml-1">Email Address</label>
                       <div className={`relative transition-all duration-200 ${
                         focusedField === 'email' ? 'scale-[1.01]' : ''
                       }`}>
@@ -227,14 +227,14 @@ const Overview = ({ onLogin }: OverviewProps) => {
                             borderColor: focusedField === 'email' ? 'rgba(59,130,246,0.5)' : 'rgba(255,255,255,0.1)',
                             boxShadow: focusedField === 'email' ? '0 0 0 3px rgba(59,130,246,0.1)' : 'none'
                           }}
-                          placeholder="nama@gmail.com"
+                          placeholder="Enter your email address"
                         />
                       </div>
                     </div>
 
                     {/* Password Field */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white ml-1">Kata Sandi</label>
+                      <label className="text-sm font-medium text-white ml-1">Password</label>
                       <div className={`relative transition-all duration-200 ${
                         focusedField === 'password' ? 'scale-[1.01]' : ''
                       }`}>
@@ -253,7 +253,7 @@ const Overview = ({ onLogin }: OverviewProps) => {
                             borderColor: focusedField === 'password' ? 'rgba(59,130,246,0.5)' : 'rgba(255,255,255,0.1)',
                             boxShadow: focusedField === 'password' ? '0 0 0 3px rgba(59,130,246,0.1)' : 'none'
                           }}
-                          placeholder="Masukkan kata sandi"
+                          placeholder="Fill in your password"
                         />
                         {/* PERBAIKAN: Tombol show/hide password dengan aria-label dan touch target yang cukup */}
                         <button
@@ -270,16 +270,16 @@ const Overview = ({ onLogin }: OverviewProps) => {
                     {/* Error Message */}
                     {error && (
                       <div className={`rounded-xl p-3 animate-in fade-in duration-200 ${
-                        error.includes('SUDAH DISETUJUI') 
+                        error.includes('Already approved') 
                           ? 'bg-emerald-500/10 border border-emerald-500/20' 
-                          : error.includes('BELUM DISETUJUI') 
+                          : error.includes('Not yet approved') 
                           ? 'bg-amber-500/10 border border-amber-500/20'
                           : 'bg-red-500/10 border border-red-500/20'
                       }`}>
-                        <p className={`text-xs font-medium text-center ${
-                          error.includes('SUDAH DISETUJUI') 
+                        <p className={`text-sm font-medium text-center ${
+                          error.includes('Already approved') 
                             ? 'text-emerald-400' 
-                            : error.includes('BELUM DISETUJUI') 
+                            : error.includes('Not yet approved') 
                             ? 'text-amber-400'
                             : 'text-red-400'
                         }`}>{error}</p>
@@ -295,18 +295,18 @@ const Overview = ({ onLogin }: OverviewProps) => {
                       {isLoading ? (
                         <>
                           <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>Memproses...</span>
+                          <span>Processing...</span>
                         </>
                       ) : (
                         isLoginMode ? (
                           <>
                             <Activity className="w-4 h-4" />
-                            <span>Masuk ke Dashboard</span>
+                            <span>Sign In to Dashboard</span>
                           </>
                         ) : (
                           <>
                             <User className="w-4 h-4" />
-                            <span>Daftar Sekarang</span>
+                            <span>Sign Up Now</span>
                           </>
                         )
                       )}
@@ -319,17 +319,17 @@ const Overview = ({ onLogin }: OverviewProps) => {
                           type="button"
                           onClick={checkStatus}
                           disabled={checkingStatus}
-                          className="text-xs text-white hover:text-blue-400 transition-colors inline-flex items-center gap-1"
+                          className="text-sm text-white hover:text-blue-400 transition-colors inline-flex items-center gap-1"
                         >
                           {checkingStatus ? (
                             <>
                               <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>Mengecek...</span>
+                              <span>Checking...</span>
                             </>
                           ) : (
                             <>
                               <span></span>
-                              <span>Belum bisa login? Cek status akun</span>
+                              <span>Cannot login? Check account status</span>
                             </>
                           )}
                         </button>
@@ -338,10 +338,11 @@ const Overview = ({ onLogin }: OverviewProps) => {
                   </form>
 
                   {/* Footer text */}
-                  <p className="text-center text-[11px] text-white mt-6">
+                  <p className="text-center text-[15px] text-white mt-6">
                     {isLoginMode 
-                      ? 'Gunakan email dan kata sandi yang telah terdaftar' 
-                      : 'Dengan mendaftar, Anda menyetujui Syarat & Ketentuan yang berlaku'}
+                      ? 'Use your registered email and password to access the dashboard' 
+                      : 'Make sure you fill in the data correctly' 
+                      }
                   </p>
                 </div>
               </div>
