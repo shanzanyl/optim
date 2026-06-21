@@ -449,8 +449,8 @@ def tesseract_extract(image_bytes: bytes) -> str:
 
 def ocr_space_extract(image_bytes: bytes) -> str:
     """Ekstrak teks menggunakan OCR.space API"""
-    OCR_SPACE_API_KEY = "helloworld"
-    
+    OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
+
     try:
         response = requests.post(
             'https://api.ocr.space/parse/image',

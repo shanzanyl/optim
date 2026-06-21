@@ -497,7 +497,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                       step="0.1"
                       value={prxManual}
                       onChange={e => setPrxManual(e.target.value)}
-                      placeholder="-15.6"
                       className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100"
                     />
                     <span className="text-sm text-white whitespace-nowrap">dBm</span>
