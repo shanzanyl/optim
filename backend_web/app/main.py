@@ -325,37 +325,29 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_FOLDER", "uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════
-# OCR PREPROCESSING (DIPERBAIKI)
+# OCR PREPROCESSING (DIPERBAIKI - OPTIMASI)
 # ═══════════════════════════════════════════════════════════════════
 
-import re
-import asyncio
-import logging
-import numpy as np
-import cv2
-import pytesseract
-import requests
 from PIL import Image, ImageEnhance
 from typing import List, Dict, Tuple
-from fastapi import UploadFile, File, Form, HTTPException
 
 logger = logging.getLogger(__name__)
 
 def preprocess_image_simple(image_bytes: bytes) -> list:
-    """Preprocessing lebih agresif untuk OCR"""
+    """Preprocessing lebih agresif untuk OCR - OPTIMASI"""
     arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
     results = []
     
-    # 🔥 Potong lebih presisi (20% atas, 5% bawah)
-    y_start = int(h * 0.20)
+    # 🔥 Potong lebih presisi (15% atas, 5% bawah)
+    y_start = int(h * 0.15)
     y_end = int(h * 0.95)
     cropped = img[y_start:y_end, 0:w]
     
-    # 🔥 Perbesar 4x (lebih besar dari 3x)
-    resized = cv2.resize(cropped, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    # 🔥 PERBAIKI: resize 2x saja (bukan 4x) - lebih cepat
+    resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     
     # 🔥 Grayscale
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
@@ -382,12 +374,9 @@ def preprocess_image_simple(image_bytes: bytes) -> list:
     cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
     
-    # 🔥 Tambahkan beberapa variasi
+    # 🔥 KURANGI VARIASI - hanya 2 jenis untuk kecepatan
     results.append(Image.fromarray(cleaned))
-    results.append(Image.fromarray(cv2.bitwise_not(cleaned)))
     results.append(Image.fromarray(enhanced))
-    results.append(Image.fromarray(sharpened))
-    results.append(Image.fromarray(denoised))
     
     return results
 
@@ -404,28 +393,26 @@ def tesseract_extract(image_bytes: bytes) -> str:
     try:
         images = preprocess_image_simple(image_bytes)
 
+        # 🔥 KURANGI KONFIGURASI - hanya 3 yang paling penting
         configs = [
-            "--oem 3 --psm 6",
-            "--oem 3 --psm 4",
-            "--oem 3 --psm 11",
-            "--oem 1 --psm 6",
-            "--oem 3 --psm 3",
-            "--oem 3 --psm 7",      # 🔥 TAMBAH: single text line
-            "--oem 3 --psm 12",     # 🔥 TAMBAH: sparse text
-            "--oem 3 --psm 13",     # 🔥 TAMBAH: raw line
+            "--oem 3 --psm 6",   # default, block text - PALING PENTING
+            "--oem 3 --psm 4",   # assume single column
+            "--oem 3 --psm 11",  # sparse text
         ]
 
         for img in images:
             for config in configs:
                 try:
                     text = pytesseract.image_to_string(img, config=config)
+                    # 🔥 CEK ADA TIDAK ANGKA 1.xxx atau 2.xxx (distance)
+                    has_distance = len(re.findall(r'[1-4]\.\d{3,5}', text))
                     decimal_score = len(re.findall(r'\d+\.\d{4,}', text))
-                    loss_score = len(re.findall(r'0\.\d{2}', text))
-                    total_score = decimal_score + loss_score * 2
+                    total_score = decimal_score + has_distance * 5  # distance lebih penting
 
                     if total_score > best_score:
                         best_score = total_score
                         best_text = text
+                        logger.info(f"Found config with score {total_score}: {config}")
                 except Exception:
                     continue
 
@@ -449,8 +436,9 @@ def tesseract_extract(image_bytes: bytes) -> str:
 
 def ocr_space_extract(image_bytes: bytes) -> str:
     """Ekstrak teks menggunakan OCR.space API"""
-    OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
-
+    # 🔥 GANTI DENGAN API KEY ANDA (gunakan environment variable)
+    OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY", "65299172ed88957")
+    
     try:
         response = requests.post(
             'https://api.ocr.space/parse/image',
@@ -462,9 +450,15 @@ def ocr_space_extract(image_bytes: bytes) -> str:
                 'scale': True,
                 'OCREngine': 2,
             },
-            timeout=30,  # 🔥 DINAIIKKAN dari 15 ke 30
+            timeout=60,  # 🔥 DINAIIKKAN dari 30 ke 60
         )
         result = response.json()
+        
+        # 🔥 CEK ERROR
+        if result.get('ErrorMessage'):
+            logger.error(f"OCR.space Error: {result.get('ErrorMessage')}")
+            return ""
+            
         if result.get('ParsedResults') and len(result['ParsedResults']) > 0:
             text = result['ParsedResults'][0]['ParsedText']
             logger.info(f"OCR.space extracted {len(text)} chars")
@@ -950,7 +944,22 @@ async def parse_ocr_only(
     if file.content_type not in allowed:
         return {
             "success": False,
-            "error": "Format gambar tidak didukung. Gunakan JPG atau PNG."
+            "error": "Format gambar tidak didukung. Gunakan JPG atau PNG.",
+            "extracted": {
+                "distances": [0, 0, 0, 0],
+                "losses": [0, 0, 0, 0],
+                "total_ls": [0, 0, 0, 0],
+                "avg_ls": [0, 0, 0, 0],
+                "returns": [0, 0, 0, 0],
+                "avg_total": 0,
+            },
+            "prx": prx_manual if prx_manual else -25.0,
+            "per_km": {
+                "km1": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km2": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km3": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km4": {"distance": 0, "loss": None, "total_l": 0, "avg_l": 0, "return": 0},
+            }
         }
     
     content = await file.read()
@@ -963,7 +972,7 @@ async def parse_ocr_only(
     try:
         results = {}
         
-        # 🔥 TIMEOUT DINAIKKAN dari 40 ke 60
+        # 🔥 TIMEOUT TESSERACT
         try:
             results['tesseract'] = await asyncio.wait_for(
                 asyncio.to_thread(tesseract_extract, content), timeout=60.0)
@@ -971,10 +980,10 @@ async def parse_ocr_only(
             logger.warning("Tesseract timed out")
             results['tesseract'] = ""
 
-        # 🔥 TIMEOUT DINAIKKAN dari 30 ke 45
+        # 🔥 TIMEOUT OCR.SPACE - dinaikkan
         try:
             results['ocr.space'] = await asyncio.wait_for(
-                asyncio.to_thread(ocr_space_extract, content), timeout=45.0)
+                asyncio.to_thread(ocr_space_extract, content), timeout=120.0)
         except asyncio.TimeoutError:
             logger.warning("OCR.space timed out")
             results['ocr.space'] = ""
@@ -993,13 +1002,28 @@ async def parse_ocr_only(
     except Exception as e:
         logger.error(f"OCR error: {e}")
     
-    # 🔥 RETURN 200 BUKAN 400
+    # 🔥 RETURN DENGAN STRUKTUR YANG KONSISTEN
     if not raw_text or len(raw_text.strip()) < 20:
         return {
             "success": False,
             "error": "Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat.",
             "needs_manual": True,
-            "message": "OCR gagal membaca gambar. Silakan input data secara manual."
+            "message": "OCR gagal membaca gambar. Silakan input data secara manual.",
+            "extracted": {
+                "distances": [0, 0, 0, 0],
+                "losses": [0, 0, 0, 0],
+                "total_ls": [0, 0, 0, 0],
+                "avg_ls": [0, 0, 0, 0],
+                "returns": [0, 0, 0, 0],
+                "avg_total": 0,
+            },
+            "prx": prx_manual if prx_manual else -25.0,
+            "per_km": {
+                "km1": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km2": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km3": {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km4": {"distance": 0, "loss": None, "total_l": 0, "avg_l": 0, "return": 0},
+            }
         }
     
     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
@@ -1011,9 +1035,6 @@ async def parse_ocr_only(
     if len(rows) >= 4:
         rows[3]['loss'] = None
     
-    # 🔥 HAPUS ROUND
-    avg_total = avg_total
-    
     prx_from_ocr = extract_prx(raw_text)
     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
     
@@ -1021,15 +1042,54 @@ async def parse_ocr_only(
     for i, row in enumerate(rows):
         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
     
-    # 🔥 RETURN 200 BUKAN 400
+    # 🔥 VALIDASI DENGAN AMAN
     valid = [r for r in rows if r['distance'] > 0.5]
     if len(valid) < 2:
+        # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
+        while len(rows) < 4:
+            km = len(rows) + 1
+            rows.append({
+                "distance": float(km),
+                "section": 0.0,
+                "loss": None if km == 4 else 0.0,
+                "total_l": 0.0,
+                "avg_l": 0.0,
+                "return": -45.0
+            })
+        
         return {
             "success": False,
             "error": f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2).",
             "needs_manual": True,
-            "message": "Data yang terdeteksi tidak lengkap. Silakan input data secara manual."
+            "message": "Data yang terdeteksi tidak lengkap. Silakan input data secara manual.",
+            "extracted": {
+                "distances": [rows[i]['distance'] for i in range(4)],
+                "losses": [rows[i]['loss'] for i in range(4)],
+                "total_ls": [rows[i]['total_l'] for i in range(4)],
+                "avg_ls": [rows[i]['avg_l'] for i in range(4)],
+                "returns": [rows[i]['return'] for i in range(4)],
+                "avg_total": avg_total if avg_total else 0,
+            },
+            "prx": final_prx,
+            "per_km": {
+                "km1": rows[0] if len(rows) > 0 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km2": rows[1] if len(rows) > 1 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km3": rows[2] if len(rows) > 2 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km4": rows[3] if len(rows) > 3 else {"distance": 0, "loss": None, "total_l": 0, "avg_l": 0, "return": 0},
+            }
         }
+    
+    # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
+    while len(rows) < 4:
+        km = len(rows) + 1
+        rows.append({
+            "distance": float(km),
+            "section": 0.0,
+            "loss": None if km == 4 else 0.0,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return": -45.0
+        })
     
     logger.info("=" * 70)
     logger.info("✅ OCR parsing completed (NO ML classification)")
@@ -1045,7 +1105,7 @@ async def parse_ocr_only(
             "total_ls": [rows[i]['total_l'] for i in range(4)],
             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
             "returns": [rows[i]['return'] for i in range(4)],
-            "avg_total": avg_total,
+            "avg_total": avg_total if avg_total else 0,
         },
         "prx": final_prx,
         "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},

@@ -430,7 +430,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div className="absolute -top-10 -right-10 w-32 h-32 blur-[80px] opacity-10 rounded-full" style={{ backgroundColor: lossColors[km - 1] }} />
                   <div className="flex justify-between items-start mb-3 relative z-10">
                     <div>
-                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Loss Km {km}</p>
+                      <p className="text-[13px] font-black text-white tracking-widest mb-1">LOSS Km {km}</p>
                       <div className="flex items-baseline gap-1">
                         <h4 className={`text-2xl font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}`}>
                           {lossValue === 0 && km === 4 ? '---' : lossValue}
@@ -511,7 +511,7 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
                   <div className="absolute -top-10 -right-10 w-32 h-32 blur-[80px] opacity-10 rounded-full" style={{ backgroundColor: returnColors[km - 1] }} />
                   <div className="flex justify-between items-start mb-3 relative z-10">
                     <div>
-                      <p className="text-[13px] font-black text-white uppercase tracking-widest mb-1">Return Km {km}</p>
+                      <p className="text-[13px] font-black text-white tracking-widest mb-1">RETURN Km {km}</p>
                       <div className="flex items-baseline gap-1">
                         <h4 className={`text-2xl font-black leading-none ${isAboveThreshold ? 'text-red-400' : 'text-white'}`}>{returnValue}</h4>
                         <span className="text-[12px] font-bold text-white">dB</span>
@@ -568,9 +568,9 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
           <div className="lg:col-span-2 bg-[#1e2f50] border border-[#3b4f6e] rounded-[2.5rem] p-8">
             <div className="flex justify-between items-start mb-6">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                <h3 className="text-sm font-black text-white tracking-widest flex items-center gap-2">
                   <div className="w-1.5 h-4 bg-blue-500 rounded-full" />
-                  Signal Power (Prx) 
+                  SIGNAL POWER (Prx) 
                 </h3>
                 <div className="mt-3">
                   <p className="text-2xl text-white font-black leading-none">
