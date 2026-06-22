@@ -1,5 +1,5 @@
 // frontend/src/components/MainDashboard.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Activity, CheckCircle2, AlertTriangle, Database, Clock, Network
 } from 'lucide-react';
@@ -64,7 +64,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     setAutoPlay 
   } = useSlide();
 
-  const [prevTotalData, setPrevTotalData] = useState(0);
+  // 🔥 HAPUS prevTotalData (sudah tidak dipakai)
+  // const [prevTotalData, setPrevTotalData] = useState(0);
+  
+  const sentAlertsRef = useRef<Set<number | string>>(new Set());
 
   // 🔥 TAMBAHAN: State untuk display timestamps (dari teman)
   const [displayTimestamps, setDisplayTimestamps] = useState<Record<number, string>>(() => {
@@ -80,11 +83,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     localStorage.setItem('slide_display_timestamps', JSON.stringify(displayTimestamps));
   }, [displayTimestamps]);
 
-  useEffect(() => {
-    if (totalData !== prevTotalData) {
-      setPrevTotalData(totalData);
-    }
-  }, [totalData, prevTotalData]);
+  // 🔥 HAPUS useEffect update prevTotalData (sudah tidak dipakai)
+  // useEffect(() => {
+  //   if (totalData !== prevTotalData) {
+  //     setPrevTotalData(totalData);
+  //   }
+  // }, [totalData, prevTotalData]);
 
   // 🔥 PERBAIKAN: HAPUS/COMMENT useEffect yang mereset currentIndex
   // useEffect(() => {
@@ -98,23 +102,23 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   //   setTotalData(allData.length);
   // }, [allData.length, setTotalData]);
 
+  // 🔥 PERBAIKAN: AutoPlay sederhana tanpa prevTotalData (tidak ngulang)
   useEffect(() => {
     if (!autoPlay || allData.length === 0) return;
+    
     const interval = setInterval(() => {
       setCurrentIndex((prev: number) => {
-        const newTotal = allData.length;
-        if (newTotal > prevTotalData) {
-          setPrevTotalData(newTotal);
-          return newTotal - 1;
-        }
-        if (prev === newTotal - 1) {
+        // Jika sudah di akhir, loop ke 0
+        if (prev >= allData.length - 1) {
           return 0;
         }
+        // Normal: increment
         return prev + 1;
       });
-    }, 1000 * 30); // 30 detik
+    }, 900000); // 15 menit
+
     return () => clearInterval(interval);
-  }, [autoPlay, allData.length, prevTotalData, setCurrentIndex]);
+  }, [autoPlay, allData.length, setCurrentIndex]);
 
   // 🔥 TAMBAHAN: Update timestamp saat slide berubah (dari teman)
   useEffect(() => {
@@ -141,23 +145,52 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [allData.length, autoPlay, setAutoPlay]);
 
-  // Trigger Telegram alert saat slide monitoring berpindah ke data warning/critical
+  // 🔥 PERBAIKAN: Trigger Telegram alert dengan tracking agar tidak kirim ulang
   useEffect(() => {
-    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
+    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) {
+      return;
+    }
+    
     const currentRecord = allData[currentIndex];
     if (!currentRecord) return;
 
     const status = currentRecord.status || '';
+    const recordId = currentRecord.id;
+    
+    // 🔥 CEK: Apakah alert sudah pernah dikirim untuk record ini?
+    if (sentAlertsRef.current.has(recordId)) {
+      return; // Sudah pernah, SKIP
+    }
+    
+    // Hanya kirim untuk Warning atau Critical
     if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-      triggerSlideAlert(currentRecord.id)
+      // 🔥 TANDAI sebagai sudah dikirim
+      sentAlertsRef.current.add(recordId);
+      console.log(`📤 [DASHBOARD] Sending alert for record ${recordId} (${status})`);
+      
+      triggerSlideAlert(recordId)
         .then((res: { status: string; }) => {
           if (res.status === 'sent') {
-            console.log(`Telegram alert sent automatically for record ID: ${currentRecord.id}`);
+            console.log(`✅ [DASHBOARD] Telegram alert sent for record ID: ${recordId}`);
+          } else {
+            // Jika gagal, hapus dari set agar bisa dicoba lagi
+            sentAlertsRef.current.delete(recordId);
           }
         })
-        .catch((err: any) => console.error('Error triggering slide alert:', err));
+        .catch((err: any) => {
+          console.error(`❌ [DASHBOARD] Error triggering slide alert for ${recordId}:`, err);
+          sentAlertsRef.current.delete(recordId);
+        });
     }
   }, [currentIndex, allData, loading]);
+
+  // 🔥 TAMBAHKAN: Reset tracking alert saat data baru di-load
+  useEffect(() => {
+    if (allData.length > 0) {
+      sentAlertsRef.current.clear();
+      console.log('🔄 [DASHBOARD] Alert tracking reset, data length:', allData.length);
+    }
+  }, [allData]);
 
   useEffect(() => {
     if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
@@ -291,13 +324,11 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   const isGangguan = currentRecord?.klasifikasi && currentRecord.klasifikasi !== 'Normal';
 
-  // 🔥 Helper function untuk format timestamp
-// 🔥 HAPUS getRealTimeLabels, ganti dengan fungsi ini
-const generateMinuteLabels = (count: number, intervalMinutes: number = 1) => {
+const generateMinuteLabels = (count: number, intervalMinutes: number = 15) => {
   const now = new Date();
   const labels = [];
   for (let i = count - 1; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 60 * 1000);
+    const time = new Date(now.getTime() - i * intervalMinutes * 60 * 1000); // 🔥 15 MENIT
     let hours = time.getHours();
     const minutes = String(time.getMinutes()).padStart(2, '0');
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -307,7 +338,6 @@ const generateMinuteLabels = (count: number, intervalMinutes: number = 1) => {
   }
   return labels;
 };
-
 // 🔥 GANTI chartData dan miniChartData
 const minuteLabels6 = generateMinuteLabels(6, 15); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
 
@@ -708,18 +738,12 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
               </thead>
               <tbody>
                 {(() => {
-                  const tableNow = new Date();
+                    // 🔥 PERBAIKAN: Tabel pakai minuteLabels6 yang SAMA dengan grafik (15 MENIT)
+                  const tableLabels = [...minuteLabels6].reverse();
+  
                   return tableData.length > 0 ? tableData.map((row, idx) => {
-                    const displayTime = displayTimestamps[row.id];
-                    const tsVal = displayTime ? new Date(displayTime) : (row.timestamp ? new Date(row.timestamp) : new Date());
-                    const isValid = !isNaN(tsVal.getTime());
-                    const targetDate = isValid ? tsVal : new Date();
-                    const hh = String(targetDate.getHours()).padStart(2, '0');
-                    const mm = String(targetDate.getMinutes()).padStart(2, '0');
-                    const dd = String(targetDate.getDate()).padStart(2, '0');
-                    const mo = String(targetDate.getMonth() + 1).padStart(2, '0');
-                    const yyyy = targetDate.getFullYear();
-                    const realTime = `${hh}.${mm} ${dd}/${mo}/${yyyy}`;
+                    const labelIndex = Math.min(idx, tableLabels.length - 1);
+                    const realTime = tableLabels[labelIndex] || '--:-- --';
                     const loss4Display = (row.loss_4 || 0) === 0 ? '---' : (row.loss_4 || 0);
                     const totalLDisplay = (row.total_l_4 || 0) === 0 ? '---' : (row.total_l_4 || 0);
                     return (

@@ -465,6 +465,22 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
                 <p className="text-xs text-slate-100 mb-5 text-center">Format: JPG, PNG</p>
+                {/* 🔥 TAMBAHKAN: Peringatan/Note untuk OCR */}
+<div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+  <div className="flex items-start gap-2">
+    <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+    <div>
+      <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">Tips Foto OTDR</p>
+      <ul className="text-xs text-slate-300 mt-1 space-y-1 list-disc list-inside">
+        <li><span className="text-white font-medium">Pastikan foto jelas dan tidak buram</span></li>
+        <li><span className="text-white font-medium">Foto tidak boleh miring baik portrait maupun landscape</span></li>
+        <li><span className="text-white font-medium">Pastikan seluruh tabel OTDR terlihat semua dalam frame</span></li>
+        <li><span className="text-white font-medium">Hindari bayangan yang menutupi angka pada tabel</span></li>
+        <li><span className="text-white font-medium">Pastikan cahaya cukup agar angka terbaca dengan baik</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
                 
                 {isOcrParsed && ocrParseResult && (
                   <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
