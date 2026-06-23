@@ -67,6 +67,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 last_dashboard_slide_index = 0
 last_dashboard_slide_data = None
 
+# ── Shared slide state: satu posisi untuk semua user/device ──
+shared_slide_index = 0
+slide_alert_sent_ids: set = set()  # Track ID yang sudah dikirim alert, cegah duplikat
+
 def send_telegram_alert(classification: str, status: str, loss: list, rl: list, prx, distances: list = None, timestamp = None):
     """Mengirim pesan notifikasi gangguan ke Telegram Teknisi dengan format detail baru"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -257,10 +261,7 @@ def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) 
     
     result['Avg-Total'] = avg_total
     
-    for key in result:
-        if isinstance(result[key], float):
-            result[key] = round(result[key], 2)
-    
+    # 🔥 HAPUS round() global — nilai OCR disimpan apa adanya, pembulatan hanya di display frontend
     return result
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1969,6 +1970,61 @@ async def update_dashboard_slide_data(payload: dict):
     except Exception as e:
         logger.error(f"[TELEGRAM] Error update dashboard slide: {e}")
         return {"error": str(e)}
+
+# ============================================================
+# SHARED SLIDE STATE — satu posisi untuk semua user/device
+# ============================================================
+
+@app.get("/api/shared-slide")
+async def get_shared_slide():
+    """Kembalikan posisi slide yang berlaku untuk semua user."""
+    global shared_slide_index
+    return {"current_index": shared_slide_index}
+
+@app.post("/api/shared-slide")
+async def set_shared_slide(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update posisi slide bersama.
+    Hanya dikirim oleh satu instance (master auto-play).
+    Semua client lain hanya membaca lewat GET.
+    """
+    global shared_slide_index, slide_alert_sent_ids
+    try:
+        index = int(payload.get("index", 0))
+        record_id = payload.get("record_id")
+        shared_slide_index = index
+
+        # Kirim alert Telegram hanya jika belum pernah dikirim untuk record ini
+        if record_id and record_id not in slide_alert_sent_ids:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(OtdrResult).where(OtdrResult.id == record_id))
+                record = result.scalar_one_or_none()
+                if record:
+                    status_str = (record.status or "").lower()
+                    if status_str in ("warning", "critical"):
+                        slide_alert_sent_ids.add(record_id)
+                        loss_list = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
+                        rl_list   = [record.return_1, record.return_2, record.return_3, record.return_4]
+                        await asyncio.to_thread(
+                            send_telegram_alert,
+                            classification=record.klasifikasi,
+                            status=record.status,
+                            loss=loss_list,
+                            rl=rl_list,
+                            prx=record.prx,
+                            distances=[record.distance_1, record.distance_2, record.distance_3, record.distance_4],
+                            timestamp=record.timestamp,
+                        )
+                        logger.info(f"[SHARED-SLIDE] Alert sent for record {record_id} ({record.status})")
+
+        logger.info(f"[SHARED-SLIDE] index={index}, record_id={record_id}, by user={current_user.email}")
+        return {"status": "ok", "current_index": shared_slide_index}
+    except Exception as e:
+        logger.error(f"[SHARED-SLIDE] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================
 # TELEGRAM BOT COMMAND HANDLER (CEK STATUS VIA TELEGRAM)

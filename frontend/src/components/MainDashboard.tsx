@@ -1,5 +1,5 @@
 // frontend/src/components/MainDashboard.tsx
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Activity, CheckCircle2, AlertTriangle, Database, Clock, Network
 } from 'lucide-react';
@@ -7,7 +7,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine
 } from 'recharts';
-import { syncFromSheets, triggerSlideAlert } from '../services/api';
+import { syncFromSheets } from '../services/api';
 import topologyImage from '../assets/topology.png';
 import { useSlide } from '../Context/SlideContext';
 import NetworkTopology from '../components/NetworkTopology';
@@ -67,7 +67,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   // 🔥 HAPUS prevTotalData (sudah tidak dipakai)
   // const [prevTotalData, setPrevTotalData] = useState(0);
   
-  const sentAlertsRef = useRef<Set<number | string>>(new Set());
+  // sentAlertsRef dihapus — alert kini dihandle backend via /api/shared-slide
 
   // 🔥 TAMBAHAN: State untuk display timestamps (dari teman)
   const [displayTimestamps, setDisplayTimestamps] = useState<Record<number, string>>(() => {
@@ -102,23 +102,32 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   //   setTotalData(allData.length);
   // }, [allData.length, setTotalData]);
 
-  // 🔥 PERBAIKAN: AutoPlay sederhana tanpa prevTotalData (tidak ngulang)
+  // ── MASTER AUTO-PLAY: hitung index baru lalu push ke backend (shared state) ──
   useEffect(() => {
     if (!autoPlay || allData.length === 0) return;
-    
+
     const interval = setInterval(() => {
       setCurrentIndex((prev: number) => {
-        // Jika sudah di akhir, loop ke 0
-        if (prev >= allData.length - 1) {
-          return 0;
+        const next = prev >= allData.length - 1 ? 0 : prev + 1;
+        const record = allData[next];
+        if (record) {
+          const token = localStorage.getItem('token');
+          const API_BASE = import.meta.env.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
+          fetch(`${API_BASE}/api/shared-slide`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ index: next, record_id: record.id }),
+          }).catch(() => {});
         }
-        // Normal: increment
-        return prev + 1;
+        return next;
       });
     }, 900000); // 15 menit
 
     return () => clearInterval(interval);
-  }, [autoPlay, allData.length, setCurrentIndex]);
+  }, [autoPlay, allData.length, setCurrentIndex, allData]);
 
   // 🔥 TAMBAHAN: Update timestamp saat slide berubah (dari teman)
   useEffect(() => {
@@ -145,82 +154,36 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [allData.length, autoPlay, setAutoPlay]);
 
-  // 🔥 PERBAIKAN: Trigger Telegram alert dengan tracking agar tidak kirim ulang
+  // ── SHARED SLIDE POLLING: semua client ikut posisi backend setiap 5 detik ──
   useEffect(() => {
-    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) {
-      return;
-    }
-    
-    const currentRecord = allData[currentIndex];
-    if (!currentRecord) return;
+    if (allData.length === 0) return;
 
-    const status = currentRecord.status || '';
-    const recordId = currentRecord.id;
-    
-    // 🔥 CEK: Apakah alert sudah pernah dikirim untuk record ini?
-    if (sentAlertsRef.current.has(recordId)) {
-      return; // Sudah pernah, SKIP
-    }
-    
-    // Hanya kirim untuk Warning atau Critical
-    if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-      // 🔥 TANDAI sebagai sudah dikirim
-      sentAlertsRef.current.add(recordId);
-      console.log(`📤 [DASHBOARD] Sending alert for record ${recordId} (${status})`);
-      
-      triggerSlideAlert(recordId)
-        .then((res: { status: string; }) => {
-          if (res.status === 'sent') {
-            console.log(`✅ [DASHBOARD] Telegram alert sent for record ID: ${recordId}`);
-          } else {
-            // Jika gagal, hapus dari set agar bisa dicoba lagi
-            sentAlertsRef.current.delete(recordId);
-          }
-        })
-        .catch((err: any) => {
-          console.error(`❌ [DASHBOARD] Error triggering slide alert for ${recordId}:`, err);
-          sentAlertsRef.current.delete(recordId);
-        });
-    }
-  }, [currentIndex, allData, loading]);
-
-  // 🔥 TAMBAHKAN: Reset tracking alert saat data baru di-load
-  useEffect(() => {
-    if (allData.length > 0) {
-      sentAlertsRef.current.clear();
-      console.log('🔄 [DASHBOARD] Alert tracking reset, data length:', allData.length);
-    }
-  }, [allData]);
-
-  useEffect(() => {
-    if (loading || allData.length === 0 || currentIndex < 0 || currentIndex >= allData.length) return;
-    
-    const currentRecord = allData[currentIndex];
-    if (!currentRecord) return;
-    
-    const updateDashboardSlide = async () => {
+    const pollSharedSlide = async () => {
       try {
         const token = localStorage.getItem('token');
         const API_BASE = import.meta.env.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
-        
-        await fetch(`${API_BASE}/api/telegram-update-dashboard-slide`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({
-            id: currentRecord.id,
-            index: currentIndex
-          })
+        const res = await fetch(`${API_BASE}/api/shared-slide`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         });
-      } catch (err) {
-        // Silent error, ga masalah kalau gagal
+        if (!res.ok) return;
+        const json = await res.json();
+        const serverIndex = json.current_index ?? 0;
+        // Hanya update jika berbeda dan masih dalam range, agar tidak loop saat master push
+        setCurrentIndex((prev: number) => {
+          if (serverIndex !== prev && serverIndex >= 0 && serverIndex < allData.length) {
+            return serverIndex;
+          }
+          return prev;
+        });
+      } catch {
+        // Silent — polling tidak boleh crash UI
       }
     };
-    
-    updateDashboardSlide();
-  }, [currentIndex, allData, loading]);
+
+    pollSharedSlide(); // langsung poll saat mount / data berubah
+    const pollInterval = setInterval(pollSharedSlide, 5000);
+    return () => clearInterval(pollInterval);
+  }, [allData.length, setCurrentIndex]);
 
   const fetchAllData = async () => {
     try {
