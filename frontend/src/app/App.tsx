@@ -4,11 +4,13 @@ import {
   Zap,
   Search,
   LogOut, 
+  Clock,
   Shield, 
   TrendingUp
 } from 'lucide-react';
 import MainDashboard from "../components/MainDashboard";
 import Detection from "../components/Detection";
+import History from "../components/History";
 import Overview from "../components/Overview";
 import Adminpage from "../components/Adminpage";
 // import Chatbot from "../components/chatbot";
@@ -22,7 +24,7 @@ interface UserData {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'detection' | 'admin'>('main');
+  const [activeTab, setActiveTab] = useState<'main' | 'detection' | 'history' | 'admin'>('main');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<UserData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -160,6 +162,18 @@ export default function App() {
                       <span className="hidden sm:inline">Detection</span>
                     </button>
 
+                    <button
+                      onClick={() => setActiveTab('history')}
+                      className={`flex items-center gap-1 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                        activeTab === 'history' 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' 
+                          : 'text-slate-300 hover:text-white hover:bg-[#2a3d60]'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">History</span>
+                    </button>
+
                     {isAdmin && (
                       <button
                         onClick={() => setActiveTab('admin')}
@@ -224,6 +238,9 @@ export default function App() {
                 refreshTrigger={refreshTrigger}
                 onDataChange={handleDataChange}
               />
+            )}
+            {activeTab === 'history' && (
+              <History refreshTrigger={refreshTrigger} />
             )}
             {activeTab === 'admin' && isAdmin && <Adminpage />}
           </main>

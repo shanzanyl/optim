@@ -292,7 +292,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const totalProcessed = processedData.length;
 
   // 🔥 TAMBAHAN: tableData menggunakan processedData (dari teman)
-  const tableData = processedData.slice().reverse();
+  const recentData = allData.slice(-6);
+  const tableData = allData
+  .slice(Math.max(0, currentIndex - 5), currentIndex + 1)
+  .reverse();
 
   const faultMap: Record<string, number> = {};
   processedData.forEach((r: any) => {

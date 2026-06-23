@@ -1683,6 +1683,34 @@ async def sync_from_sheets(
                 except Exception:
                     return default
             
+            # 🔥 FUNGSI UNTUK AMBIL TIMESTAMP DARI KOLOM 'Time'
+            def get_timestamp_from_row(row):
+                """Ambil timestamp dari kolom 'Time' di sheets"""
+                if 'Time' in row.index:
+                    val = row.get('Time')
+                    if pd.notna(val) and val != '':
+                        try:
+                            if isinstance(val, str):
+                                # Format: 2026-06-22 08:00:00
+                                if ' ' in val and '-' in val:
+                                    return pd.to_datetime(val).to_pydatetime()
+                                # Format: 22/06/2026 08:00
+                                elif '/' in val:
+                                    return pd.to_datetime(val, dayfirst=True).to_pydatetime()
+                            return pd.to_datetime(val).to_pydatetime()
+                        except Exception as e:
+                            print(f"⚠️ ROW {idx}: Gagal parse Time '{val}': {e}")
+                            return None
+                return None
+            
+            # 🔥 AMBIL TIMESTAMP DARI KOLOM 'Time'
+            timestamp = get_timestamp_from_row(row)
+            if timestamp is None:
+                # Fallback: pakai waktu sekarang + offset indeks (15 menit per row)
+                base_time = datetime.now()
+                timestamp = base_time + timedelta(minutes=idx * 15)
+                print(f"⚠️ ROW {idx}: Time tidak ditemukan, pakai fallback: {timestamp}")
+            
             # 🔥 AMBIL SEMUA NILAI
             prx = g('Prx (dBm)')
             d1, d2, d3, d4 = g('Distance 1'), g('Distance 2'), g('Distance 3'), g('Distance 4')
@@ -1721,7 +1749,7 @@ async def sync_from_sheets(
             
             record = OtdrResult(
                 user_id=current_user.id,
-                timestamp=datetime.now(),
+                timestamp=timestamp,  # ✅ PAKAI TIMESTAMP DARI SHEETS
                 prx=prx,
                 temperature=g('Temperature (C)'),
                 wavelength=g('Wavelength'),

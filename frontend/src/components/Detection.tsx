@@ -329,25 +329,25 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
 
-  useEffect(() => {
-    if (!autoPlay || allHistory.length === 0) return;
+  // useEffect(() => {
+  //   if (!autoPlay || allHistory.length === 0) return;
 
-    const interval = setInterval(() => {
-      setCurrentIndex((prev: number) => {
-        const newTotal = allHistory.length;
-        if (newTotal > prevTotalData) {
-          setPrevTotalData(newTotal);
-          return newTotal - 1;
-        }
-        if (prev === newTotal - 1) {
-          return 0;
-        }
-        return prev + 1;
-      });
-    }, 30000);
+  //   const interval = setInterval(() => {
+  //     setCurrentIndex((prev: number) => {
+  //       const newTotal = allHistory.length;
+  //       if (newTotal > prevTotalData) {
+  //         setPrevTotalData(newTotal);
+  //         return newTotal - 1;
+  //       }
+  //       if (prev === newTotal - 1) {
+  //         return 0;
+  //       }
+  //       return prev + 1;
+  //     });
+  //   }, 30000);
 
-    return () => clearInterval(interval);
-  }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
+  //   return () => clearInterval(interval);
+  // }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
