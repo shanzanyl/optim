@@ -133,19 +133,20 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   }, [displayTimestamps]);
 
   useEffect(() => {
-    if (!lastResult) return;
-    const timestamp = new Date().toISOString();
+    // Hanya jalan saat allHistory update dan ada lastResult —
+    // saat ini record baru sudah pasti ada di allHistory (fetchHistory sudah await selesai)
+    if (!lastResult || allHistory.length === 0) return;
+    const latestRecord = allHistory[allHistory.length - 1];
+    if (!latestRecord) return;
     setDisplayTimestamps(prev => {
-      const latestRecord = allHistory.length > 0 ? allHistory[allHistory.length - 1] : null;
-      if (latestRecord) {
-        return {
-          ...prev,
-          [latestRecord.id]: timestamp
-        };
-      }
-      return prev;
+      // Jika id ini sudah ada timestampnya, jangan timpa
+      if (prev[latestRecord.id]) return prev;
+      return {
+        ...prev,
+        [latestRecord.id]: new Date().toISOString()
+      };
     });
-  }, [lastResult, allHistory]);
+  }, [allHistory]); // ← hanya allHistory, bukan lastResult
 
   const formatDisplayTime = (timestamp: string | null) => {
     if (!timestamp) return '—';

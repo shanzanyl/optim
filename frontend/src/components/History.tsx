@@ -65,6 +65,27 @@ const History = ({ refreshTrigger }: HistoryProps) => {
   const [endDate, setEndDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [sharedSlideIndex, setSharedSlideIndex] = useState<number | null>(null);
+
+  // Poll shared slide index dari backend (posisi slide dashboard)
+  useEffect(() => {
+    const fetchSharedSlide = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE}/api/shared-slide`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        setSharedSlideIndex(json.current_index ?? null);
+      } catch {
+        // silent
+      }
+    };
+    fetchSharedSlide();
+    const interval = setInterval(fetchSharedSlide, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Ambil data dari API
   const fetchHistory = async () => {
@@ -120,7 +141,15 @@ const History = ({ refreshTrigger }: HistoryProps) => {
 
   // Filter data
   useEffect(() => {
+    // Batasi data sesuai posisi slide dashboard (slide ke-N = tampilkan N data pertama)
+    // Data diurutkan DESC (terbaru di atas), slide bergerak dari data terlama ke terbaru
+    // jadi "N data pertama" = N data terlama = slice dari belakang array DESC
     let data = [...allData];
+    if (sharedSlideIndex !== null) {
+      const limit = sharedSlideIndex + 1; // index 0-based → jumlah data
+      // allData sudah sort DESC, data ke-1 s/d ke-N dari urutan ASC = elemen terakhir N dari DESC
+      data = data.slice(Math.max(0, data.length - limit));
+    }
 
     // Search
     if (searchTerm.trim()) {
@@ -161,7 +190,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
 
     setFilteredData(data);
     setCurrentPage(1);
-  }, [allData, searchTerm, filterStatus, filterKlasifikasi, startDate, endDate]);
+  }, [allData, searchTerm, filterStatus, filterKlasifikasi, startDate, endDate, sharedSlideIndex]);
 
   // Format timestamp
   const formatTimestamp = (timestamp: string | null) => {
@@ -258,6 +287,11 @@ const History = ({ refreshTrigger }: HistoryProps) => {
           <span className="text-xs text-slate-400 bg-[#0f1a2e] px-3 py-1 rounded-full border border-[#3b4f6e]">
             {filteredData.length} data
           </span>
+          {sharedSlideIndex !== null && (
+            <span className="text-xs text-blue-400 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">
+              Slide {sharedSlideIndex + 1}
+            </span>
+          )}
         </h2>
         <button
           onClick={fetchHistory}

@@ -294,7 +294,7 @@ const generateMinuteLabels = (count: number, intervalMinutes: number = 15) => {
   const now = new Date();
   const labels = [];
   for (let i = count - 1; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * intervalMinutes * 60 * 1000); // 🔥 15 MENIT
+    const time = new Date(now.getTime() - i * intervalMinutes * 60 * 1000);
     let hours = time.getHours();
     const minutes = String(time.getMinutes()).padStart(2, '0');
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -304,8 +304,7 @@ const generateMinuteLabels = (count: number, intervalMinutes: number = 15) => {
   }
   return labels;
 };
-// 🔥 GANTI chartData dan miniChartData
-const minuteLabels6 = generateMinuteLabels(6, 15); // [11.39, 11.40, 11.41, 11.42, 11.43, 11.44]
+const minuteLabels6 = generateMinuteLabels(6, 15);
 
 const chartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex + 1).map((r, idx) => ({
   time: minuteLabels6[idx],
@@ -704,12 +703,13 @@ const miniChartData = allData.slice(Math.max(0, currentIndex - 5), currentIndex 
               </thead>
               <tbody>
                 {(() => {
-                    // 🔥 PERBAIKAN: Tabel pakai minuteLabels6 yang SAMA dengan grafik (15 MENIT)
-                  const tableLabels = [...minuteLabels6].reverse();
-  
+                  // tableData sudah di-reverse (terbaru di atas), tapi label harus sama dengan grafik
+                  // grafik pakai minuteLabels6[idx] dari slice ascending → current slide = index terakhir
+                  const sliceLength = Math.min(tableData.length, 6);
                   return tableData.length > 0 ? tableData.map((row, idx) => {
-                    const labelIndex = Math.min(idx, tableLabels.length - 1);
-                    const realTime = tableLabels[labelIndex] || '--:-- --';
+                    // idx 0 = current (terbaru di tabel), harus dapat label paling kanan di grafik
+                    const labelIndex = sliceLength - 1 - idx;
+                    const realTime = minuteLabels6[Math.max(0, labelIndex)] || '--:-- --';
                     const loss4Display = (row.loss_4 || 0) === 0 ? '---' : (row.loss_4 || 0);
                     const totalLDisplay = (row.total_l_4 || 0) === 0 ? '---' : (row.total_l_4 || 0);
                     return (
