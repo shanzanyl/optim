@@ -472,7 +472,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
     <div>
       <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">Tips Foto OTDR</p>
-      <ul className="text-xs text-slate-300 mt-1 space-y-1 list-disc list-inside">
+      <ul className="text-sm text-slate-300 mt-1 space-y-1 list-disc list-inside">
         <li><span className="text-white font-medium">Pastikan foto jelas dan tidak buram</span></li>
         <li><span className="text-white font-medium">Foto tidak boleh miring baik portrait maupun landscape</span></li>
         <li><span className="text-white font-medium">Pastikan seluruh tabel OTDR terlihat semua dalam frame</span></li>

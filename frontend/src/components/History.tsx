@@ -311,7 +311,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
-              placeholder="Cari ID, Klasifikasi, Status..."
+              placeholder="Cari Klasifikasi, Status..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-sm placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500/50 outline-none"
@@ -366,8 +366,8 @@ const History = ({ refreshTrigger }: HistoryProps) => {
         {/* Tanggal Filter */}
         <div className="flex flex-wrap items-center gap-3 mt-3">
           <div className="flex items-center gap-2">
-            <Calendar size={14} className="text-slate-400" />
-            <span className="text-xs text-slate-400">Dari:</span>
+            <Calendar size={16} className="text-white" />
+            <span className="text-sm text-white">Dari:</span>
             <input
               type="date"
               value={startDate}
@@ -376,7 +376,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">Sampai:</span>
+            <span className="text-sm text-white">Sampai:</span>
             <input
               type="date"
               value={endDate}
@@ -384,7 +384,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
               className="px-2 py-1 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none"
             />
           </div>
-          <span className="text-xs text-slate-500">
+          <span className="text-sm text-white">
             {filteredData.length} data ditampilkan
           </span>
         </div>
@@ -445,7 +445,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center"><StatusBadge status={row.status} /></td>
-                  <td className="px-4 py-3 text-center text-xs text-slate-400">
+                  <td className="px-4 py-3 text-center text-xs text-white">
                     {row.source === 'ocr' ? '📷 OCR' : row.source === 'manual' ? '✏️ Manual' : row.source === 'sheets' ? '📊 Sheets' : '—'}
                   </td>
                 </tr>
@@ -458,7 +458,7 @@ const History = ({ refreshTrigger }: HistoryProps) => {
       {/* Pagination */}
       {!loading && filteredData.length > 0 && (
         <div className="flex justify-between items-center mt-4">
-          <div className="text-xs text-slate-400">
+          <div className="text-sm text-white">
             Menampilkan {startIndex + 1} - {Math.min(startIndex + itemsPerPage, filteredData.length)} dari {filteredData.length} data
           </div>
           <div className="flex items-center gap-2">
@@ -475,17 +475,17 @@ const History = ({ refreshTrigger }: HistoryProps) => {
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-xs disabled:opacity-50 hover:bg-[#2a3d60] transition"
+              className="px-3 py-1 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-xs hover:bg-[#2a3d60] transition"
             >
               <ChevronLeft size={14} />
             </button>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-white">
               {currentPage} / {totalPages}
             </span>
             <button
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-xs disabled:opacity-50 hover:bg-[#2a3d60] transition"
+              className="px-3 py-1 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg text-white text-xs hover:bg-[#2a3d60] transition"
             >
               <ChevronRight size={14} />
             </button>
