@@ -866,148 +866,188 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR menggunakan pendekatan line-based.
-    Setiap baris adalah satu event/row tabel.
-    TIDAK ADA PERHITUNGAN - semua nilai diambil langsung dari OCR.
+    Parse teks OCR OTDR - DIPERBAIKI UNTUK FIBER CUT
     """
     text = raw_text.replace(",", ".")
 
     # =====================================================
-    # 1. AVG TOTAL - Ambil dari header (SATU-SATUNYA PERHITUNGAN)
+    # 1. AVG TOTAL
     # =====================================================
     avg_total = 0.0
     m = re.search(r'Avg\.?\s*L?\s*[:=]?\s*(\d+\.\d{2,})\s*dB/km', text, re.IGNORECASE)
     if m:
-        avg_total = float(m.group(1))  # 🔥 HAPUS ROUND
+        avg_total = float(m.group(1))
     else:
-        # Fallback: cari pola "1.23 dB/km" di header
         m2 = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
         if m2:
-            avg_total = float(m2.group(1))  # 🔥 HAPUS ROUND
+            avg_total = float(m2.group(1))
 
     # =====================================================
-    # 2. CLEAN LINES
+    # 2. TOTAL EVENTS
+    # =====================================================
+    total_events = 4
+    total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
+    if total_events_match:
+        total_events = int(total_events_match.group(1))
+        logger.info(f"[TOTAL EVENTS] = {total_events}")
+
+    # =====================================================
+    # 3. EKSTRAK BARIS
     # =====================================================
     lines = []
     for line in text.splitlines():
         line = re.sub(r'\s+', ' ', line).strip()
-        if line:
+        if line and re.search(r'\b[1-4]\.\d{3,5}\b', line):
             lines.append(line)
 
     # =====================================================
-    # 3. DETECT EVENT LINES (harus ada distance 1.xxx - 4.xxx)
-    # =====================================================
-    event_lines = []
-    for line in lines:
-        if re.search(r'\b[1-4]\.\d{3,5}\b', line):
-            event_lines.append(line)
-
-    # =====================================================
-    # 4. MERGE OCR BROKEN ROW (jika baris terpotong)
-    # =====================================================
-    merged = []
-    i = 0
-    while i < len(event_lines):
-        row = event_lines[i]
-        nums = re.findall(r'\d+\.\d+', row)
-        # Normal event minimal 5 angka, kalau kurang gabung
-        while len(nums) < 5 and i + 1 < len(event_lines):
-            i += 1
-            row += " " + event_lines[i]
-            nums = re.findall(r'\d+\.\d+', row)
-        merged.append(row)
-        i += 1
-
-    # =====================================================
-    # 5. PARSE EACH ROW (LANGSUNG AMBIL DARI OCR, TANPA PERHITUNGAN)
+    # 4. PARSE SETIAP BARIS - DIPERBAIKI
     # =====================================================
     rows = []
-    for idx, row in enumerate(merged):
-        # Ambil semua angka dari baris
-        nums = [
-            float(x) for x in re.findall(r'-?\d+\.?\d*', row)
-            if abs(float(x)) < 100  # skip nilai aneh
-        ]
-
+    
+    for line in lines:
+        nums = re.findall(r'-?\d+\.?\d*', line)
+        nums = [float(x) for x in nums if abs(float(x)) < 100]
+        
         if not nums:
             continue
-
-        # Cari indeks distance (nilai 1.xxx - 4.xxx)
+        
+        # 🔥 CARI DISTANCE SEJATI
+        # Distance sejati: 1.004xx, 2.006xx, 3.010xx, 4.014xx
+        # Ciri: 3-5 digit desimal
         distance_idx = None
         for j, val in enumerate(nums):
-            if 0.8 <= val <= 4.5 and val not in [4.0, 4.1, 4.2, 4.3, 4.4]:
-                distance_idx = j
-                break
-
+            if 0.8 <= val <= 4.5:
+                val_str = str(val)
+                if '.' in val_str:
+                    decimal_part = val_str.split('.')[1]
+                    # 🔥 HANYA AMBIL YANG 3-5 DIGIT DESIMAL
+                    if len(decimal_part) >= 3:
+                        distance_idx = j
+                        break
+        
+        # 🔥 FALLBACK: ambil angka pertama di range 0.8-4.5 yang BUKAN nomor event
+        if distance_idx is None:
+            for j, val in enumerate(nums):
+                if 0.8 <= val <= 4.5:
+                    val_str = str(val)
+                    if '.' in val_str:
+                        decimal_part = val_str.split('.')[1]
+                        # 🔥 SKIP jika 1 digit desimal (3.1, 4.1) → nomor event
+                        if len(decimal_part) >= 2:
+                            distance_idx = j
+                            break
+        
+        # 🔥 Jika masih tidak ada, skip baris ini
         if distance_idx is None:
             continue
-
-        nums = nums[distance_idx:]
-
-        # =====================================
-        # NORMAL ROW (6 angka)
-        # =====================================
-        if len(nums) >= 6:
-            distance = nums[0]
-            section = nums[1]
-            loss = nums[2] if nums[2] is not None else 0.0
-            total_l = nums[3] if nums[3] is not None else 0.0
-            avg_l = nums[4] if nums[4] is not None else 0.0
-            return_val = nums[5] if nums[5] is not None else 0.0
-
-        # =====================================
-        # LAST ROW / BROKEN ROW (5 angka)
-        # =====================================
-        elif len(nums) == 5:
-            distance = nums[0]
-            section = nums[1]
-            loss = 0.0
-            total_l = nums[2] if nums[2] is not None else 0.0
-            avg_l = nums[3] if nums[3] is not None else 0.0
-            return_val = nums[4] if nums[4] is not None else 0.0
-
-        else:
-            continue
-
-        # 🔥 TIDAK ADA ROUND - nilai langsung dari OCR
+        
+        values = nums[distance_idx:]
+        
+        # 🔥 LOG UNTUK DEBUG
+        logger.info(f"Line: {line[:50]}... → nums={nums}, distance_idx={distance_idx}, values={values}")
+        
+        distance = values[0] if len(values) > 0 else 0.0
+        section = values[1] if len(values) > 1 else 0.0
+        loss = values[2] if len(values) > 2 else 0.0
+        total_l = values[3] if len(values) > 3 else 0.0
+        avg_l = values[4] if len(values) > 4 else 0.0
+        return_val = abs(values[5]) if len(values) > 5 else 0.0
+        
+        # 🔥 CEK "---"
+        has_missing_loss = re.search(r'---|—|–', line)
+        if has_missing_loss:
+            loss = None
+        
         rows.append({
-            "distance": distance,  # 🔥 HAPUS ROUND
-            "section": section,  # 🔥 HAPUS ROUND
-            "loss": loss,  # 🔥 HAPUS ROUND
-            "total_l": total_l,  # 🔥 HAPUS ROUND
-            "avg_l": avg_l,  # 🔥 HAPUS ROUND
-            "return": -abs(return_val) if return_val != 0 else -45.0  # 🔥 HAPUS ROUND
+            "distance": distance,
+            "section": section,
+            "loss": loss,
+            "total_l": total_l,
+            "avg_l": avg_l,
+            "return": -return_val if return_val > 0 else -45.0
         })
 
     # =====================================================
-    # 6. SORT BY DISTANCE
+    # 5. SORT BY DISTANCE
     # =====================================================
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 7. FIX: KM4 loss harus None (End of Fiber)
+    # 6. VALIDASI SWAP
     # =====================================================
-    if len(rows) >= 4:
-        # KM4 loss = None
-        rows[3]["loss"] = None
-    elif len(rows) == 3:
-        # Tambah KM4 default
-        rows.append({
-            "distance": 4.0,
-            "section": 0.0,
-            "loss": None,
-            "total_l": 0.0,
-            "avg_l": 0.0,
-            "return": -45.0
-        })
+    for i, row in enumerate(rows):
+        if row['loss'] is not None and row['loss'] > 5.0 and row['total_l'] < 5.0:
+            old_loss = row['loss']
+            row['loss'] = row['total_l']
+            row['total_l'] = old_loss
+            logger.info(f"  KM{i+1}: Swapped loss ↔ total_l")
+        
+        if row['avg_l'] > 2.0 and abs(row['return']) < 10.0:
+            old_avg = row['avg_l']
+            row['avg_l'] = abs(row['return'])
+            row['return'] = -old_avg
+            logger.info(f"  KM{i+1}: Swapped avg_l ↔ return")
 
     # =====================================================
-    # 8. Normalisasi: pastikan 4 baris
+    # 7. FIBER CUT DETECTION
+    # =====================================================
+    is_fiber_cut = False
+    cut_km = -1
+    
+    if total_events == 2:
+        is_fiber_cut = True
+        cut_km = 2
+        logger.info(f"🔴 FIBER CUT KM 2 detected (Total Events:2)")
+    elif total_events == 3:
+        is_fiber_cut = True
+        cut_km = 3
+        logger.info(f"🔴 FIBER CUT KM 3 detected (Total Events:3)")
+    
+    # 🔥 Fallback: cek dari rows
+    if not is_fiber_cut and len(rows) >= 2:
+        for i, row in enumerate(rows):
+            km = i + 1
+            if km >= 2 and (row['loss'] is None or row['loss'] == 0.0) and row['total_l'] > 0:
+                is_fiber_cut = True
+                cut_km = km
+                logger.info(f"🔴 FIBER CUT detected at KM {cut_km}")
+                break
+
+    # =====================================================
+    # 8. NORMALISASI FIBER CUT
+    # =====================================================
+    if is_fiber_cut and cut_km == 2:
+        if len(rows) >= 2:
+            rows[1]['loss'] = None
+        
+        while len(rows) > 2:
+            rows.pop()
+        
+        last_dist = rows[-1]['distance'] if rows else 2.0
+        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+        rows.append({"distance": last_dist + 2.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+
+    elif is_fiber_cut and cut_km == 3:
+        if len(rows) >= 3:
+            rows[2]['loss'] = None
+        
+        if len(rows) < 4:
+            last_dist = rows[-1]['distance'] if rows else 3.0
+            rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+
+    # Normal: KM4 loss = None
+    if len(rows) >= 4 and not is_fiber_cut:
+        rows[3]["loss"] = None
+
+    # =====================================================
+    # 9. PASTIKAN 4 ROWS
     # =====================================================
     while len(rows) < 4:
         km = len(rows) + 1
+        last_dist = rows[-1]["distance"] if rows else float(km - 1)
         rows.append({
-            "distance": float(km),
+            "distance": last_dist + 1.0,
             "section": 0.0,
             "loss": None if km == 4 else 0.0,
             "total_l": 0.0,
@@ -1016,7 +1056,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         })
 
     # =====================================================
-    # 9. LOG HASIL
+    # 10. LOG
     # =====================================================
     logger.info("===== FINAL PARSED ROWS =====")
     for i, r in enumerate(rows, start=1):
@@ -1027,7 +1067,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             f"avg_l={r['avg_l']}, "
             f"return={r['return']}"
         )
-    logger.info(f"AVG TOTAL = {avg_total}")
+    logger.info(f"AVG TOTAL = {avg_total}, FIBER_CUT = {is_fiber_cut}, CUT_KM = {cut_km}")
 
     return rows, avg_total
 
