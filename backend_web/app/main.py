@@ -190,39 +190,45 @@ REQUIRED_FEATURES = [
 # FIBER CUT NORMALIZATION HELPER
 # ═══════════════════════════════════════════════════════════════════
 
-def detect_fiber_cut_point(loss_1, loss_2, loss_3) -> int:
+def detect_fiber_cut_point(loss_1, loss_2, loss_3, total_l_1, total_l_2, total_l_3) -> int:
     """
-    Deteksi titik cut berdasarkan loss yang ada.
+    Deteksi titik cut berdasarkan loss dan total_l.
     Kembalikan km terakhir yang valid (1, 2, atau 3).
-    - Fiber cut di km 2: loss_3 akan None/0
-    - Fiber cut di km 3: loss_3 ada, km4 tidak ada (sudah selalu None)
-    - Normal: semua loss_1-3 ada
     """
-    def is_valid(val):
-        return val is not None and val != 0.0
-
-    if is_valid(loss_3):
-        return 3  # Data valid sampai km3
-    elif is_valid(loss_2):
-        return 2  # Data valid sampai km2 (cut di km2)
-    elif is_valid(loss_1):
-        return 1  # Data valid sampai km1 (cut di km1, jarang)
-    return 3  # Default: anggap normal, return km3
+    def is_valid_loss(val):
+        return val is not None and val > 0.0
+    
+    def is_valid_total(val):
+        return val is not None and val > 0.0
+    
+    # Cek dari losses
+    has_l1 = is_valid_loss(loss_1)
+    has_l2 = is_valid_loss(loss_2)
+    has_l3 = is_valid_loss(loss_3)
+    
+    # Cek dari total_l sebagai fallback
+    has_tl1 = is_valid_total(total_l_1)
+    has_tl2 = is_valid_total(total_l_2)
+    has_tl3 = is_valid_total(total_l_3)
+    
+    # Fiber Cut di KM3: loss_3 = None/0, tapi total_l_3 > 0
+    if (not has_l3) and has_tl3:
+        return 3  # Fiber cut di KM3
+    
+    # Fiber Cut di KM2: loss_2 = None/0, loss_3 = None/0
+    if (not has_l2) and (not has_l3) and has_tl2:
+        return 2  # Fiber cut di KM2
+    
+    # Normal: semua loss ada
+    if has_l1 and has_l2 and has_l3:
+        return 3
+    
+    # Default
+    return 3
 
 def normalize_fiber_cut_fields(payload: dict) -> dict:
     """
     Normalisasi field input manual yang null/kosong karena fiber cut.
-    Mengubah None → nilai default yang aman sebelum masuk ke model ML.
-    
-    Logika:
-    - Field sebelum/di titik cut: ambil apa adanya
-    - Field setelah titik cut (null/0): isi default aman untuk ML
-      - Distance: isi berurutan (km+1) berdasarkan distance terakhir yang ada
-      - Loss (hanya km1-3): 0.0
-      - Total-L, Avg-L, Return: 0.0
-    - Loss km4: selalu None (end of fiber, tidak masuk ke ML)
-    
-    Return: dict dengan field yang sudah dinormalisasi untuk ML inference.
     """
     def g(key, default=0.0):
         val = payload.get(key)
@@ -236,17 +242,22 @@ def normalize_fiber_cut_fields(payload: dict) -> dict:
     l1 = g('loss_1', 0.0)
     l2 = g('loss_2', 0.0)
     l3 = g('loss_3', 0.0)
+    
+    tl1 = g('total_l_1', 0.0)
+    tl2 = g('total_l_2', 0.0)
+    tl3 = g('total_l_3', 0.0)
 
-    cut_point = detect_fiber_cut_point(l1, l2, l3)
-    logger.info(f"[FIBER CUT] Detected cut_point = km{cut_point} (loss_1={l1}, loss_2={l2}, loss_3={l3})")
+    # 🔥 Deteksi titik cut dengan data loss dan total_l
+    cut_point = detect_fiber_cut_point(l1, l2, l3, tl1, tl2, tl3)
+    logger.info(f"[FIBER CUT] Detected cut_point = km{cut_point} (l1={l1}, l2={l2}, l3={l3})")
 
-    # Normalisasi distance: jika km setelah cut kosong, isi dengan perkiraan
+    # Normalisasi distance
     d1 = g('distance_1') or 1.0
     d2 = g('distance_2') or (d1 + 1.0)
     d3 = g('distance_3') or (d2 + 1.0)
     d4 = g('distance_4') or (d3 + 1.0)
 
-    # Normalisasi total_l, avg_l, return: 0.0 jika kosong
+    # Normalisasi total_l, avg_l, return
     tl1 = g('total_l_1', 0.0)
     tl2 = g('total_l_2', 0.0)
     tl3 = g('total_l_3', 0.0)
@@ -265,16 +276,17 @@ def normalize_fiber_cut_fields(payload: dict) -> dict:
     avg_total = g('avg_total', 0.0)
     prx = g('prx', -15.6)
 
-    # Jika avg_total kosong, hitung dari total_l4/distance4 atau fallback
-    if avg_total == 0.0 and tl4 > 0 and d4 > 0:
-        avg_total = tl4 / d4
-    elif avg_total == 0.0 and tl1 > 0 and d1 > 0:
-        # Fallback: gunakan km terakhir yang ada
-        last_tl = tl3 if tl3 > 0 else (tl2 if tl2 > 0 else tl1)
-        last_d = d3 if d3 > 0 else (d2 if d2 > 0 else d1)
-        avg_total = last_tl / last_d if last_d > 0 else 0.0
+    # Jika avg_total kosong, hitung dari data yang ada
+    if avg_total == 0.0:
+        if tl4 > 0 and d4 > 0:
+            avg_total = tl4 / d4
+        elif tl3 > 0 and d3 > 0:
+            avg_total = tl3 / d3
+        elif tl2 > 0 and d2 > 0:
+            avg_total = tl2 / d2
+        elif tl1 > 0 and d1 > 0:
+            avg_total = tl1 / d1
 
-    # Nilai yang dikembalikan: field sudah aman untuk ML (tidak ada None)
     return {
         'prx': prx,
         'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
@@ -284,7 +296,6 @@ def normalize_fiber_cut_fields(payload: dict) -> dict:
         'avg_total': avg_total,
         'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4,
         'cut_point': cut_point,
-        # Nilai asli (sebelum normalisasi) untuk disimpan ke DB
         'raw_l1': payload.get('loss_1'), 'raw_l2': payload.get('loss_2'),
         'raw_l3': payload.get('loss_3'),
     }
@@ -850,7 +861,7 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# OTDR PARSER (DIPERBAIKI - TANPA ROUND)
+# OTDR PARSER (DIPERBAIKI - TANPA ROUND + FIBER CUT DETECTION)
 # ═══════════════════════════════════════════════════════════════════
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
@@ -924,7 +935,8 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         # Cari indeks distance (nilai 1.xxx - 4.xxx)
         distance_idx = None
         for j, val in enumerate(nums):
-            if 0.8 <= val <= 4.5 and val not in [4.0, 4.1, 4.2, 4.3, 4.4]:
+            # 🔥 PERBAIKI: cari nilai yang mendekati 1.x, 2.x, 3.x, 4.x
+            if 0.8 <= val <= 4.5:
                 distance_idx = j
                 break
 
@@ -933,8 +945,11 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
 
         nums = nums[distance_idx:]
 
+        # 🔥 Log untuk debugging
+        logger.info(f"Row {idx}: nums = {nums}")
+
         # =====================================
-        # NORMAL ROW (6 angka)
+        # PARSE: ambil 6 angka atau 5 angka
         # =====================================
         if len(nums) >= 6:
             distance = nums[0]
@@ -943,18 +958,13 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             total_l = nums[3] if nums[3] is not None else 0.0
             avg_l = nums[4] if nums[4] is not None else 0.0
             return_val = nums[5] if nums[5] is not None else 0.0
-
-        # =====================================
-        # LAST ROW / BROKEN ROW (5 angka)
-        # =====================================
-        elif len(nums) == 5:
+        elif len(nums) >= 5:
             distance = nums[0]
             section = nums[1]
             loss = 0.0
             total_l = nums[2] if nums[2] is not None else 0.0
             avg_l = nums[3] if nums[3] is not None else 0.0
             return_val = nums[4] if nums[4] is not None else 0.0
-
         else:
             continue
 
@@ -969,49 +979,65 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         })
 
     # =====================================================
-    # 6. SORT BY DISTANCE
+    # 6. SORT BY DISTANCE (PENTING!)
     # =====================================================
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 7. FIX: KM4 loss harus None (End of Fiber)
+    # 7. FIBER CUT DETECTION
     # =====================================================
-    if len(rows) >= 4:
-        # KM4 loss = None
-        rows[3]["loss"] = None
-    elif len(rows) == 3:
-        # Ada 3 baris: bisa fiber cut di km3 (km4 tidak ada) atau memang OCR hanya baca 3
-        # Tambah KM4 placeholder tapi tandai sebagai kemungkinan fiber cut
-        rows.append({
-            "distance": rows[2]["distance"] + 1.0,
-            "section": 0.0,
-            "loss": None,
-            "total_l": 0.0,
-            "avg_l": 0.0,
-            "return": -45.0
-        })
-    elif len(rows) == 2:
-        # Hanya 2 baris: kemungkinan fiber cut di km2
-        # Tambah km3 dan km4 sebagai null
-        rows.append({
-            "distance": rows[1]["distance"] + 1.0,
-            "section": 0.0,
-            "loss": None,  # Fiber cut: tidak ada data km3
-            "total_l": 0.0,
-            "avg_l": 0.0,
-            "return": -45.0
-        })
-        rows.append({
-            "distance": rows[1]["distance"] + 2.0,
-            "section": 0.0,
-            "loss": None,
-            "total_l": 0.0,
-            "avg_l": 0.0,
-            "return": -45.0
-        })
+    is_fiber_cut = False
+    cut_km = -1
+    
+    # Cek dari raw text: Total Events:3 dan tidak ada "Next Event"
+    total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
+    if total_events_match:
+        total_events = int(total_events_match.group(1))
+        if total_events == 3:
+            # Cek apakah ada "Next Event" di baris terakhir event
+            if merged:
+                last_event = merged[-1]
+                if "Next Event" not in last_event and "Next" not in last_event:
+                    is_fiber_cut = True
+                    cut_km = 3
+                    logger.info(f"🔴 FIBER CUT detected at KM {cut_km} (Total Events:3, no Next Event)")
+    
+    # 🔥 Juga cek dari rows: jika hanya 3 baris valid
+    if not is_fiber_cut:
+        valid_rows = [r for r in rows if r['distance'] > 0.5 and r['total_l'] > 0]
+        if len(valid_rows) == 3:
+            # Hanya 3 baris, kemungkinan Fiber Cut di KM3
+            is_fiber_cut = True
+            cut_km = 3
+            logger.info(f"🔴 FIBER CUT detected at KM {cut_km} (only 3 valid rows)")
 
     # =====================================================
-    # 8. Normalisasi: pastikan 4 baris
+    # 8. NORMALISASI
+    # =====================================================
+    if is_fiber_cut and cut_km == 3:
+        # Fiber Cut di KM3: KM3 loss = None (tidak terbaca)
+        if len(rows) >= 3:
+            rows[2]['loss'] = None
+            logger.info(f"  KM3 loss set to None (Fiber Cut)")
+        
+        # Tambah KM4 placeholder jika belum ada
+        if len(rows) < 4:
+            last_dist = rows[-1]['distance'] if rows else 3.0
+            rows.append({
+                "distance": last_dist + 1.0,
+                "section": 0.0,
+                "loss": None,
+                "total_l": 0.0,
+                "avg_l": 0.0,
+                "return": -45.0
+            })
+    
+    # Normal: KM4 loss = None
+    if len(rows) >= 4 and not is_fiber_cut:
+        rows[3]["loss"] = None
+
+    # =====================================================
+    # 9. PASTIKAN 4 ROWS
     # =====================================================
     while len(rows) < 4:
         km = len(rows) + 1
@@ -1019,14 +1045,14 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         rows.append({
             "distance": last_dist + 1.0,
             "section": 0.0,
-            "loss": None,
+            "loss": None if km == 4 else 0.0,
             "total_l": 0.0,
             "avg_l": 0.0,
             "return": -45.0
         })
 
     # =====================================================
-    # 9. LOG HASIL
+    # 10. LOG HASIL
     # =====================================================
     logger.info("===== FINAL PARSED ROWS =====")
     for i, r in enumerate(rows, start=1):
@@ -1037,7 +1063,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             f"avg_l={r['avg_l']}, "
             f"return={r['return']}"
         )
-    logger.info(f"AVG TOTAL = {avg_total}")
+    logger.info(f"AVG TOTAL = {avg_total}, FIBER_CUT = {is_fiber_cut}")
 
     return rows, avg_total
 
@@ -1170,7 +1196,6 @@ async def parse_ocr_only(
         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
     
     # 🔥 VALIDASI FIBER CUT AWARE: minimal 1 baris valid dengan distance > 0
-    # (kasus fiber cut di km2 = hanya 2 baris valid, tetap diizinkan)
     valid = [r for r in rows if r['distance'] > 0.5]
     if len(valid) < 1:
         # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
@@ -1366,189 +1391,6 @@ async def reject_user(
     await db.delete(user)
     await db.commit()
     return {"message": f"User {user.email} berhasil dihapus"}
-
-# ═══════════════════════════════════════════════════════════════════
-# DETECTION OCR - MAIN ENDPOINT
-# ═══════════════════════════════════════════════════════════════════
-
-# @app.post("/api/detect")
-# async def detect_ocr(
-#     file: UploadFile = File(...),
-#     prx_manual: float = Form(None),
-#     db: AsyncSession = Depends(get_db),
-#     current_user: User = Depends(get_optional_user),
-# ):
-#     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
-#     if file.content_type not in allowed:
-#         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
-    
-#     content = await file.read()
-#     raw_text = ""
-#     logger.info(f"📝 RAW TEXT FULL:\n{raw_text}")
-#     ocr_method = "none"
-    
-#     logger.info("=" * 70)
-#     logger.info("🔄 Starting OCR process...")
-    
-#     try:
-#         results = {}
-        
-#         try:
-#             results['tesseract'] = await asyncio.wait_for(
-#                 asyncio.to_thread(tesseract_extract, content), timeout=25.0)
-#         except asyncio.TimeoutError:
-#             logger.warning("Tesseract timed out")
-#             results['tesseract'] = ""
-
-#         try:
-#             results['ocr.space'] = await asyncio.wait_for(
-#                 asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
-#         except asyncio.TimeoutError:
-#             logger.warning("OCR.space timed out")
-#             results['ocr.space'] = ""
-
-#         best_score = 0
-#         for method, text in results.items():
-#             if text:
-#                 score = len(re.findall(r'\d+\.\d{3,}', text))
-#                 if score > best_score:
-#                     best_score = score
-#                     raw_text = text
-#                     ocr_method = method
-
-#         logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
-
-#     except Exception as e:
-#         logger.error(f"OCR error: {e}")
-    
-#     if not raw_text or len(raw_text.strip()) < 20:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat."
-#         )
-    
-#     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
-    
-#     rows, avg_total = parse_otdr_table_simple(raw_text)
-#     avg_total = round(avg_total, 2)
-    
-#     prx_from_ocr = extract_prx(raw_text)
-#     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
-    
-#     logger.info(f"📊 Parsed rows: {len(rows)}")
-#     for i, row in enumerate(rows):
-#         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
-    
-#     valid = [r for r in rows if r['distance'] > 0.5]
-#     if len(valid) < 2:
-#         raise HTTPException(
-#             status_code=400,
-#             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
-#         )
-    
-#     logger.info("=" * 50)
-#     logger.info("Starting ML Prediction...")
-    
-#     otdr_values = {
-#         'Prx (dBm)': final_prx,
-#         'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
-#         'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
-#         'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
-#         'Total-L 1': rows[0]['total_l'], 'Total-L 2': rows[1]['total_l'],
-#         'Total-L 3': rows[2]['total_l'], 'Total-L 4': rows[3]['total_l'],
-#         'Avg-L 1': rows[0]['avg_l'], 'Avg-L 2': rows[1]['avg_l'],
-#         'Avg-L 3': rows[2]['avg_l'], 'Avg-L 4': rows[3]['avg_l'],
-#         'Avg-Total': avg_total,
-#         'Return 1': rows[0]['return'], 'Return 2': rows[1]['return'],
-#         'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
-#     }
-    
-#     try:
-#         pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-#         logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')}")
-#     except Exception as e:
-#         logger.error(f"❌ ML prediction FAILED: {e}")
-#         pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-    
-#     logger.info("=" * 50)
-#     logger.info("💾 Saving to Database...")
-#     user_id = current_user.id if current_user else 1
-    
-#     try:
-#         record = OtdrResult(
-#             user_id=user_id,
-#             timestamp=datetime.now(),
-#             prx=final_prx,
-#             loss_1=rows[0]['loss'], loss_2=rows[1]['loss'],
-#             loss_3=rows[2]['loss'], loss_4=None,
-#             return_1=rows[0]['return'], return_2=rows[1]['return'],
-#             return_3=rows[2]['return'], return_4=rows[3]['return'],
-#             distance_1=rows[0]['distance'], distance_2=rows[1]['distance'],
-#             distance_3=rows[2]['distance'], distance_4=rows[3]['distance'],
-#             total_l_1=rows[0]['total_l'], total_l_2=rows[1]['total_l'],
-#             total_l_3=rows[2]['total_l'], total_l_4=rows[3]['total_l'],
-#             avg_l_1=rows[0]['avg_l'], avg_l_2=rows[1]['avg_l'],
-#             avg_l_3=rows[2]['avg_l'], avg_l_4=rows[3]['avg_l'],
-#             avg_total=avg_total,
-#             klasifikasi=pred.get("prediction"),
-#             status=pred.get("status"),
-#             confidence=pred.get("confidence"),
-#             source="ocr",
-#             raw_text=raw_text[:1000],
-#         )
-        
-#         db.add(record)
-#         await db.commit()
-#         await db.refresh(record)
-#         logger.info(f"✅ Saved to DB: ID={record.id}")
-    
-#         status_str = pred.get("status", "Normal")
-#         if status_str.lower() in ["warning", "critical"]:
-#             logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')}")
-#             try:
-#                 await asyncio.to_thread(
-#                     send_telegram_alert,
-#                     classification=pred.get("prediction"),
-#                     status=status_str,
-#                     loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
-#                     rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
-#                     prx=final_prx,
-#                     distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
-#                     timestamp=record.timestamp
-#                 )
-#                 record.telegram_alert_sent = True
-#                 await db.commit()
-#             except Exception as tg_err:
-#                 logger.error(f"[TELEGRAM] Error: {tg_err}")
-        
-
-#     except Exception as e:
-#         logger.error(f"❌ DATABASE ERROR: {e}")
-#         await db.rollback()
-#         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-#     logger.info("=" * 70)
-    
-#     return {
-#         "message": "Gambar berhasil diproses",
-#         "raw_text": raw_text[:500],
-#         "extracted": {
-#             "distances": [rows[i]['distance'] for i in range(4)],
-#             "losses": [rows[i]['loss'] for i in range(4)],
-#             "total_ls": [rows[i]['total_l'] for i in range(4)],
-#             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
-#             "returns": [rows[i]['return'] for i in range(4)],
-#             "avg_total": round(avg_total, 2),
-#         },
-#         "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
-#         "prx": final_prx,
-#         "avg_total": round(avg_total, 2),
-#         "prediction": pred.get("prediction"),
-#         "confidence": pred.get("confidence"),
-#         "status": pred.get("status"),
-#         "id": record.id,
-#         "ocr_method": ocr_method,
-#     }
 
 # ═══════════════════════════════════════════════════════════════════
 # DASHBOARD & HISTORY

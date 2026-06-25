@@ -2,7 +2,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, AlertTriangle, Info, Edit3, CheckCircle, Send } from 'lucide-react';
 import { useSlide } from '../Context/SlideContext';
-import { triggerSlideAlert } from '../services/api';
 
 interface DetectionProps {
   refreshTrigger?: number;
@@ -46,6 +45,7 @@ interface LastResult {
 }
 
 interface OcrParseResult {
+  success: boolean;
   message: string;
   raw_text: string;
   ocr_method: string;
@@ -126,29 +126,34 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   });
 
-  const [sentAlerts, setSentAlerts] = useState<Set<number>>(new Set());
-
   useEffect(() => {
     localStorage.setItem('detection_display_timestamps', JSON.stringify(displayTimestamps));
   }, [displayTimestamps]);
 
+  // 🔥 PERBAIKI: update timestamp hanya untuk record baru
   useEffect(() => {
-    // Hanya jalan saat allHistory update dan ada lastResult —
-    // saat ini record baru sudah pasti ada di allHistory (fetchHistory sudah await selesai)
     if (!lastResult || allHistory.length === 0) return;
     const latestRecord = allHistory[allHistory.length - 1];
     if (!latestRecord) return;
     setDisplayTimestamps(prev => {
-      // Jika id ini sudah ada timestampnya, jangan timpa
       if (prev[latestRecord.id]) return prev;
       return {
         ...prev,
         [latestRecord.id]: new Date().toISOString()
       };
     });
-  }, [allHistory]); // ← hanya allHistory, bukan lastResult
+  }, [allHistory, lastResult]);
 
-  const formatDisplayTime = (timestamp: string | null) => {
+  // 🔥 PERBAIKI: formatDisplayTime dengan recordId
+  const formatDisplayTime = (timestamp: string | null, recordId: number) => {
+    const overrideTime = displayTimestamps[recordId];
+    if (overrideTime) {
+      return formatDisplayTimeString(overrideTime);
+    }
+    return formatDisplayTimeString(timestamp);
+  };
+
+  const formatDisplayTimeString = (timestamp: string | null) => {
     if (!timestamp) return '—';
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) return '—';
@@ -162,73 +167,45 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // ── HELPER: konversi nilai OCR ke string form, nilai null/0 = kosong ──
-  // Untuk fiber cut, nilai setelah titik cut = null/0 dari backend → tetap kosong di form
-  const ocrValToStr = (val: number | null | undefined): string => {
+  // ── HELPER: konversi nilai ke string ──
+  const valToStr = (val: number | null | undefined): string => {
     if (val === null || val === undefined || val === 0) return '';
     return val.toString();
   };
 
-  // ── HELPER: deteksi titik cut dari losses OCR ──
-  // Mengembalikan km terakhir yang valid (1-4), atau 4 jika semua ada
-  const detectCutPoint = (losses: (number | null)[]): number => {
-    // Scan mundur: cari km terakhir yang memiliki loss valid (non-null, non-0)
-    for (let i = 2; i >= 0; i--) { // hanya periksa km1-km3 (loss_4 selalu null)
-      if (losses[i] !== null && losses[i] !== undefined && losses[i] !== 0) {
-        return i + 1; // km yang valid terakhir (1-indexed)
-      }
-    }
-    return 1;
-  };
-
-  // 🔥 POPULATE FORM DARI OCR - FIBER CUT AWARE
+  // 🔥 POPULATE FORM DARI OCR
   const populateFormFromOcr = (ocrData: OcrParseResult) => {
     const { extracted, prx } = ocrData;
     
-    // Deteksi titik cut: km terakhir yang valid
-    const cutPoint = detectCutPoint(extracted.losses);
-    
-    // Untuk field setelah titik cut: biarkan kosong jika nilainya 0/null
-    // Untuk field sebelum/sama dengan titik cut: isi seperti biasa
-    const safeStr = (val: number | null | undefined, km: number, isCutSensitive: boolean = true): string => {
-      if (val === null || val === undefined) return '';
-      if (isCutSensitive && km > cutPoint && val === 0) return ''; // setelah cut → kosong
-      if (val === 0) return '';
-      return val.toString();
-    };
-
     setManualForm({
       prx: prx !== undefined && prx !== null ? prx.toString() : '',
       avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
-      // Distance: isi semua selama ada nilainya (distance sendiri tidak terpengaruh cut)
-      distance_1: ocrValToStr(extracted.distances[0]),
-      distance_2: ocrValToStr(extracted.distances[1]),
-      distance_3: ocrValToStr(extracted.distances[2]),
-      distance_4: ocrValToStr(extracted.distances[3]),
-      // Loss: km setelah cut point → kosong; loss_4 selalu kosong (end of fiber)
-      loss_1: safeStr(extracted.losses[0], 1),
-      loss_2: safeStr(extracted.losses[1], 2),
-      loss_3: safeStr(extracted.losses[2], 3),
+      distance_1: valToStr(extracted.distances[0]),
+      distance_2: valToStr(extracted.distances[1]),
+      distance_3: valToStr(extracted.distances[2]),
+      distance_4: valToStr(extracted.distances[3]),
+      loss_1: valToStr(extracted.losses[0]),
+      loss_2: valToStr(extracted.losses[1]),
+      loss_3: valToStr(extracted.losses[2]),
       loss_4: '', // selalu kosong - end of fiber
-      // Total-L, Avg-L, Return: setelah cut point → kosong jika 0
-      total_l_1: safeStr(extracted.total_ls[0], 1),
-      total_l_2: safeStr(extracted.total_ls[1], 2),
-      total_l_3: safeStr(extracted.total_ls[2], 3),
-      total_l_4: safeStr(extracted.total_ls[3], 4),
-      avg_l_1: safeStr(extracted.avg_ls[0], 1),
-      avg_l_2: safeStr(extracted.avg_ls[1], 2),
-      avg_l_3: safeStr(extracted.avg_ls[2], 3),
-      avg_l_4: safeStr(extracted.avg_ls[3], 4),
-      return_1: safeStr(extracted.returns[0], 1),
-      return_2: safeStr(extracted.returns[1], 2),
-      return_3: safeStr(extracted.returns[2], 3),
-      return_4: safeStr(extracted.returns[3], 4),
+      total_l_1: valToStr(extracted.total_ls[0]),
+      total_l_2: valToStr(extracted.total_ls[1]),
+      total_l_3: valToStr(extracted.total_ls[2]),
+      total_l_4: valToStr(extracted.total_ls[3]),
+      avg_l_1: valToStr(extracted.avg_ls[0]),
+      avg_l_2: valToStr(extracted.avg_ls[1]),
+      avg_l_3: valToStr(extracted.avg_ls[2]),
+      avg_l_4: valToStr(extracted.avg_ls[3]),
+      return_1: valToStr(extracted.returns[0]),
+      return_2: valToStr(extracted.returns[1]),
+      return_3: valToStr(extracted.returns[2]),
+      return_4: valToStr(extracted.returns[3]),
     });
     
     setIsOcrParsed(true);
   };
 
-  // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
+  // 🔥 HANDLE OCR PARSE
   const handleOcrParse = async (file: File) => {
     setImageStatus('uploading');
     setErrorMsg('');
@@ -265,9 +242,18 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
 
       const result: OcrParseResult = await response.json();
       setOcrParseResult(result);
-      populateFormFromOcr(result);
-      setImageStatus('success');
-      setErrorMsg('OCR berhasil! Silakan periksa dan edit nilai yang salah, lalu klik "Proses Klasifikasi".');
+      
+      if (result.success) {
+        populateFormFromOcr(result);
+        setImageStatus('success');
+        setErrorMsg('OCR berhasil! Silakan periksa dan edit nilai yang salah, lalu klik "Proses Klasifikasi".');
+      } else {
+        setImageStatus('error');
+        setErrorMsg(result.error || 'OCR gagal membaca gambar. Silakan input manual.');
+        if (result.extracted) {
+          populateFormFromOcr(result);
+        }
+      }
       
     } catch (error: any) {
       console.error('OCR parse error:', error);
@@ -276,53 +262,42 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   };
 
-  // 🔥 HANDLE KLASIFIKASI - KIRIM DATA KE /api/detect-manual
-  // FIBER CUT AWARE: field kosong setelah titik cut dikirim sebagai null, bukan 0
+  // 🔥 HANDLE KLASIFIKASI - Fiber Cut aware
   const handleClassify = async () => {
     setImageStatus('uploading');
     setErrorMsg('');
     setLastResult(null);
 
-    // Helper: parse angka dari form, kembalikan null jika kosong
+    // Helper: parse angka, null jika kosong
     const parseOrNull = (val: string): number | null => {
       if (val === '' || val === null || val === undefined) return null;
       const n = parseFloat(val);
       return isNaN(n) ? null : n;
     };
 
-    // Helper: parse angka dari form, kembalikan 0 jika kosong (untuk field wajib)
-    const parseOrZero = (val: string): number => {
-      if (val === '' || val === null || val === undefined) return 0.0;
-      const n = parseFloat(val);
-      return isNaN(n) ? 0.0 : n;
-    };
-
-    // Field yang aman jika null (fiber cut aware): loss_1-3, distance_1-4, total_l, avg_l, return per km
-    // Backend akan melakukan normalisasi sebelum masuk model
     const payload = {
-      prx: parseOrZero(manualForm.prx) || -15.6,
-      avg_total: parseOrNull(manualForm.avg_total),
-      distance_1: parseOrNull(manualForm.distance_1),
-      distance_2: parseOrNull(manualForm.distance_2),
-      distance_3: parseOrNull(manualForm.distance_3),
-      distance_4: parseOrNull(manualForm.distance_4),
-      // loss_1-3: null jika kosong (fiber cut setelah km itu)
-      loss_1: parseOrNull(manualForm.loss_1),
-      loss_2: parseOrNull(manualForm.loss_2),
-      loss_3: parseOrNull(manualForm.loss_3),
+      prx: parseOrNull(manualForm.prx) ?? -15.6,
+      avg_total: parseOrNull(manualForm.avg_total) ?? 0.0,
+      distance_1: parseOrNull(manualForm.distance_1) ?? 0.0,
+      distance_2: parseOrNull(manualForm.distance_2) ?? 0.0,
+      distance_3: parseOrNull(manualForm.distance_3) ?? 0.0,
+      distance_4: parseOrNull(manualForm.distance_4) ?? 0.0,
+      loss_1: parseOrNull(manualForm.loss_1) ?? 0.0,
+      loss_2: parseOrNull(manualForm.loss_2) ?? 0.0,
+      loss_3: parseOrNull(manualForm.loss_3) ?? 0.0,
       loss_4: null, // selalu null - end of fiber
-      total_l_1: parseOrNull(manualForm.total_l_1),
-      total_l_2: parseOrNull(manualForm.total_l_2),
-      total_l_3: parseOrNull(manualForm.total_l_3),
-      total_l_4: parseOrNull(manualForm.total_l_4),
-      avg_l_1: parseOrNull(manualForm.avg_l_1),
-      avg_l_2: parseOrNull(manualForm.avg_l_2),
-      avg_l_3: parseOrNull(manualForm.avg_l_3),
-      avg_l_4: parseOrNull(manualForm.avg_l_4),
-      return_1: parseOrNull(manualForm.return_1),
-      return_2: parseOrNull(manualForm.return_2),
-      return_3: parseOrNull(manualForm.return_3),
-      return_4: parseOrNull(manualForm.return_4),
+      total_l_1: parseOrNull(manualForm.total_l_1) ?? 0.0,
+      total_l_2: parseOrNull(manualForm.total_l_2) ?? 0.0,
+      total_l_3: parseOrNull(manualForm.total_l_3) ?? 0.0,
+      total_l_4: parseOrNull(manualForm.total_l_4) ?? 0.0,
+      avg_l_1: parseOrNull(manualForm.avg_l_1) ?? 0.0,
+      avg_l_2: parseOrNull(manualForm.avg_l_2) ?? 0.0,
+      avg_l_3: parseOrNull(manualForm.avg_l_3) ?? 0.0,
+      avg_l_4: parseOrNull(manualForm.avg_l_4) ?? 0.0,
+      return_1: parseOrNull(manualForm.return_1) ?? 0.0,
+      return_2: parseOrNull(manualForm.return_2) ?? 0.0,
+      return_3: parseOrNull(manualForm.return_3) ?? 0.0,
+      return_4: parseOrNull(manualForm.return_4) ?? 0.0,
     };
 
     const token = localStorage.getItem('token');
@@ -356,47 +331,8 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   };
 
   const { currentIndex, setCurrentIndex, totalData, autoPlay } = useSlide();
-  const [prevTotalData, setPrevTotalData] = useState(0);
 
-  useEffect(() => {
-    if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
-    const currentRecord = allHistory[currentIndex];
-    if (!currentRecord) return;
-
-    const status = currentRecord.status || '';
-    
-    if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-      if (sentAlerts.has(currentRecord.id)) return;
-      
-      triggerSlideAlert(currentRecord.id)
-        .then((res: { status: string }) => {
-          if (res.status === 'sent') {
-            setSentAlerts(prev => new Set(prev).add(currentRecord.id));
-          }
-        })
-        .catch((err: any) => console.error('Error triggering slide alert:', err));
-    }
-  }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
-
-  // useEffect(() => {
-  //   if (!autoPlay || allHistory.length === 0) return;
-
-  //   const interval = setInterval(() => {
-  //     setCurrentIndex((prev: number) => {
-  //       const newTotal = allHistory.length;
-  //       if (newTotal > prevTotalData) {
-  //         setPrevTotalData(newTotal);
-  //         return newTotal - 1;
-  //       }
-  //       if (prev === newTotal - 1) {
-  //         return 0;
-  //       }
-  //       return prev + 1;
-  //     });
-  //   }, 30000);
-
-  //   return () => clearInterval(interval);
-  // }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
+  // 🔥 HAPUS useEffect alert - sudah di backend
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
@@ -462,7 +398,6 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   };
 
   const displayedHistory = [...allHistory].reverse();
-  const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
 
   return (
     <div className="p-6 sm:p-8 bg-[#1e2f50] rounded-2xl border border-[#3b4f6e]"> 
@@ -514,28 +449,28 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
                 <p className="text-xs text-slate-100 mb-5 text-center">Format: JPG, PNG</p>
-                {/* 🔥 TAMBAHKAN: Peringatan/Note untuk OCR */}
-<div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
-  <div className="flex items-start gap-2">
-    <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
-    <div>
-      <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">Tips Foto OTDR</p>
-      <ul className="text-sm text-slate-300 mt-1 space-y-1 list-disc list-inside">
-        <li><span className="text-white font-medium">Pastikan foto jelas dan tidak buram</span></li>
-        <li><span className="text-white font-medium">Foto tidak boleh miring baik portrait maupun landscape</span></li>
-        <li><span className="text-white font-medium">Pastikan seluruh tabel OTDR terlihat semua dalam frame</span></li>
-        <li><span className="text-white font-medium">Hindari bayangan yang menutupi angka pada tabel</span></li>
-        <li><span className="text-white font-medium">Pastikan cahaya cukup agar angka terbaca dengan baik</span></li>
-      </ul>
-    </div>
-  </div>
-</div>
+                
+                <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">Tips Foto OTDR</p>
+                      <ul className="text-sm text-slate-300 mt-1 space-y-1 list-disc list-inside">
+                        <li><span className="text-white font-medium">Pastikan foto jelas dan tidak buram</span></li>
+                        <li><span className="text-white font-medium">Foto tidak boleh miring baik portrait maupun landscape</span></li>
+                        <li><span className="text-white font-medium">Pastikan seluruh tabel OTDR terlihat semua dalam frame</span></li>
+                        <li><span className="text-white font-medium">Hindari bayangan yang menutupi angka pada tabel</span></li>
+                        <li><span className="text-white font-medium">Pastikan cahaya cukup agar angka terbaca dengan baik</span></li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
                 
                 {isOcrParsed && ocrParseResult && (
                   <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
                     <p className="text-emerald-400 text-xs flex items-center gap-2">
                       <CheckCircle size={14} />
-                      OCR berhasil! Silakan periksa dan edit nilai di bawah.
+                      {ocrParseResult.success ? 'OCR berhasil! Silakan periksa dan edit nilai di bawah.' : 'OCR parsing selesai, silakan periksa dan edit data.'}
                     </p>
                     <p className="text-slate-100 text-[10px] mt-1">
                       Metode: {ocrParseResult.ocr_method || 'Unknown'}
@@ -620,7 +555,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Prx (dBm)</label>
-                    <input type="number" step="0.01" required value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
+                    <input type="number" step="0.01" value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
@@ -644,11 +579,9 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
                           <td className="p-2 font-bold text-white text-xs">Km {km}{km === 4 ? <span className="text-slate-500 text-[9px] ml-1">(EOF)</span> : ''}</td>
                           <td className="p-2">
-                            {/* Distance: tidak required untuk km 3-4 saat fiber cut */}
-                            <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder={km <= 2 ? '0.0' : '—'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            {/* Loss: km4 selalu disabled, km2-3 tidak required (fiber cut) */}
                             <input type="number" step="0.001" disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
                           </td>
                           <td className="p-2">
@@ -692,7 +625,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
             )}
           </div>
 
-          {/* 🔥 RESULT CLASSIFICATION - DENGAN DETECTED VALUES YANG BISA DIEDIT */}
+          {/* 🔥 RESULT CLASSIFICATION */}
           <div className="bg-[#1e2f50] p-8 rounded-2xl border border-[#3b4f6e]">
             <h3 className="text-lg font-bold text-white mb-4 uppercase tracking-widest">Result Classification</h3>
             
@@ -717,161 +650,153 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               </div>
             )}
 
-            {/* 🔥 TAMPILKAN DETECTED VALUES EDITABLE SAAT OCR PARSED (BELUM KLASIFIKASI) */}
-{isOcrParsed && ocrParseResult && !lastResult && (
-  <div className="space-y-3">
-    <div className="flex justify-between items-center">
-      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DETECTED VALUES</p>
-      <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-        <Edit3 size={10} /> Editable
-      </span>
-    </div>
-    
-    {/* Signal Power - Editable */}
-    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Info size={14} className="text-blue-400" />
-        <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
-      </div>
-      <div className="flex items-center gap-1">
-        <input
-          type="text"
-          inputMode="decimal"
-          step="0.01"
-          value={manualForm.prx}
-          onChange={(e) => setManualForm({ ...manualForm, prx: e.target.value })}
-          className="w-20 px-2 py-1 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
-        />
-        <span className="text-white text-sm font-black">dBm</span>
-        <span className="text-[10px] text-white ml-1">(input manual)</span>
-      </div>
-    </div>
+            {/* 🔥 DETECTED VALUES EDITABLE SAAT OCR PARSED */}
+            {isOcrParsed && ocrParseResult && !lastResult && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">DETECTED VALUES</p>
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <Edit3 size={10} /> Editable
+                  </span>
+                </div>
+                
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Info size={14} className="text-blue-400" />
+                    <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      step="0.01"
+                      value={manualForm.prx}
+                      onChange={(e) => setManualForm({ ...manualForm, prx: e.target.value })}
+                      className="w-20 px-2 py-1 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                    />
+                    <span className="text-white text-sm font-black">dBm</span>
+                  </div>
+                </div>
 
-    {/* Loss Values - Style Monitoring NOC */}
-    <div className="grid grid-cols-2 gap-2 text-sm">
-      {[1, 2, 3, 4].map((i) => (
-        <div key={`loss-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Loss Km {i} <span className="text-white text-[13px]">(dB)</span></span>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              inputMode="decimal"
-              step="0.01"
-              value={i === 4 ? (manualForm.loss_4 || '') : manualForm[`loss_${i}` as keyof typeof manualForm]}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (i === 4) {
-                  setManualForm({ ...manualForm, loss_4: val });
-                } else {
-                  setManualForm({ ...manualForm, [`loss_${i}`]: val });
-                }
-              }}
-              disabled={i === 4}
-              placeholder={i === 4 ? '---' : '0.00'}
-              className={`w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50 ${i === 4 ? 'opacity-45 cursor-not-allowed' : ''}`}
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`loss-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+                      <span className="text-white font-medium">Loss Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={i === 4 ? (manualForm.loss_4 || '') : manualForm[`loss_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (i === 4) {
+                              setManualForm({ ...manualForm, loss_4: val });
+                            } else {
+                              setManualForm({ ...manualForm, [`loss_${i}`]: val });
+                            }
+                          }}
+                          disabled={i === 4}
+                          placeholder={i === 4 ? '---' : '0.00'}
+                          className={`w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50 ${i === 4 ? 'opacity-45 cursor-not-allowed' : ''}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-    {/* Total-L Values */}
-    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
-      {[1, 2, 3, 4].map((i) => (
-        <div key={`total-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Total-L Km {i} <span className="text-white text-[13px]">(dB)</span></span>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              inputMode="decimal"
-              step="0.01"
-              value={manualForm[`total_l_${i}` as keyof typeof manualForm]}
-              onChange={(e) => setManualForm({ ...manualForm, [`total_l_${i}`]: e.target.value })}
-              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+                <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`total-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+                      <span className="text-white font-medium">Total-L Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={manualForm[`total_l_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`total_l_${i}`]: e.target.value })}
+                          className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-    {/* Avg-L Values */}
-    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
-      {[1, 2, 3, 4].map((i) => (
-        <div key={`avg-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Avg-L Km {i} <span className="text-white text-[13px]">(dB/km)</span></span>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              inputMode="decimal"
-              step="0.01"
-              value={manualForm[`avg_l_${i}` as keyof typeof manualForm]}
-              onChange={(e) => setManualForm({ ...manualForm, [`avg_l_${i}`]: e.target.value })}
-              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+                <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`avg-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+                      <span className="text-white font-medium">Avg-L Km {i} <span className="text-white text-[13px]">(dB/km)</span></span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={manualForm[`avg_l_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`avg_l_${i}`]: e.target.value })}
+                          className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-    {/* Avg-Total */}
-    <div className="bg-[#0f1a2e]/70 rounded-lg p-2 flex justify-between items-center text-sm border border-[#3b4f6e]/50">
-      <span className="text-white font-bold">Avg-Total<span className="text-white text-[13px] ml-1">(dB/km)</span></span>
-      <div className="flex items-center gap-1.5">
-        <input
-          type="text"
-          inputMode="decimal"
-          step="0.01"
-          value={manualForm.avg_total}
-          onChange={(e) => setManualForm({ ...manualForm, avg_total: e.target.value })}
-          className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
-        />
-      </div>
-    </div>
+                <div className="bg-[#0f1a2e]/70 rounded-lg p-2 flex justify-between items-center text-sm border border-[#3b4f6e]/50">
+                  <span className="text-white font-bold">Avg-Total<span className="text-white text-[13px] ml-1">(dB/km)</span></span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      step="0.01"
+                      value={manualForm.avg_total}
+                      onChange={(e) => setManualForm({ ...manualForm, avg_total: e.target.value })}
+                      className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                    />
+                  </div>
+                </div>
 
-    {/* Return Values */}
-    <div className="grid grid-cols-2 gap-2 text-sm mt-1">
-      {[1, 2, 3, 4].map((i) => (
-        <div key={`ret-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Return Km {i} <span className="text-white text-[13px]">(dB)</span></span>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              inputMode="decimal"
-              step="0.01"
-              value={manualForm[`return_${i}` as keyof typeof manualForm]}
-              onChange={(e) => setManualForm({ ...manualForm, [`return_${i}`]: e.target.value })}
-              className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+                <div className="grid grid-cols-2 gap-2 text-sm mt-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={`ret-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
+                      <span className="text-white font-medium">Return Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={manualForm[`return_${i}` as keyof typeof manualForm]}
+                          onChange={(e) => setManualForm({ ...manualForm, [`return_${i}`]: e.target.value })}
+                          className="w-16 px-2 py-0.5 bg-[#0f1a2e] border border-[#3b4f6e] rounded text-white text-right font-mono text-[13px] outline-none focus:ring-1 focus:ring-blue-500/50"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-    {/* Tombol Proses Klasifikasi */}
-    <button
-      onClick={handleClassify}
-      disabled={imageStatus === 'uploading'}
-      className="w-full mt-4 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {imageStatus === 'uploading' ? (
-        <>
-          <RefreshCw size={16} className="animate-spin" />
-          Memproses...
-        </>
-      ) : (
-        <>
-          <Send size={16} />
-          Proses Klasifikasi
-        </>
-      )}
-    </button>
-    <p className="text-[12px] text-white text-center">
-      Pastikan semua nilai sudah benar sebelum klasifikasi
-    </p>
-  </div>
-)}
+                <button
+                  onClick={handleClassify}
+                  disabled={imageStatus === 'uploading'}
+                  className="w-full mt-4 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {imageStatus === 'uploading' ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={16} />
+                      Proses Klasifikasi
+                    </>
+                  )}
+                </button>
+                <p className="text-[12px] text-white text-center">
+                  Pastikan semua nilai sudah benar sebelum klasifikasi
+                </p>
+              </div>
+            )}
 
-            {/* 🔥 TAMPILKAN HASIL KLASIFIKASI (SETELAH KLIK PROSES) */}
+            {/* 🔥 HASIL KLASIFIKASI */}
             {lastResult && imageStatus === 'success' && (
               <div className="space-y-4">
                 <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
@@ -979,13 +904,8 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500 italic">No measurement history available.</td></tr>
                 ) : (
                   displayedHistory.map((row, idx) => {
-                    const displayTime = displayTimestamps[row.id];
-                    let recordTime = '—';
-                    if (displayTime) {
-                      recordTime = formatDisplayTime(displayTime);
-                    } else if (row.timestamp) {
-                      recordTime = formatDisplayTime(row.timestamp);
-                    }
+                    // 🔥 PERBAIKI: gunakan formatDisplayTime dengan recordId
+                    const recordTime = formatDisplayTime(row.timestamp, row.id);
                     const totalLValue = row.total_l_4;
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
                     
