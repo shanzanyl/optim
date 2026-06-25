@@ -186,121 +186,6 @@ REQUIRED_FEATURES = [
     "Return 1", "Return 2", "Return 3", "Return 4"
 ]
 
-# ═══════════════════════════════════════════════════════════════════
-# FIBER CUT NORMALIZATION HELPER
-# ═══════════════════════════════════════════════════════════════════
-
-def detect_fiber_cut_point(loss_1, loss_2, loss_3, total_l_1, total_l_2, total_l_3) -> int:
-    """
-    Deteksi titik cut berdasarkan loss dan total_l.
-    Kembalikan km terakhir yang valid (1, 2, atau 3).
-    """
-    def is_valid_loss(val):
-        return val is not None and val > 0.0
-    
-    def is_valid_total(val):
-        return val is not None and val > 0.0
-    
-    # Cek dari losses
-    has_l1 = is_valid_loss(loss_1)
-    has_l2 = is_valid_loss(loss_2)
-    has_l3 = is_valid_loss(loss_3)
-    
-    # Cek dari total_l sebagai fallback
-    has_tl1 = is_valid_total(total_l_1)
-    has_tl2 = is_valid_total(total_l_2)
-    has_tl3 = is_valid_total(total_l_3)
-    
-    # Fiber Cut di KM3: loss_3 = None/0, tapi total_l_3 > 0
-    if (not has_l3) and has_tl3:
-        return 3  # Fiber cut di KM3
-    
-    # Fiber Cut di KM2: loss_2 = None/0, loss_3 = None/0
-    if (not has_l2) and (not has_l3) and has_tl2:
-        return 2  # Fiber cut di KM2
-    
-    # Normal: semua loss ada
-    if has_l1 and has_l2 and has_l3:
-        return 3
-    
-    # Default
-    return 3
-
-def normalize_fiber_cut_fields(payload: dict) -> dict:
-    """
-    Normalisasi field input manual yang null/kosong karena fiber cut.
-    """
-    def g(key, default=0.0):
-        val = payload.get(key)
-        if val is None or val == '':
-            return default
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return default
-
-    l1 = g('loss_1', 0.0)
-    l2 = g('loss_2', 0.0)
-    l3 = g('loss_3', 0.0)
-    
-    tl1 = g('total_l_1', 0.0)
-    tl2 = g('total_l_2', 0.0)
-    tl3 = g('total_l_3', 0.0)
-
-    # 🔥 Deteksi titik cut dengan data loss dan total_l
-    cut_point = detect_fiber_cut_point(l1, l2, l3, tl1, tl2, tl3)
-    logger.info(f"[FIBER CUT] Detected cut_point = km{cut_point} (l1={l1}, l2={l2}, l3={l3})")
-
-    # Normalisasi distance
-    d1 = g('distance_1') or 1.0
-    d2 = g('distance_2') or (d1 + 1.0)
-    d3 = g('distance_3') or (d2 + 1.0)
-    d4 = g('distance_4') or (d3 + 1.0)
-
-    # Normalisasi total_l, avg_l, return
-    tl1 = g('total_l_1', 0.0)
-    tl2 = g('total_l_2', 0.0)
-    tl3 = g('total_l_3', 0.0)
-    tl4 = g('total_l_4', 0.0)
-
-    al1 = g('avg_l_1', 0.0)
-    al2 = g('avg_l_2', 0.0)
-    al3 = g('avg_l_3', 0.0)
-    al4 = g('avg_l_4', 0.0)
-
-    r1 = g('return_1', -45.0)
-    r2 = g('return_2', -45.0)
-    r3 = g('return_3', -45.0)
-    r4 = g('return_4', -45.0)
-
-    avg_total = g('avg_total', 0.0)
-    prx = g('prx', -15.6)
-
-    # Jika avg_total kosong, hitung dari data yang ada
-    if avg_total == 0.0:
-        if tl4 > 0 and d4 > 0:
-            avg_total = tl4 / d4
-        elif tl3 > 0 and d3 > 0:
-            avg_total = tl3 / d3
-        elif tl2 > 0 and d2 > 0:
-            avg_total = tl2 / d2
-        elif tl1 > 0 and d1 > 0:
-            avg_total = tl1 / d1
-
-    return {
-        'prx': prx,
-        'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
-        'l1': l1, 'l2': l2, 'l3': l3,
-        'tl1': tl1, 'tl2': tl2, 'tl3': tl3, 'tl4': tl4,
-        'al1': al1, 'al2': al2, 'al3': al3, 'al4': al4,
-        'avg_total': avg_total,
-        'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4,
-        'cut_point': cut_point,
-        'raw_l1': payload.get('loss_1'), 'raw_l2': payload.get('loss_2'),
-        'raw_l3': payload.get('loss_3'),
-    }
-
-
 def create_column_mapping(df_columns: list) -> dict:
     col_lower = {c.lower().strip(): c for c in df_columns}
     
@@ -377,6 +262,120 @@ def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) 
     result['Avg-Total'] = avg_total
     
     # 🔥 HAPUS round() global — nilai OCR disimpan apa adanya, pembulatan hanya di display frontend
+    return result
+
+# ═══════════════════════════════════════════════════════════════════
+# AUTO-DETECT FIBER CUT - TANPA MODE USER
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_measurement_mode_from_rows(rows: list) -> tuple:
+    """
+    Deteksi mode dari hasil parsing OCR (rows).
+    Returns: (mode, cut_km)
+    mode: 'normal', 'fiber_cut_km2', 'fiber_cut_km3'
+    """
+    if not rows or len(rows) < 2:
+        return 'normal', -1
+    
+    # Hitung jumlah baris valid (distance > 0.5 dan total_l > 0)
+    valid_rows = []
+    for r in rows:
+        if r.get('distance', 0) > 0.5 and r.get('total_l', 0) > 0:
+            valid_rows.append(r)
+    
+    valid_count = len(valid_rows)
+    
+    # 🔥 Fiber Cut KM 2: hanya 2 baris valid
+    if valid_count == 2:
+        if len(valid_rows) >= 2:
+            loss_2 = valid_rows[1].get('loss')
+            total_l_2 = valid_rows[1].get('total_l', 0)
+            if (loss_2 is None or loss_2 == 0) and total_l_2 > 0:
+                return 'fiber_cut_km2', 2
+    
+    # 🔥 Fiber Cut KM 3: hanya 3 baris valid
+    if valid_count == 3:
+        if len(valid_rows) >= 3:
+            loss_3 = valid_rows[2].get('loss')
+            total_l_3 = valid_rows[2].get('total_l', 0)
+            if (loss_3 is None or loss_3 == 0) and total_l_3 > 0:
+                return 'fiber_cut_km3', 3
+    
+    # 🔥 Normal: 4 baris valid
+    if valid_count >= 4:
+        return 'normal', -1
+    
+    return 'normal', -1
+
+
+def detect_manual_mode(payload: dict) -> tuple:
+    """
+    Deteksi mode dari input manual.
+    Returns: (mode, cut_km)
+    """
+    def get_val(key, default=None):
+        val = payload.get(key)
+        if val is None or val == '':
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+    
+    l1 = get_val('loss_1')
+    l2 = get_val('loss_2')
+    l3 = get_val('loss_3')
+    
+    tl2 = get_val('total_l_2', 0)
+    tl3 = get_val('total_l_3', 0)
+    
+    def has_loss(loss):
+        return loss is not None and loss > 0
+    
+    has_l1 = has_loss(l1)
+    has_l2 = has_loss(l2)
+    has_l3 = has_loss(l3)
+    
+    # 🔥 Fiber Cut KM 2: loss_2 = None/0, loss_3 = None/0, tapi total_l_2 > 0
+    if (not has_l2) and (not has_l3) and tl2 > 0:
+        return 'fiber_cut_km2', 2
+    
+    # 🔥 Fiber Cut KM 3: loss_3 = None/0, tapi total_l_3 > 0
+    if (not has_l3) and tl3 > 0:
+        return 'fiber_cut_km3', 3
+    
+    # 🔥 Normal: semua loss ada
+    if has_l1 and has_l2 and has_l3:
+        return 'normal', -1
+    
+    # Fallback: cek distance
+    d1 = get_val('distance_1', 0)
+    d2 = get_val('distance_2', 0)
+    d3 = get_val('distance_3', 0)
+    
+    if d1 > 0 and d2 > 0 and d3 > 0 and not has_l3:
+        return 'fiber_cut_km3', 3
+    
+    return 'normal', -1
+
+
+def normalize_for_model(mode: str, cut_km: int, parsed_data: dict) -> dict:
+    """
+    Normalisasi data ke format training model.
+    """
+    result = parsed_data.copy() if parsed_data else {}
+    
+    if mode == 'fiber_cut_km2':
+        result['loss_2'] = float('inf')
+        result['loss_3'] = float('inf')
+        result['loss_4'] = float('inf')
+        logger.info(f"[NORMALIZE] Fiber Cut KM2: loss_2, loss_3, loss_4 → inf")
+        
+    elif mode == 'fiber_cut_km3':
+        result['loss_3'] = float('inf')
+        result['loss_4'] = float('inf')
+        logger.info(f"[NORMALIZE] Fiber Cut KM3: loss_3, loss_4 → inf")
+    
     return result
 
 # ═══════════════════════════════════════════════════════════════════
@@ -762,31 +761,30 @@ def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
 
 def is_valid_parsed_rows(rows: list) -> bool:
     """
-    Cek apakah hasil parsing valid.
-    - Normal: minimal 3 dari 4 km valid
-    - Fiber Cut: minimal 2 km valid (fiber cut di km2 atau km3)
-    KM4 tidak dihitung untuk loss karena End of Fiber.
+    Cek apakah hasil parsing valid (minimal 3 dari 4 baris punya data)
+    KM4 tidak dihitung untuk loss karena End of Fiber
     """
-    if len(rows) < 2:
+    if len(rows) < 4:
         return False
     
     valid_count = 0
     for i, row in enumerate(rows):
+        # 🔥 PERBAIKI: handle None values dengan aman
         loss_val = row.get('loss')
         total_val = row.get('total_l', 0)
-        dist_val = row.get('distance', 0)
         
-        if i == 3:  # KM4 (index 3): cek total_l atau distance saja
-            if total_val > 0 or dist_val > 0.5:
+        # KM4: cek total_l saja (loss selalu None)
+        if i == 3:  # KM4 (index 3)
+            if total_val > 0:
                 valid_count += 1
         else:
-            # KM1-KM3: cek loss atau total_l atau distance
-            if (loss_val is not None and loss_val > 0) or total_val > 0 or dist_val > 0.5:
+            # KM1-KM3: cek loss atau total_l
+            # 🔥 PERBAIKIAN: loss bisa None, cek dengan aman
+            if (loss_val is not None and loss_val > 0) or total_val > 0:
                 valid_count += 1
     
-    # Fiber cut case: cukup 2 dari 4 valid (cut di km2)
-    # Normal case: 3+ valid
-    return valid_count >= 2
+    # Minimal 3 dari 4 valid (termasuk KM4 yang hanya perlu total_l)
+    return valid_count >= 3
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -855,171 +853,159 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
     return [
         {'distance': 1.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
         {'distance': 2.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
-        {'distance': 3.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 3.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
         {'distance': 4.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0}
     ], 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════
-# OTDR PARSER (DIPERBAIKI - TANPA ROUND + FIBER CUT DETECTION KM 2 & 3)
+# OTDR PARSER (DIPERBAIKI - TANPA ROUND)
 # ═══════════════════════════════════════════════════════════════════
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR - SUDAH DIUJI DENGAN DATA FOTO
+    Parse teks OCR OTDR menggunakan pendekatan line-based.
+    Setiap baris adalah satu event/row tabel.
+    TIDAK ADA PERHITUNGAN - semua nilai diambil langsung dari OCR.
     """
     text = raw_text.replace(",", ".")
 
     # =====================================================
-    # 1. AVG TOTAL
+    # 1. AVG TOTAL - Ambil dari header (SATU-SATUNYA PERHITUNGAN)
     # =====================================================
     avg_total = 0.0
     m = re.search(r'Avg\.?\s*L?\s*[:=]?\s*(\d+\.\d{2,})\s*dB/km', text, re.IGNORECASE)
     if m:
-        avg_total = float(m.group(1))
+        avg_total = float(m.group(1))  # 🔥 HAPUS ROUND
     else:
+        # Fallback: cari pola "1.23 dB/km" di header
         m2 = re.search(r'(\d+\.\d{2,})\s*dB/km', text)
         if m2:
-            avg_total = float(m2.group(1))
+            avg_total = float(m2.group(1))  # 🔥 HAPUS ROUND
 
     # =====================================================
-    # 2. TOTAL EVENTS
-    # =====================================================
-    total_events = 4
-    total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
-    if total_events_match:
-        total_events = int(total_events_match.group(1))
-
-    # =====================================================
-    # 3. EKSTRAK BARIS YANG MENGANDUNG DISTANCE
+    # 2. CLEAN LINES
     # =====================================================
     lines = []
     for line in text.splitlines():
         line = re.sub(r'\s+', ' ', line).strip()
-        if line and re.search(r'\b[1-4]\.\d{3,5}\b', line):
+        if line:
             lines.append(line)
 
     # =====================================================
-    # 4. PARSE SETIAP BARIS
+    # 3. DETECT EVENT LINES (harus ada distance 1.xxx - 4.xxx)
+    # =====================================================
+    event_lines = []
+    for line in lines:
+        if re.search(r'\b[1-4]\.\d{3,5}\b', line):
+            event_lines.append(line)
+
+    # =====================================================
+    # 4. MERGE OCR BROKEN ROW (jika baris terpotong)
+    # =====================================================
+    merged = []
+    i = 0
+    while i < len(event_lines):
+        row = event_lines[i]
+        nums = re.findall(r'\d+\.\d+', row)
+        # Normal event minimal 5 angka, kalau kurang gabung
+        while len(nums) < 5 and i + 1 < len(event_lines):
+            i += 1
+            row += " " + event_lines[i]
+            nums = re.findall(r'\d+\.\d+', row)
+        merged.append(row)
+        i += 1
+
+    # =====================================================
+    # 5. PARSE EACH ROW (LANGSUNG AMBIL DARI OCR, TANPA PERHITUNGAN)
     # =====================================================
     rows = []
-    
-    for line in lines:
-        # Ekstrak semua angka
-        nums = re.findall(r'-?\d+\.?\d*', line)
-        nums = [float(x) for x in nums if abs(float(x)) < 100]
-        
+    for idx, row in enumerate(merged):
+        # Ambil semua angka dari baris
+        nums = [
+            float(x) for x in re.findall(r'-?\d+\.?\d*', row)
+            if abs(float(x)) < 100  # skip nilai aneh
+        ]
+
         if not nums:
             continue
-        
-        # 🔥 Cari distance: nilai 1.xxx, 2.xxx, 3.xxx, 4.xxx
-        # Skip nomor event seperti 31, 32, 33 (angka tanpa desimal)
+
+        # Cari indeks distance (nilai 1.xxx - 4.xxx)
         distance_idx = None
         for j, val in enumerate(nums):
-            # Distance harus 1.0 - 4.5 dan memiliki desimal (bukan 31, 32)
-            if 0.8 <= val <= 4.5 and '.' in str(val):
+            if 0.8 <= val <= 4.5 and val not in [4.0, 4.1, 4.2, 4.3, 4.4]:
                 distance_idx = j
                 break
-        
+
         if distance_idx is None:
             continue
-        
-        values = nums[distance_idx:]
-        
-        # 🔥 HAPUS: jika ada angka negatif aneh, skip
-        if len(values) > 0 and values[0] < 0:
+
+        nums = nums[distance_idx:]
+
+        # =====================================
+        # NORMAL ROW (6 angka)
+        # =====================================
+        if len(nums) >= 6:
+            distance = nums[0]
+            section = nums[1]
+            loss = nums[2] if nums[2] is not None else 0.0
+            total_l = nums[3] if nums[3] is not None else 0.0
+            avg_l = nums[4] if nums[4] is not None else 0.0
+            return_val = nums[5] if nums[5] is not None else 0.0
+
+        # =====================================
+        # LAST ROW / BROKEN ROW (5 angka)
+        # =====================================
+        elif len(nums) == 5:
+            distance = nums[0]
+            section = nums[1]
+            loss = 0.0
+            total_l = nums[2] if nums[2] is not None else 0.0
+            avg_l = nums[3] if nums[3] is not None else 0.0
+            return_val = nums[4] if nums[4] is not None else 0.0
+
+        else:
             continue
-        
-        # Ambil nilai sesuai urutan
-        distance = values[0] if len(values) > 0 else 0.0
-        section = values[1] if len(values) > 1 else 0.0
-        loss = values[2] if len(values) > 2 else 0.0
-        total_l = values[3] if len(values) > 3 else 0.0
-        avg_l = values[4] if len(values) > 4 else 0.0
-        return_val = abs(values[5]) if len(values) > 5 else 0.0
-        
-        # 🔥 CEK "---" di baris (loss tidak terbaca)
-        has_missing_loss = re.search(r'---|—|–', line)
-        if has_missing_loss:
-            loss = None
-            logger.info(f"  Detected '---' → loss set to None")
-        
+
+        # 🔥 TIDAK ADA ROUND - nilai langsung dari OCR
         rows.append({
-            "distance": distance,
-            "section": section,
-            "loss": loss,
-            "total_l": total_l,
-            "avg_l": avg_l,
-            "return": -return_val if return_val > 0 else -45.0
+            "distance": distance,  # 🔥 HAPUS ROUND
+            "section": section,  # 🔥 HAPUS ROUND
+            "loss": loss,  # 🔥 HAPUS ROUND
+            "total_l": total_l,  # 🔥 HAPUS ROUND
+            "avg_l": avg_l,  # 🔥 HAPUS ROUND
+            "return": -abs(return_val) if return_val != 0 else -45.0  # 🔥 HAPUS ROUND
         })
 
     # =====================================================
-    # 5. SORT BY DISTANCE
+    # 6. SORT BY DISTANCE
     # =====================================================
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 6. FIBER CUT DETECTION
+    # 7. FIX: KM4 loss harus None (End of Fiber)
     # =====================================================
-    is_fiber_cut = False
-    cut_km = -1
-    
-    if total_events == 2:
-        is_fiber_cut = True
-        cut_km = 2
-        logger.info(f"🔴 FIBER CUT KM 2 detected (Total Events:2)")
-    elif total_events == 3:
-        is_fiber_cut = True
-        cut_km = 3
-        logger.info(f"🔴 FIBER CUT KM 3 detected (Total Events:3)")
-    
-    # Fallback: cek dari rows
-    if not is_fiber_cut and len(rows) >= 2:
-        for i, row in enumerate(rows):
-            km = i + 1
-            if km >= 2 and (row['loss'] is None or row['loss'] == 0.0) and row['total_l'] > 0:
-                is_fiber_cut = True
-                cut_km = km
-                logger.info(f"🔴 FIBER CUT detected at KM {cut_km} (loss=None/0, total_l>0)")
-                break
-
-    # =====================================================
-    # 7. NORMALISASI
-    # =====================================================
-    if is_fiber_cut and cut_km == 2:
-        if len(rows) >= 2:
-            rows[1]['loss'] = None
-            logger.info(f"  KM2 loss set to None")
-        
-        while len(rows) > 2:
-            rows.pop()
-        
-        last_dist = rows[-1]['distance'] if rows else 2.0
-        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
-        last_dist = rows[-1]['distance'] if rows else 3.0
-        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
-
-    elif is_fiber_cut and cut_km == 3:
-        if len(rows) >= 3:
-            rows[2]['loss'] = None
-            logger.info(f"  KM3 loss set to None")
-        
-        if len(rows) < 4:
-            last_dist = rows[-1]['distance'] if rows else 3.0
-            rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
-
-    # Normal: KM4 loss = None (End of Fiber)
-    if len(rows) >= 4 and not is_fiber_cut:
+    if len(rows) >= 4:
+        # KM4 loss = None
         rows[3]["loss"] = None
+    elif len(rows) == 3:
+        # Tambah KM4 default
+        rows.append({
+            "distance": 4.0,
+            "section": 0.0,
+            "loss": None,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return": -45.0
+        })
 
     # =====================================================
-    # 8. PASTIKAN 4 ROWS
+    # 8. Normalisasi: pastikan 4 baris
     # =====================================================
     while len(rows) < 4:
         km = len(rows) + 1
-        last_dist = rows[-1]["distance"] if rows else float(km - 1)
         rows.append({
-            "distance": last_dist + 1.0,
+            "distance": float(km),
             "section": 0.0,
             "loss": None if km == 4 else 0.0,
             "total_l": 0.0,
@@ -1039,7 +1025,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             f"avg_l={r['avg_l']}, "
             f"return={r['return']}"
         )
-    logger.info(f"AVG TOTAL = {avg_total}, FIBER_CUT = {is_fiber_cut}, CUT_KM = {cut_km}")
+    logger.info(f"AVG TOTAL = {avg_total}")
 
     return rows, avg_total
 
@@ -1057,7 +1043,7 @@ def extract_prx(text: str) -> float:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# OCR PARSER ONLY - TANPA KLASIFIKASI ML
+# OCR PARSER ONLY - TANPA KLASIFIKASI ML (DIPERBAIKI)
 # ═══════════════════════════════════════════════════════════════════
 
 @app.post("/api/parse-ocr")
@@ -1101,6 +1087,7 @@ async def parse_ocr_only(
     try:
         results = {}
         
+        # 🔥 TIMEOUT TESSERACT
         try:
             results['tesseract'] = await asyncio.wait_for(
                 asyncio.to_thread(tesseract_extract, content), timeout=60.0)
@@ -1108,6 +1095,7 @@ async def parse_ocr_only(
             logger.warning("Tesseract timed out")
             results['tesseract'] = ""
 
+        # 🔥 TIMEOUT OCR.SPACE - dinaikkan
         try:
             results['ocr.space'] = await asyncio.wait_for(
                 asyncio.to_thread(ocr_space_extract, content), timeout=120.0)
@@ -1129,6 +1117,7 @@ async def parse_ocr_only(
     except Exception as e:
         logger.error(f"OCR error: {e}")
     
+    # 🔥 RETURN DENGAN STRUKTUR YANG KONSISTEN
     if not raw_text or len(raw_text.strip()) < 20:
         return {
             "success": False,
@@ -1156,6 +1145,25 @@ async def parse_ocr_only(
     
     rows, avg_total = parse_otdr_hybrid(raw_text)
     
+    # 🔥 AUTO-DETECT FIBER CUT
+    mode, cut_km = detect_measurement_mode_from_rows(rows)
+    logger.info(f"[AUTO-DETECT] OCR mode: {mode}, cut_km: {cut_km}")
+    
+    # 🔥 Jika Fiber Cut, set loss di rows sesuai mode
+    if mode == 'fiber_cut_km2':
+        if len(rows) >= 2:
+            rows[1]['loss'] = None  # KM2 loss = None
+        if len(rows) >= 3:
+            rows[2]['loss'] = None  # KM3 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None  # KM4 loss = None
+    elif mode == 'fiber_cut_km3':
+        if len(rows) >= 3:
+            rows[2]['loss'] = None  # KM3 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None  # KM4 loss = None
+    
+    # 🔥 PASTIKAN KM4 loss = None (End of Fiber)
     if len(rows) >= 4:
         rows[3]['loss'] = None
     
@@ -1166,8 +1174,10 @@ async def parse_ocr_only(
     for i, row in enumerate(rows):
         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
     
+    # 🔥 VALIDASI DENGAN AMAN
     valid = [r for r in rows if r['distance'] > 0.5]
-    if len(valid) < 1:
+    if len(valid) < 2:
+        # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
         while len(rows) < 4:
             km = len(rows) + 1
             rows.append({
@@ -1201,6 +1211,7 @@ async def parse_ocr_only(
             }
         }
     
+    # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
     while len(rows) < 4:
         km = len(rows) + 1
         rows.append({
@@ -1220,6 +1231,8 @@ async def parse_ocr_only(
         "message": "OCR berhasil diekstrak. Silakan periksa dan edit data sebelum klasifikasi.",
         "raw_text": raw_text[:500],
         "ocr_method": ocr_method,
+        "detected_mode": mode,  
+        "cut_km": cut_km, 
         "extracted": {
             "distances": [rows[i]['distance'] for i in range(4)],
             "losses": [rows[i]['loss'] for i in range(4)],
@@ -1359,6 +1372,189 @@ async def reject_user(
     await db.delete(user)
     await db.commit()
     return {"message": f"User {user.email} berhasil dihapus"}
+
+# ═══════════════════════════════════════════════════════════════════
+# DETECTION OCR - MAIN ENDPOINT
+# ═══════════════════════════════════════════════════════════════════
+
+# @app.post("/api/detect")
+# async def detect_ocr(
+#     file: UploadFile = File(...),
+#     prx_manual: float = Form(None),
+#     db: AsyncSession = Depends(get_db),
+#     current_user: User = Depends(get_optional_user),
+# ):
+#     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
+#     if file.content_type not in allowed:
+#         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
+    
+#     content = await file.read()
+#     raw_text = ""
+#     logger.info(f"📝 RAW TEXT FULL:\n{raw_text}")
+#     ocr_method = "none"
+    
+#     logger.info("=" * 70)
+#     logger.info("🔄 Starting OCR process...")
+    
+#     try:
+#         results = {}
+        
+#         try:
+#             results['tesseract'] = await asyncio.wait_for(
+#                 asyncio.to_thread(tesseract_extract, content), timeout=25.0)
+#         except asyncio.TimeoutError:
+#             logger.warning("Tesseract timed out")
+#             results['tesseract'] = ""
+
+#         try:
+#             results['ocr.space'] = await asyncio.wait_for(
+#                 asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
+#         except asyncio.TimeoutError:
+#             logger.warning("OCR.space timed out")
+#             results['ocr.space'] = ""
+
+#         best_score = 0
+#         for method, text in results.items():
+#             if text:
+#                 score = len(re.findall(r'\d+\.\d{3,}', text))
+#                 if score > best_score:
+#                     best_score = score
+#                     raw_text = text
+#                     ocr_method = method
+
+#         logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
+
+#     except Exception as e:
+#         logger.error(f"OCR error: {e}")
+    
+#     if not raw_text or len(raw_text.strip()) < 20:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat."
+#         )
+    
+#     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
+    
+#     rows, avg_total = parse_otdr_table_simple(raw_text)
+#     avg_total = round(avg_total, 2)
+    
+#     prx_from_ocr = extract_prx(raw_text)
+#     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
+    
+#     logger.info(f"📊 Parsed rows: {len(rows)}")
+#     for i, row in enumerate(rows):
+#         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
+    
+#     valid = [r for r in rows if r['distance'] > 0.5]
+#     if len(valid) < 2:
+#         raise HTTPException(
+#             status_code=400,
+#             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
+#         )
+    
+#     logger.info("=" * 50)
+#     logger.info("Starting ML Prediction...")
+    
+#     otdr_values = {
+#         'Prx (dBm)': final_prx,
+#         'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
+#         'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
+#         'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
+#         'Total-L 1': rows[0]['total_l'], 'Total-L 2': rows[1]['total_l'],
+#         'Total-L 3': rows[2]['total_l'], 'Total-L 4': rows[3]['total_l'],
+#         'Avg-L 1': rows[0]['avg_l'], 'Avg-L 2': rows[1]['avg_l'],
+#         'Avg-L 3': rows[2]['avg_l'], 'Avg-L 4': rows[3]['avg_l'],
+#         'Avg-Total': avg_total,
+#         'Return 1': rows[0]['return'], 'Return 2': rows[1]['return'],
+#         'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
+#     }
+    
+#     try:
+#         pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
+#         logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')}")
+#     except Exception as e:
+#         logger.error(f"❌ ML prediction FAILED: {e}")
+#         pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+    
+#     logger.info("=" * 50)
+#     logger.info("💾 Saving to Database...")
+#     user_id = current_user.id if current_user else 1
+    
+#     try:
+#         record = OtdrResult(
+#             user_id=user_id,
+#             timestamp=datetime.now(),
+#             prx=final_prx,
+#             loss_1=rows[0]['loss'], loss_2=rows[1]['loss'],
+#             loss_3=rows[2]['loss'], loss_4=None,
+#             return_1=rows[0]['return'], return_2=rows[1]['return'],
+#             return_3=rows[2]['return'], return_4=rows[3]['return'],
+#             distance_1=rows[0]['distance'], distance_2=rows[1]['distance'],
+#             distance_3=rows[2]['distance'], distance_4=rows[3]['distance'],
+#             total_l_1=rows[0]['total_l'], total_l_2=rows[1]['total_l'],
+#             total_l_3=rows[2]['total_l'], total_l_4=rows[3]['total_l'],
+#             avg_l_1=rows[0]['avg_l'], avg_l_2=rows[1]['avg_l'],
+#             avg_l_3=rows[2]['avg_l'], avg_l_4=rows[3]['avg_l'],
+#             avg_total=avg_total,
+#             klasifikasi=pred.get("prediction"),
+#             status=pred.get("status"),
+#             confidence=pred.get("confidence"),
+#             source="ocr",
+#             raw_text=raw_text[:1000],
+#         )
+        
+#         db.add(record)
+#         await db.commit()
+#         await db.refresh(record)
+#         logger.info(f"✅ Saved to DB: ID={record.id}")
+    
+#         status_str = pred.get("status", "Normal")
+#         if status_str.lower() in ["warning", "critical"]:
+#             logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')}")
+#             try:
+#                 await asyncio.to_thread(
+#                     send_telegram_alert,
+#                     classification=pred.get("prediction"),
+#                     status=status_str,
+#                     loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
+#                     rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
+#                     prx=final_prx,
+#                     distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
+#                     timestamp=record.timestamp
+#                 )
+#                 record.telegram_alert_sent = True
+#                 await db.commit()
+#             except Exception as tg_err:
+#                 logger.error(f"[TELEGRAM] Error: {tg_err}")
+        
+
+#     except Exception as e:
+#         logger.error(f"❌ DATABASE ERROR: {e}")
+#         await db.rollback()
+#         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+#     logger.info("=" * 70)
+    
+#     return {
+#         "message": "Gambar berhasil diproses",
+#         "raw_text": raw_text[:500],
+#         "extracted": {
+#             "distances": [rows[i]['distance'] for i in range(4)],
+#             "losses": [rows[i]['loss'] for i in range(4)],
+#             "total_ls": [rows[i]['total_l'] for i in range(4)],
+#             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
+#             "returns": [rows[i]['return'] for i in range(4)],
+#             "avg_total": round(avg_total, 2),
+#         },
+#         "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
+#         "prx": final_prx,
+#         "avg_total": round(avg_total, 2),
+#         "prediction": pred.get("prediction"),
+#         "confidence": pred.get("confidence"),
+#         "status": pred.get("status"),
+#         "id": record.id,
+#         "ocr_method": ocr_method,
+#     }
 
 # ═══════════════════════════════════════════════════════════════════
 # DASHBOARD & HISTORY
@@ -1621,14 +1817,18 @@ async def sync_from_sheets(
                 except Exception:
                     return default
             
+            # 🔥 FUNGSI UNTUK AMBIL TIMESTAMP DARI KOLOM 'Time'
             def get_timestamp_from_row(row):
+                """Ambil timestamp dari kolom 'Time' di sheets"""
                 if 'Time' in row.index:
                     val = row.get('Time')
                     if pd.notna(val) and val != '':
                         try:
                             if isinstance(val, str):
+                                # Format: 2026-06-22 08:00:00
                                 if ' ' in val and '-' in val:
                                     return pd.to_datetime(val).to_pydatetime()
+                                # Format: 22/06/2026 08:00
                                 elif '/' in val:
                                     return pd.to_datetime(val, dayfirst=True).to_pydatetime()
                             return pd.to_datetime(val).to_pydatetime()
@@ -1637,12 +1837,15 @@ async def sync_from_sheets(
                             return None
                 return None
             
+            # 🔥 AMBIL TIMESTAMP DARI KOLOM 'Time'
             timestamp = get_timestamp_from_row(row)
             if timestamp is None:
+                # Fallback: pakai waktu sekarang + offset indeks (15 menit per row)
                 base_time = datetime.now()
                 timestamp = base_time + timedelta(minutes=idx * 15)
                 print(f"⚠️ ROW {idx}: Time tidak ditemukan, pakai fallback: {timestamp}")
             
+            # 🔥 AMBIL SEMUA NILAI
             prx = g('Prx (dBm)')
             d1, d2, d3, d4 = g('Distance 1'), g('Distance 2'), g('Distance 3'), g('Distance 4')
             l1, l2, l3 = g('Loss 1'), g('Loss 2'), g('Loss 3')
@@ -1651,8 +1854,10 @@ async def sync_from_sheets(
             al1, al2, al3, al4 = g('Avg-L 1'), g('Avg-L 2'), g('Avg-L 3'), g('Avg-L 4')
             r1, r2, r3, r4 = g('Return 1'), g('Return 2'), g('Return 3'), g('Return 4')
             
+            # 🔥 AMBIL AVG-TOTAL: UTAMAKAN DARI KOLOM
             avg_total = g('Avg-Total', 0.0)
             
+            # 🔥 KALAU KOSONG, HITUNG MANUAL DARI Total-L4 / Distance4
             if avg_total == 0.0:
                 if tl4 > 0 and d4 > 0:
                     avg_total = tl4 / d4
@@ -1678,7 +1883,7 @@ async def sync_from_sheets(
             
             record = OtdrResult(
                 user_id=current_user.id,
-                timestamp=timestamp,
+                timestamp=timestamp,  # ✅ PAKAI TIMESTAMP DARI SHEETS
                 prx=prx,
                 temperature=g('Temperature (C)'),
                 wavelength=g('Wavelength'),
@@ -1723,43 +1928,111 @@ async def detect_manual(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
-    # ── FIBER CUT AWARE normalization ──────────────────────────────
-    norm = normalize_fiber_cut_fields(payload)
+    # ── DETEKSI MODE MANUAL ──
+    mode, cut_km = detect_manual_mode(payload)
+    logger.info(f"[AUTO-DETECT] Manual mode: {mode}, cut_km: {cut_km}")
 
-    d1, d2, d3, d4 = norm['d1'], norm['d2'], norm['d3'], norm['d4']
-    l1, l2, l3     = norm['l1'], norm['l2'], norm['l3']
-    tl1, tl2, tl3, tl4 = norm['tl1'], norm['tl2'], norm['tl3'], norm['tl4']
-    al1, al2, al3, al4 = norm['al1'], norm['al2'], norm['al3'], norm['al4']
-    avg_total       = norm['avg_total']
-    r1, r2, r3, r4  = norm['r1'], norm['r2'], norm['r3'], norm['r4']
-    prx             = norm['prx']
-    cut_point       = norm['cut_point']
-
-    l4 = None
-
-    def raw_to_db(raw_val):
-        if raw_val is None or raw_val == '':
+    def g(key, default=0.0):
+        try:
+            val = payload.get(key, default)
+            if val is None or val == "":
+                return default
+            return float(val)
+        except:
+            return default
+    
+    def get_loss(key):
+        val = payload.get(key)
+        if val is None or val == "":
             return None
         try:
-            return float(raw_val)
-        except (ValueError, TypeError):
+            return float(val)
+        except:
             return None
-
-    db_l1 = raw_to_db(norm['raw_l1'])
-    db_l2 = raw_to_db(norm['raw_l2'])
-    db_l3 = raw_to_db(norm['raw_l3'])
-
-    otdr_values = {
-        'Prx (dBm)': prx,
-        'Distance 1': d1, 'Distance 2': d2, 'Distance 3': d3, 'Distance 4': d4,
-        'Loss 1': l1, 'Loss 2': l2, 'Loss 3': l3,
-        'Total-L 1': tl1, 'Total-L 2': tl2, 'Total-L 3': tl3, 'Total-L 4': tl4,
-        'Avg-L 1': al1, 'Avg-L 2': al2, 'Avg-L 3': al3, 'Avg-L 4': al4,
-        'Avg-Total': avg_total,
-        'Return 1': r1, 'Return 2': r2, 'Return 3': r3, 'Return 4': r4,
+    
+    d1 = g('distance_1', 0.0)
+    d2 = g('distance_2', 0.0)
+    d3 = g('distance_3', 0.0)
+    d4 = g('distance_4', 0.0)
+    
+    l1 = get_loss('loss_1') or 0.0
+    l2 = get_loss('loss_2') or 0.0
+    l3 = get_loss('loss_3') or 0.0
+    l4 = None  # selalu None (End of Fiber)
+    
+    tl1 = g('total_l_1', 0.0)
+    tl2 = g('total_l_2', 0.0)
+    tl3 = g('total_l_3', 0.0)
+    tl4 = g('total_l_4', 0.0)
+    
+    al1 = g('avg_l_1', 0.0)
+    al2 = g('avg_l_2', 0.0)
+    al3 = g('avg_l_3', 0.0)
+    al4 = g('avg_l_4', 0.0)
+    
+    avg_total = g('avg_total', 0.0)
+    
+    r1 = g('return_1', 0.0)
+    r2 = g('return_2', 0.0)
+    r3 = g('return_3', 0.0)
+    r4 = g('return_4', 0.0)
+    
+    prx = g('prx', -15.6)
+    
+    # ── DATA UNTUK NORMALISASI ──
+    parsed_data = {
+        'loss_1': l1,
+        'loss_2': l2,
+        'loss_3': l3,
+        'loss_4': l4,
+        'total_l_1': tl1,
+        'total_l_2': tl2,
+        'total_l_3': tl3,
+        'total_l_4': tl4,
+        'avg_l_1': al1,
+        'avg_l_2': al2,
+        'avg_l_3': al3,
+        'avg_l_4': al4,
+        'avg_total': avg_total,
+        'return_1': r1,
+        'return_2': r2,
+        'return_3': r3,
+        'return_4': r4,
+        'distance_1': d1,
+        'distance_2': d2,
+        'distance_3': d3,
+        'distance_4': d4,
     }
     
-    logger.info(f"[MANUAL] cut_point=km{cut_point}, otdr_values (for ML): {otdr_values}")
+    # ── NORMALISASI KE FORMAT MODEL ──
+    normalized = normalize_for_model(mode, cut_km, parsed_data)
+    
+    # ── OTDR VALUES UNTUK ML ──
+    otdr_values = {
+        'Prx (dBm)': prx,
+        'Distance 1': normalized.get('distance_1', d1),
+        'Distance 2': normalized.get('distance_2', d2),
+        'Distance 3': normalized.get('distance_3', d3),
+        'Distance 4': normalized.get('distance_4', d4),
+        'Loss 1': normalized.get('loss_1', l1) or 0.0,
+        'Loss 2': normalized.get('loss_2', l2) or 0.0,
+        'Loss 3': normalized.get('loss_3', l3) or 0.0,
+        'Total-L 1': normalized.get('total_l_1', tl1),
+        'Total-L 2': normalized.get('total_l_2', tl2),
+        'Total-L 3': normalized.get('total_l_3', tl3),
+        'Total-L 4': normalized.get('total_l_4', tl4),
+        'Avg-L 1': normalized.get('avg_l_1', al1),
+        'Avg-L 2': normalized.get('avg_l_2', al2),
+        'Avg-L 3': normalized.get('avg_l_3', al3),
+        'Avg-L 4': normalized.get('avg_l_4', al4),
+        'Avg-Total': normalized.get('avg_total', avg_total),
+        'Return 1': normalized.get('return_1', r1),
+        'Return 2': normalized.get('return_2', r2),
+        'Return 3': normalized.get('return_3', r3),
+        'Return 4': normalized.get('return_4', r4),
+    }
+    
+    logger.info(f"[MANUAL] mode={mode}, cut_km={cut_km}")
     
     try:
         pred = ml.predict_from_otdr(otdr_values)
@@ -1776,7 +2049,7 @@ async def detect_manual(
             timestamp=datetime.utcnow(),
             prx=prx,
             distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
-            loss_1=db_l1, loss_2=db_l2, loss_3=db_l3, loss_4=None,
+            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=None,
             total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
             avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
             avg_total=avg_total,
@@ -1785,7 +2058,7 @@ async def detect_manual(
             status=pred.get("status"),
             confidence=pred.get("confidence"),
             source="manual",
-            raw_text=f"Manual Input Data (cut_point=km{cut_point})",
+            raw_text=f"Manual Input (detected: {mode}, cut_km: {cut_km})",
         )
         db.add(record)
         await db.commit()
@@ -1794,7 +2067,7 @@ async def detect_manual(
         status_str = pred.get("status", "Normal")
         if status_str.lower() in ["warning", "critical"]:
             try:
-                loss_for_alert = [l1, l2, l3, 0.0]
+                loss_for_alert = [l1 or 0.0, l2 or 0.0, l3 or 0.0, 0.0]
                 await asyncio.to_thread(
                     send_telegram_alert,
                     classification=pred.get("prediction"),
@@ -1819,7 +2092,7 @@ async def detect_manual(
         "message": "Data manual berhasil diproses",
         "extracted": {
             "distances": [d1, d2, d3, d4],
-            "losses": [db_l1, db_l2, db_l3, None],
+            "losses": [l1, l2, l3, None],
             "total_ls": [tl1, tl2, tl3, tl4],
             "returns": [r1, r2, r3, r4],
             "avg_ls": [al1, al2, al3, al4],
@@ -1831,7 +2104,8 @@ async def detect_manual(
         "confidence": pred.get("confidence"),
         "status": pred.get("status"),
         "id": record.id,
-        "cut_point": cut_point,
+        "detected_mode": mode,  # ← TAMBAHKAN
+        "cut_km": cut_km,       # ← TAMBAHKAN
     }
 
 # ============================================================
@@ -1895,6 +2169,7 @@ async def set_shared_slide(
         record_id = payload.get("record_id")
         shared_slide_index = index
 
+        # Kirim alert Telegram hanya jika belum pernah dikirim untuk record ini
         if record_id and record_id not in slide_alert_sent_ids:
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(OtdrResult).where(OtdrResult.id == record_id))
@@ -1924,7 +2199,7 @@ async def set_shared_slide(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================
-# TELEGRAM BOT COMMAND HANDLER
+# TELEGRAM BOT COMMAND HANDLER (CEK STATUS VIA TELEGRAM)
 # ============================================================
 
 async def handle_telegram_command(update: dict) -> str | None:
@@ -1942,12 +2217,19 @@ async def handle_telegram_command(update: dict) -> str | None:
             
         command = text.lower().split()[0] if text else ''
         
+        # /status - cek status terakhir
         if command == '/status':
             return await get_telegram_status()
+        
+        # /rekap - rekap hari ini
         elif command == '/rekap':
             return await get_telegram_rekap()
+        
+        # /help atau /start - bantuan
         elif command in ['/help', '/start']:
             return get_telegram_help()
+        
+        # Keyword natural: "status", "cek", "kondisi", "latest"
         elif any(kw in text.lower() for kw in ['status', 'cek', 'kondisi', 'bagaimana', 'latest', 'terakhir']):
             return await get_telegram_status()
         
@@ -1962,9 +2244,11 @@ async def get_telegram_status() -> str:
     global last_dashboard_slide_index, last_dashboard_slide_data
     
     try:
+        # 🔥 CEK APAKAH ADA DATA SLIDE
         if last_dashboard_slide_data is None:
             return "📡 Belum ada data slide. Buka Dashboard dulu ya!"
         
+        # 🔥 LANGSUNG PAKAI DATA DARI SLIDE
         record = last_dashboard_slide_data
         slide_info = f" (Dashboard Slide #{last_dashboard_slide_index + 1})"
         source_label = {
@@ -1973,6 +2257,7 @@ async def get_telegram_status() -> str:
             'sheets': '📊 Sheets'
         }.get(record.source, '📡 Unknown')
         
+        # Ambil rekap hari ini (tetap dari database)
         async with AsyncSessionLocal() as db:
             result_today = await db.execute(
                 select(OtdrResult)
@@ -1983,17 +2268,22 @@ async def get_telegram_status() -> str:
             today_total = len(today_records)
             today_faults = sum(1 for r in today_records if r.klasifikasi != "Normal")
             
+            # Status emoji
             status_emoji = "🟢" if record.status == "Normal" else "🟡" if record.status == "Warning" else "🔴"
             
+            # Loss values
             loss_values = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
             loss_str = " | ".join([f"{v:.2f} dB" if v else "---" for v in loss_values])
             
+            # Return loss
             return_values = [record.return_1, record.return_2, record.return_3, record.return_4]
             return_str = " | ".join([f"{v:.1f} dB" if v else "---" for v in return_values])
             
+            # Waktu
             local_time = record.timestamp + timedelta(hours=7) if record.timestamp else datetime.utcnow() + timedelta(hours=7)
             time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
             
+            # Status hari ini
             today_status = "🟢 Normal" if today_faults == 0 else "🟡 Ada gangguan" if today_faults < 3 else "🔴 Banyak gangguan"
             
             message = f"""
