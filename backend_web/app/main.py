@@ -974,7 +974,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 6. VALIDASI SWAP
+    # 6. VALIDASI: Perbaiki nilai yang salah
     # =====================================================
     for i, row in enumerate(rows):
         # 🔥 Jika loss > 5 dan total_l < 5 → swap
@@ -991,13 +991,18 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             row['return'] = -old_avg
             logger.info(f"  KM{i+1}: Swapped avg_l ↔ return")
     
-         # 🔥 TAMBAHAN: Jika total_l dan avg_l tertukar
-         # Ciri: total_l kecil (0.41) dan avg_l besar (45.27)
+        # 🔥 Jika total_l dan avg_l tertukar
         if row['total_l'] < 5.0 and row['avg_l'] > 10.0:
             old_total = row['total_l']
             row['total_l'] = row['avg_l']
             row['avg_l'] = old_total
             logger.info(f"  KM{i+1}: Swapped total_l ↔ avg_l")
+    
+        # 🔥 TAMBAHKAN: Pastikan semua nilai positif (untuk loss, total_l, avg_l)
+        if row['loss'] is not None:
+            row['loss'] = abs(row['loss'])
+        row['total_l'] = abs(row['total_l'])
+        row['avg_l'] = abs(row['avg_l'])
 
     # =====================================================
     # 7. FIBER CUT DETECTION

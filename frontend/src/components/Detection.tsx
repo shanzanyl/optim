@@ -85,7 +85,8 @@ const StatusBadge = ({ status }: { status: string | null }) => {
 
 const formatLossValue = (value: number | null | undefined) => {
   if (value === null || value === undefined || value === 0) return '---';
-  return value.toFixed(2);
+  // 🔥 Ambil nilai absolut untuk tampilan
+  return Math.abs(value).toFixed(2);
 };
 
 const formatReturnValue = (value: number | null | undefined) => {
@@ -164,55 +165,52 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 POPULATE FORM DARI OCR
-const populateFormFromOcr = (ocrData: OcrParseResult) => {
-  const { extracted, prx, detected_mode } = ocrData;
-  
-  // 🔥 Deteksi apakah ini Fiber Cut
-  const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
-  const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
-  
-  // 🔥 Fungsi: null atau 0 → string kosong
-  const valToStr = (val: number | null | undefined): string => {
-    if (val === null || val === undefined || val === 0) return '';
-    return val.toString();
+  // 🔥 POPULATE FORM DARI OCR - DIPERBAIKI
+  const populateFormFromOcr = (ocrData: OcrParseResult) => {
+    const { extracted, prx, detected_mode } = ocrData;
+    
+    const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
+    const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
+    
+    // 🔥 Ambil nilai absolut (positif)
+    const valToStr = (val: number | null | undefined): string => {
+      if (val === null || val === undefined || val === 0) return '';
+      return Math.abs(val).toString();
+    };
+    
+    const lossVal = (val: number | null | undefined, km: number): string => {
+      if (isFiberCut && km >= cutKm) return '';
+      if (val === null || val === undefined || val === 0) return '';
+      return Math.abs(val).toString();
+    };
+    
+    setManualForm({
+      prx: prx !== undefined && prx !== null ? prx.toString() : '',
+      avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? Math.abs(extracted.avg_total).toString() : '',
+      distance_1: valToStr(extracted.distances[0]),
+      distance_2: valToStr(extracted.distances[1]),
+      distance_3: valToStr(extracted.distances[2]),
+      distance_4: valToStr(extracted.distances[3]),
+      loss_1: lossVal(extracted.losses[0], 1),
+      loss_2: lossVal(extracted.losses[1], 2),
+      loss_3: lossVal(extracted.losses[2], 3),
+      loss_4: '',
+      total_l_1: valToStr(extracted.total_ls[0]),
+      total_l_2: valToStr(extracted.total_ls[1]),
+      total_l_3: valToStr(extracted.total_ls[2]),
+      total_l_4: valToStr(extracted.total_ls[3]),
+      avg_l_1: valToStr(extracted.avg_ls[0]),
+      avg_l_2: valToStr(extracted.avg_ls[1]),
+      avg_l_3: valToStr(extracted.avg_ls[2]),
+      avg_l_4: valToStr(extracted.avg_ls[3]),
+      return_1: valToStr(extracted.returns[0]),
+      return_2: valToStr(extracted.returns[1]),
+      return_3: valToStr(extracted.returns[2]),
+      return_4: valToStr(extracted.returns[3]),
+    });
+    
+    setIsOcrParsed(true);
   };
-  
-  // 🔥 Fungsi khusus untuk loss: kosong jika Fiber Cut dan km >= cutKm
-  const lossVal = (val: number | null | undefined, km: number): string => {
-    if (isFiberCut && km >= cutKm) return '';
-    if (val === null || val === undefined || val === 0) return '';
-    return val.toString();
-  };
-  
-  setManualForm({
-    prx: prx !== undefined && prx !== null ? prx.toString() : '',
-    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
-    distance_1: valToStr(extracted.distances[0]),
-    distance_2: valToStr(extracted.distances[1]),
-    distance_3: valToStr(extracted.distances[2]),
-    distance_4: valToStr(extracted.distances[3]),
-    // 🔥 Loss: kosong jika Fiber Cut di titik cut
-    loss_1: lossVal(extracted.losses[0], 1),
-    loss_2: lossVal(extracted.losses[1], 2),
-    loss_3: lossVal(extracted.losses[2], 3),
-    loss_4: '', // selalu kosong - end of fiber
-    total_l_1: valToStr(extracted.total_ls[0]),
-    total_l_2: valToStr(extracted.total_ls[1]),
-    total_l_3: valToStr(extracted.total_ls[2]),
-    total_l_4: valToStr(extracted.total_ls[3]),
-    avg_l_1: valToStr(extracted.avg_ls[0]),
-    avg_l_2: valToStr(extracted.avg_ls[1]),
-    avg_l_3: valToStr(extracted.avg_ls[2]),
-    avg_l_4: valToStr(extracted.avg_ls[3]),
-    return_1: valToStr(extracted.returns[0]),
-    return_2: valToStr(extracted.returns[1]),
-    return_3: valToStr(extracted.returns[2]),
-    return_4: valToStr(extracted.returns[3]),
-  });
-  
-  setIsOcrParsed(true);
-};
 
   // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
   const handleOcrParse = async (file: File) => {
@@ -863,7 +861,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Loss Km {i + 1}</span>
-                        <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : l.toString()} dB</span>
+                        <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : Math.abs(l).toString()} dB</span>
                       </div>
                     ))}
                   </div>
@@ -872,7 +870,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Total-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB</span>
+                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : Math.abs(tl).toString()} dB</span>
                         </div>
                       ))}
                     </div>
@@ -882,7 +880,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Avg-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{al === 0 ? '---' : al.toString()} dB/km</span>
+                          <span className="text-white font-mono">{al === 0 ? '---' : Math.abs(al).toString()} dB/km</span>
                         </div>
                       ))}
                     </div>
@@ -890,7 +888,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toFixed(2)} dB/km</span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : Math.abs(lastResult.extracted.avg_total).toFixed(2)} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
