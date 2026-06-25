@@ -186,247 +186,6 @@ REQUIRED_FEATURES = [
     "Return 1", "Return 2", "Return 3", "Return 4"
 ]
 
-# ═══════════════════════════════════════════════════════════════════
-# FIBER CUT — HELPER FUNCTIONS
-# ═══════════════════════════════════════════════════════════════════
-
-def safe_float(val, default=None):
-    """
-    Konversi nilai ke float dengan aman.
-    Kembalikan default (None) jika nilai tidak bisa dikonversi,
-    atau jika nilai adalah simbol kosong / EOF (---, -, kosong).
-    TIDAK pernah mengubah None/kosong → 0. Itu tugas pemanggil.
-    """
-    if val is None:
-        return default
-    if isinstance(val, float) and (val != val):  # NaN check
-        return default
-    s = str(val).strip()
-    if s in ('', '-', '--', '---', 'n/a', 'N/A', 'nan', 'None'):
-        return default
-    try:
-        return float(s)
-    except (ValueError, TypeError):
-        return default
-
-
-def detect_otdr_mode(rows: list) -> str:
-    """
-    Auto-detect mode berdasarkan jumlah event valid dan pola loss.
-
-    Mode yang mungkin:
-      "normal"         — 4 event lengkap, loss km1-3 semua valid
-      "fiber_cut_km3"  — km3 loss None/missing, hanya 3 event valid (atau km3 terdeteksi cut)
-      "fiber_cut_km2"  — km2 loss None/missing, hanya 2 event valid (atau km2 terdeteksi cut)
-
-    Aturan prioritas (dari spesifik ke umum):
-    1. Hitung jumlah event/baris yang memiliki distance valid (> 0.5 km)
-    2. Periksa loss pada setiap km: None = missing = kandidat cut point
-    3. Kombinasikan dua sinyal di atas untuk keputusan final
-    """
-    def has_valid_loss(row):
-        v = row.get('loss')
-        return v is not None and v != 0.0 and not (isinstance(v, float) and v != v)
-
-    def has_valid_distance(row):
-        d = row.get('distance', 0)
-        return d is not None and d > 0.5
-
-    valid_rows = [r for r in rows if has_valid_distance(r)]
-    n_valid = len(valid_rows)
-
-    # Ambil loss per km (index 0-3 = km1-km4)
-    loss = [None, None, None, None]
-    for i, r in enumerate(rows[:4]):
-        loss[i] = r.get('loss')
-
-    l1_valid = loss[0] is not None and loss[0] != 0.0
-    l2_valid = loss[1] is not None and loss[1] != 0.0
-    l3_valid = loss[2] is not None and loss[2] != 0.0
-
-    # --- Deteksi berdasarkan jumlah event valid ---
-    if n_valid <= 2:
-        # Hanya 1-2 baris yang punya distance → fiber cut paling awal
-        # Preferensi: fiber_cut_km2 jika hanya km1 yang ada loss
-        if l1_valid and not l2_valid:
-            logger.info(f"[MODE] fiber_cut_km2 (n_valid={n_valid}, l2 missing)")
-            return "fiber_cut_km2"
-        logger.info(f"[MODE] fiber_cut_km2 (n_valid={n_valid} ≤ 2, default)")
-        return "fiber_cut_km2"
-
-    if n_valid == 3:
-        # Tiga baris → fiber cut km3
-        if l1_valid and l2_valid and not l3_valid:
-            logger.info(f"[MODE] fiber_cut_km3 (n_valid=3, l3 missing)")
-            return "fiber_cut_km3"
-        # Kadang parser mengisi loss=0 bukan None → cek juga
-        if l1_valid and l2_valid and (loss[2] == 0.0 or loss[2] is None):
-            logger.info(f"[MODE] fiber_cut_km3 (n_valid=3, l3=0/None)")
-            return "fiber_cut_km3"
-        logger.info(f"[MODE] fiber_cut_km3 (n_valid=3, default)")
-        return "fiber_cut_km3"
-
-    # n_valid == 4 → periksa loss pattern
-    if not l2_valid:
-        logger.info(f"[MODE] fiber_cut_km2 (n_valid=4 but l2 missing)")
-        return "fiber_cut_km2"
-
-    if not l3_valid:
-        logger.info(f"[MODE] fiber_cut_km3 (n_valid=4 but l3 missing)")
-        return "fiber_cut_km3"
-
-    logger.info(f"[MODE] normal (n_valid={n_valid}, all losses valid)")
-    return "normal"
-
-
-def detect_mode_from_payload(payload: dict) -> str:
-    """
-    Versi detect_otdr_mode untuk payload manual (dict dengan key loss_1, loss_2, dst).
-    Digunakan di endpoint detect-manual.
-    """
-    def is_present(key):
-        v = payload.get(key)
-        if v is None or v == '' or v == 'null':
-            return False
-        f = safe_float(v)
-        return f is not None and f != 0.0
-
-    l1 = is_present('loss_1')
-    l2 = is_present('loss_2')
-    l3 = is_present('loss_3')
-
-    # Hitung berapa km yang punya distance
-    dist_count = sum(
-        1 for k in ['distance_1', 'distance_2', 'distance_3', 'distance_4']
-        if safe_float(payload.get(k), 0.0) > 0.5
-    )
-
-    if dist_count <= 2 or (l1 and not l2):
-        logger.info(f"[MODE-PAYLOAD] fiber_cut_km2 (dist_count={dist_count}, l1={l1}, l2={l2})")
-        return "fiber_cut_km2"
-
-    if dist_count == 3 or (l1 and l2 and not l3):
-        logger.info(f"[MODE-PAYLOAD] fiber_cut_km3 (dist_count={dist_count}, l3={l3})")
-        return "fiber_cut_km3"
-
-    logger.info(f"[MODE-PAYLOAD] normal (dist_count={dist_count}, l1={l1}, l2={l2}, l3={l3})")
-    return "normal"
-
-
-def normalize_for_model(
-    l1, l2, l3,
-    tl1, tl2, tl3, tl4,
-    al1, al2, al3, al4,
-    r1, r2, r3, r4,
-    d1, d2, d3, d4,
-    avg_total, prx,
-    mode: str
-) -> dict:
-    """
-    Normalisasi nilai OTDR ke format yang konsisten dengan training model.
-
-    Model dilatih dengan:
-      - Normal      : loss_1-3 = nilai asli, semua field numerik
-      - Fiber cut   : loss pada titik cut dan setelahnya = float('inf')
-                      field lain setelah cut = 0.0 (aman untuk model)
-
-    Catatan penting tentang inf:
-      - JSON tidak support inf secara native → harus dikonversi
-        ke angka besar (misal 9999.0) sebelum serialisasi jika perlu
-      - Di sini kita kembalikan dict Python dengan inf asli
-      - Caller (endpoint) harus sanitasi sebelum JSON response
-    INF_VAL dipakai sebagai proxy inf untuk model (sesuai training).
-    """
-    INF_VAL = float('inf')
-
-    def safe(v, default=0.0):
-        f = safe_float(v)
-        return f if f is not None else default
-
-    d1_ = safe(d1, 1.0)
-    d2_ = safe(d2, d1_ + 1.0)
-    d3_ = safe(d3, d2_ + 1.0)
-    d4_ = safe(d4, d3_ + 1.0)
-
-    prx_ = safe(prx, -15.6)
-
-    if mode == "normal":
-        ml_l1 = safe(l1, 0.0)
-        ml_l2 = safe(l2, 0.0)
-        ml_l3 = safe(l3, 0.0)
-        ml_tl1 = safe(tl1, 0.0); ml_tl2 = safe(tl2, 0.0)
-        ml_tl3 = safe(tl3, 0.0); ml_tl4 = safe(tl4, 0.0)
-        ml_al1 = safe(al1, 0.0); ml_al2 = safe(al2, 0.0)
-        ml_al3 = safe(al3, 0.0); ml_al4 = safe(al4, 0.0)
-        ml_r1 = safe(r1, -45.0); ml_r2 = safe(r2, -45.0)
-        ml_r3 = safe(r3, -45.0); ml_r4 = safe(r4, -45.0)
-        ml_avg = safe(avg_total, 0.0)
-
-    elif mode == "fiber_cut_km2":
-        # km1 valid, km2 ke atas = inf / 0
-        ml_l1 = safe(l1, 0.0)
-        ml_l2 = INF_VAL   # titik cut
-        ml_l3 = INF_VAL   # setelah cut
-        ml_tl1 = safe(tl1, 0.0); ml_tl2 = safe(tl2, 0.0)
-        ml_tl3 = 0.0; ml_tl4 = 0.0
-        ml_al1 = safe(al1, 0.0); ml_al2 = safe(al2, 0.0)
-        ml_al3 = 0.0; ml_al4 = 0.0
-        ml_r1 = safe(r1, -45.0); ml_r2 = safe(r2, -45.0)
-        ml_r3 = -45.0; ml_r4 = -45.0
-        ml_avg = safe(avg_total) or (safe(tl2, 0.0) / d2_ if d2_ > 0 else 0.0)
-
-    elif mode == "fiber_cut_km3":
-        # km1-2 valid, km3 ke atas = inf / 0
-        ml_l1 = safe(l1, 0.0)
-        ml_l2 = safe(l2, 0.0)
-        ml_l3 = INF_VAL   # titik cut
-        ml_tl1 = safe(tl1, 0.0); ml_tl2 = safe(tl2, 0.0)
-        ml_tl3 = safe(tl3, 0.0); ml_tl4 = 0.0
-        ml_al1 = safe(al1, 0.0); ml_al2 = safe(al2, 0.0)
-        ml_al3 = safe(al3, 0.0); ml_al4 = 0.0
-        ml_r1 = safe(r1, -45.0); ml_r2 = safe(r2, -45.0)
-        ml_r3 = safe(r3, -45.0); ml_r4 = -45.0
-        ml_avg = safe(avg_total) or (safe(tl3, 0.0) / d3_ if d3_ > 0 else 0.0)
-
-    else:
-        # Fallback ke normal
-        return normalize_for_model(
-            l1, l2, l3, tl1, tl2, tl3, tl4,
-            al1, al2, al3, al4, r1, r2, r3, r4,
-            d1, d2, d3, d4, avg_total, prx, "normal"
-        )
-
-    return {
-        'Prx (dBm)': prx_,
-        'Distance 1': d1_, 'Distance 2': d2_, 'Distance 3': d3_, 'Distance 4': d4_,
-        'Loss 1': ml_l1, 'Loss 2': ml_l2, 'Loss 3': ml_l3,
-        # Loss 4 tidak dipakai model
-        'Total-L 1': ml_tl1, 'Total-L 2': ml_tl2,
-        'Total-L 3': ml_tl3, 'Total-L 4': ml_tl4,
-        'Avg-L 1': ml_al1, 'Avg-L 2': ml_al2,
-        'Avg-L 3': ml_al3, 'Avg-L 4': ml_al4,
-        'Avg-Total': ml_avg,
-        'Return 1': ml_r1, 'Return 2': ml_r2,
-        'Return 3': ml_r3, 'Return 4': ml_r4,
-    }
-
-
-def sanitize_for_json(otdr_values: dict) -> dict:
-    """
-    Ganti inf dengan nilai besar yang aman untuk JSON serialisasi.
-    Model sudah menerima nilai ini karena di training juga pakai nilai tinggi
-    sebagai proxy inf (tergantung scaler). Fallback-nya: 9999.0.
-    """
-    INF_PROXY = 9999.0
-    result = {}
-    for k, v in otdr_values.items():
-        if isinstance(v, float) and (v == float('inf') or v == float('-inf') or v != v):
-            result[k] = INF_PROXY
-        else:
-            result[k] = v
-    return result
-
-
 def create_column_mapping(df_columns: list) -> dict:
     col_lower = {c.lower().strip(): c for c in df_columns}
     
@@ -503,6 +262,122 @@ def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) 
     result['Avg-Total'] = avg_total
     
     # 🔥 HAPUS round() global — nilai OCR disimpan apa adanya, pembulatan hanya di display frontend
+    return result
+
+# ═══════════════════════════════════════════════════════════════════
+# AUTO-DETECT FIBER CUT - TANPA MODE USER
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_measurement_mode_from_rows(rows: list) -> tuple:
+    """
+    Deteksi mode dari hasil parsing OCR (rows).
+    Returns: (mode, cut_km)
+    mode: 'normal', 'fiber_cut_km2', 'fiber_cut_km3'
+    """
+    if not rows or len(rows) < 2:
+        return 'normal', -1
+    
+    # Hitung jumlah baris valid (distance > 0.5 dan total_l > 0)
+    valid_rows = []
+    for r in rows:
+        if r.get('distance', 0) > 0.5 and r.get('total_l', 0) > 0:
+            valid_rows.append(r)
+    
+    valid_count = len(valid_rows)
+    
+    # 🔥 Fiber Cut KM 2: hanya 2 baris valid
+    if valid_count == 2:
+        if len(valid_rows) >= 2:
+            loss_2 = valid_rows[1].get('loss')
+            total_l_2 = valid_rows[1].get('total_l', 0)
+            if (loss_2 is None or loss_2 == 0) and total_l_2 > 0:
+                return 'fiber_cut_km2', 2
+    
+    # 🔥 Fiber Cut KM 3: hanya 3 baris valid
+    if valid_count == 3:
+        if len(valid_rows) >= 3:
+            loss_3 = valid_rows[2].get('loss')
+            total_l_3 = valid_rows[2].get('total_l', 0)
+            if (loss_3 is None or loss_3 == 0) and total_l_3 > 0:
+                return 'fiber_cut_km3', 3
+    
+    # 🔥 Normal: 4 baris valid
+    if valid_count >= 4:
+        return 'normal', -1
+    
+    return 'normal', -1
+
+
+def detect_manual_mode(payload: dict) -> tuple:
+    """
+    Deteksi mode dari input manual.
+    Returns: (mode, cut_km)
+    """
+    def get_val(key, default=None):
+        val = payload.get(key)
+        if val is None or val == '':
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+    
+    l1 = get_val('loss_1')
+    l2 = get_val('loss_2')
+    l3 = get_val('loss_3')
+    
+    tl2 = get_val('total_l_2', 0)
+    tl3 = get_val('total_l_3', 0)
+    
+    def has_loss(loss):
+        return loss is not None and loss > 0
+    
+    has_l1 = has_loss(l1)
+    has_l2 = has_loss(l2)
+    has_l3 = has_loss(l3)
+    
+    # 🔥 Fiber Cut KM 2: loss_2 = None/0, loss_3 = None/0, tapi total_l_2 > 0
+    if (not has_l2) and (not has_l3) and tl2 > 0:
+        return 'fiber_cut_km2', 2
+    
+    # 🔥 Fiber Cut KM 3: loss_3 = None/0, tapi total_l_3 > 0
+    if (not has_l3) and tl3 > 0:
+        return 'fiber_cut_km3', 3
+    
+    # 🔥 Normal: semua loss ada
+    if has_l1 and has_l2 and has_l3:
+        return 'normal', -1
+    
+    # Fallback: cek distance
+    d1 = get_val('distance_1', 0)
+    d2 = get_val('distance_2', 0)
+    d3 = get_val('distance_3', 0)
+    
+    if d1 > 0 and d2 > 0 and d3 > 0 and not has_l3:
+        return 'fiber_cut_km3', 3
+    
+    return 'normal', -1
+
+
+def normalize_for_model(mode: str, cut_km: int, parsed_data: dict) -> dict:
+    """
+    Normalisasi data ke format training model.
+    Gunakan nilai besar finite (999.0) sebagai pengganti inf.
+    """
+    result = parsed_data.copy() if parsed_data else {}
+    
+    if mode == 'fiber_cut_km2':
+        # 🔥 Ganti inf dengan 999.0 (nilai besar tapi finite)
+        result['loss_2'] = 999.0
+        result['loss_3'] = 999.0
+        result['loss_4'] = 999.0
+        logger.info(f"[NORMALIZE] Fiber Cut KM2: loss_2, loss_3, loss_4 → 999.0")
+        
+    elif mode == 'fiber_cut_km3':
+        result['loss_3'] = 999.0
+        result['loss_4'] = 999.0
+        logger.info(f"[NORMALIZE] Fiber Cut KM3: loss_3, loss_4 → 999.0")
+    
     return result
 
 # ═══════════════════════════════════════════════════════════════════
@@ -888,32 +763,30 @@ def parse_otdr_manual(raw_text: str) -> Tuple[List[Dict], float]:
 
 def is_valid_parsed_rows(rows: list) -> bool:
     """
-    Cek apakah hasil parsing cukup valid untuk diteruskan ke model.
-    - Normal: minimal 3 km valid
-    - Fiber cut km2: minimal 2 km valid (km1-2 punya distance)
-    - Fiber cut km3: minimal 3 km valid
-    KM4 loss selalu None (EOF), tidak dihitung sebagai invalid.
+    Cek apakah hasil parsing valid (minimal 3 dari 4 baris punya data)
+    KM4 tidak dihitung untuk loss karena End of Fiber
     """
-    if len(rows) < 2:
+    if len(rows) < 4:
         return False
-
+    
     valid_count = 0
     for i, row in enumerate(rows):
-        loss_val  = row.get('loss')
-        total_val = row.get('total_l', 0) or 0
-        dist_val  = row.get('distance', 0) or 0
-
-        if i == 3:  # KM4: cukup punya distance atau total_l
-            if dist_val > 0.5 or total_val > 0:
+        # 🔥 PERBAIKI: handle None values dengan aman
+        loss_val = row.get('loss')
+        total_val = row.get('total_l', 0)
+        
+        # KM4: cek total_l saja (loss selalu None)
+        if i == 3:  # KM4 (index 3)
+            if total_val > 0:
                 valid_count += 1
         else:
-            # KM1-3: valid jika loss ada, atau total_l > 0, atau distance > 0
-            loss_ok = (loss_val is not None and loss_val > 0)
-            if loss_ok or total_val > 0 or dist_val > 0.5:
+            # KM1-KM3: cek loss atau total_l
+            # 🔥 PERBAIKIAN: loss bisa None, cek dengan aman
+            if (loss_val is not None and loss_val > 0) or total_val > 0:
                 valid_count += 1
-
-    # Fiber cut km2 hanya punya 2 baris valid → izinkan
-    return valid_count >= 2
+    
+    # Minimal 3 dari 4 valid (termasuk KM4 yang hanya perlu total_l)
+    return valid_count >= 3
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -922,68 +795,68 @@ def is_valid_parsed_rows(rows: list) -> bool:
 
 def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Hybrid parser: coba vertical → horizontal → manual.
-    Setelah berhasil, panggil detect_otdr_mode untuk menentukan skenario.
+    Hybrid parser dengan 3 strategi: vertical, horizontal, manual
     """
     logger.info("🔄 Starting hybrid parser...")
-
-    def _count_valid(rows):
-        return sum(
-            1 for i, r in enumerate(rows)
-            if (i == 3 and (r.get('total_l', 0) or 0) > 0)
-            or (i != 3 and ((r.get('loss') is not None and (r.get('loss') or 0) > 0)
-                            or (r.get('total_l', 0) or 0) > 0
-                            or (r.get('distance', 0) or 0) > 0.5))
-        )
-
-    # Strategy 1
+    
+    # Strategy 1: Vertical (format tabel normal)
     try:
         logger.info("📊 Trying vertical parser...")
         rows, avg = parse_otdr_table_simple(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
         if len(rows) >= 4:
             rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Vertical parser success: {_count_valid(rows)}/4 rows valid")
+            logger.info(f"✅ Vertical parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
-        logger.info(f"⚠️ Vertical parser: {_count_valid(rows)}/4 valid")
+        else:
+            logger.info(f"⚠️ Vertical parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
+        logger.warning(f"Vertical parser failed: {e}")
         import traceback
-        logger.warning(f"Vertical parser failed: {e}\n{traceback.format_exc()}")
-
-    # Strategy 2
+        logger.warning(traceback.format_exc())
+    
+    # Strategy 2: Horizontal (format transpose)
     try:
         logger.info("📊 Trying horizontal parser...")
         rows, avg = parse_otdr_horizontal(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
         if len(rows) >= 4:
             rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Horizontal parser success: {_count_valid(rows)}/4 rows valid")
+            logger.info(f"✅ Horizontal parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
-        logger.info(f"⚠️ Horizontal parser: {_count_valid(rows)}/4 valid")
+        else:
+            logger.info(f"⚠️ Horizontal parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
+        logger.warning(f"Horizontal parser failed: {e}")
         import traceback
-        logger.warning(f"Horizontal parser failed: {e}\n{traceback.format_exc()}")
-
-    # Strategy 3
+        logger.warning(traceback.format_exc())
+    
+    # Strategy 3: Manual extraction
     try:
         logger.info("📊 Trying manual parser...")
         rows, avg = parse_otdr_manual(raw_text)
+        # 🔥 PASTIKAN KM4 loss = None
         if len(rows) >= 4:
             rows[3]['loss'] = None
         if is_valid_parsed_rows(rows):
-            logger.info(f"✅ Manual parser success: {_count_valid(rows)}/4 rows valid")
+            logger.info(f"✅ Manual parser success: {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 rows valid")
             return rows, avg
-        logger.info(f"⚠️ Manual parser: {_count_valid(rows)}/4 valid")
+        else:
+            logger.info(f"⚠️ Manual parser only {sum(1 for r in rows if (r.get('loss') is not None and r.get('loss') > 0) or r.get('total_l', 0) > 0)}/4 valid")
     except Exception as e:
+        logger.warning(f"Manual parser failed: {e}")
         import traceback
-        logger.warning(f"Manual parser failed: {e}\n{traceback.format_exc()}")
-
+        logger.warning(traceback.format_exc())
+    
+    # Fallback: return empty rows dengan KM4 loss = None
     logger.warning("❌ All parsers failed, returning empty rows")
     return [
         {'distance': 1.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
         {'distance': 2.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
-        {'distance': 3.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
-        {'distance': 4.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 3.0, 'section': 0.0, 'loss': 0.0, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0},
+        {'distance': 4.0, 'section': 0.0, 'loss': None, 'total_l': 0.0, 'avg_l': 0.0, 'return': -45.0}
     ], 0.0
 
 
@@ -993,15 +866,7 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR menggunakan pendekatan line-based.
-    Setiap baris adalah satu event/row tabel.
-
-    Perbaikan vs versi lama:
-    - Distance: HANYA angka dengan >= 3 digit desimal (misal 1.00447).
-      Angka seperti 3.1 / 4.2 adalah nomor event, di-skip.
-    - Simbol --- / - / kosong pada kolom loss → None (bukan 0)
-    - Deteksi dan koreksi loss ↔ total_l tertukar
-    - Deteksi dan koreksi avg_l ↔ return tertukar
+    Parse teks OCR OTDR - DIPERBAIKI UNTUK FIBER CUT
     """
     text = raw_text.replace(",", ".")
 
@@ -1018,177 +883,240 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             avg_total = float(m2.group(1))
 
     # =====================================================
-    # 2. CLEAN LINES
+    # 2. TOTAL EVENTS - PENTING UNTUK FIBER CUT
+    # =====================================================
+    total_events = 4
+    total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
+    if total_events_match:
+        total_events = int(total_events_match.group(1))
+        logger.info(f"[TOTAL EVENTS] = {total_events}")
+
+    # =====================================================
+    # 3. EKSTRAK BARIS
     # =====================================================
     lines = []
     for line in text.splitlines():
         line = re.sub(r'\s+', ' ', line).strip()
-        if line:
+        if line and re.search(r'\b[1-4]\.\d{3,5}\b', line):
             lines.append(line)
 
     # =====================================================
-    # 3. DETECT EVENT LINES
-    #    Hanya baris yang mengandung distance VALID:
-    #    format x.NNN (minimal 3 digit desimal) untuk x in [1,2,3,4]
-    #    Ini menyaring nomor event seperti 3.1, 4.2
-    # =====================================================
-    event_lines = []
-    for line in lines:
-        # Pattern: angka 1-4 diikuti titik dan minimal 3 digit
-        if re.search(r'\b[1-4]\.\d{3,}\b', line):
-            event_lines.append(line)
-
-    # =====================================================
-    # 4. MERGE BROKEN ROWS
-    # =====================================================
-    merged = []
-    i = 0
-    while i < len(event_lines):
-        row = event_lines[i]
-        # Hitung angka valid (bukan nomor event)
-        nums = re.findall(r'-?\d+\.\d+', row)
-        while len(nums) < 5 and i + 1 < len(event_lines):
-            i += 1
-            row += " " + event_lines[i]
-            nums = re.findall(r'-?\d+\.\d+', row)
-        merged.append(row)
-        i += 1
-
-    # =====================================================
-    # 5. PARSE EACH ROW
-    #    Deteksi simbol --- sebagai None pada posisi loss
+    # 4. PARSE SETIAP BARIS
     # =====================================================
     rows = []
-    for idx, row in enumerate(merged):
-
-        # Tandai posisi '---' sebelum dinumerikkan
-        # Ganti --- dengan sentinel 0 dulu, track posisinya
-        missing_marker = '__MISSING__'
-        row_marked = re.sub(r'---+', missing_marker, row)
-        row_marked = re.sub(r'(?<!\d)-(?!\d)', missing_marker, row_marked)  # lone dash
-
-        # Pecah token
-        tokens = row_marked.split()
-
-        # ── Cari indeks distance (x.NNN, minimal 3 desimal, x in [1-4]) ──
-        distance_idx = None
-        distance = None
-        for j, tok in enumerate(tokens):
-            m_dist = re.match(r'^([1-4])\.(\d{3,})$', tok)
-            if m_dist:
-                candidate = float(tok)
-                # double-check: bukan integer-like (mis. 3.100 sebagai 3.1)
-                if len(m_dist.group(2)) >= 3:
-                    distance_idx = j
-                    distance = candidate
-                    break
-
-        if distance_idx is None or distance is None:
+    
+    for line in lines:
+        nums = re.findall(r'-?\d+\.?\d*', line)
+        nums = [float(x) for x in nums if abs(float(x)) < 100]
+        
+        if not nums:
             continue
+        
+        # 🔥 CARI DISTANCE SEJATI (minimal 3 digit desimal)
+        distance_idx = None
+        for j, val in enumerate(nums):
+            if 0.8 <= val <= 4.5:
+                val_str = str(val)
+                if '.' in val_str:
+                    decimal_part = val_str.split('.')[1]
+                    if len(decimal_part) >= 3:
+                        distance_idx = j
+                        break
+        
+        # 🔥 FALLBACK: ambil angka pertama di range 0.8-4.5
+        if distance_idx is None:
+            for j, val in enumerate(nums):
+                if 0.8 <= val <= 4.5:
+                    distance_idx = j
+                    break
+        
+        if distance_idx is None:
+            continue
+        
+        values = nums[distance_idx:]
 
-        # Ambil token setelah distance
-        remaining = tokens[distance_idx + 1:]
+        # 🔥 CEK "---" untuk loss = None
+        has_missing_loss = bool(re.search(r'---|—|–', line))
 
-        # Parse token: numerik atau MISSING
-        parsed = []
-        for tok in remaining:
-            if tok == missing_marker:
-                parsed.append(None)  # missing / ---
+        # ─────────────────────────────────────────────────────────────
+        # Deteksi apakah ini "last event row" (baris terakhir tabel OTDR).
+        # Baris terakhir OTDR biasanya tidak punya kolom Loss (sudah EOF),
+        # sehingga hanya ada: distance, section, total_l, avg_l, return
+        # ATAU: distance, section, total_l, return (4 nilai saja).
+        #
+        # Cara deteksi: jika total_l (values[3]) > loss yang wajar (>3)
+        # DAN avg_l (values[4]) sangat besar (>5) → kolom loss tidak ada,
+        # semua bergeser ke kiri.
+        #
+        # Rule aman:
+        #   len(values) == 5  → bisa jadi last row (loss hilang) atau row biasa dengan 5 kolom
+        #   → cek dengan heuristik: values[2] (slot loss) > 2 dan values[4] > 5
+        #     → kemungkinan besar total_l masuk slot loss, avg_l masuk slot total_l, return masuk avg_l
+        # ─────────────────────────────────────────────────────────────
+
+        # Apakah ini row terakhir (End-of-Fiber / Last Event)?
+        # Tandai jika: baris mengandung "H" atau "Last Event" atau total_events match terakhir
+        is_last_row = bool(re.search(r'\bH\b|Last\s*Event', line, re.IGNORECASE))
+
+        if len(values) >= 6:
+            # Baris lengkap: distance, section, loss, total_l, avg_l, return
+            distance  = values[0]
+            section   = values[1]
+            loss      = None if has_missing_loss else values[2]
+            total_l   = values[3]
+            avg_l     = values[4]
+            return_val = abs(values[5])
+
+        elif len(values) == 5:
+            # Bisa 2 skenario:
+            # A) Baris normal tapi 1 kolom hilang (biasanya return hilang): d, sec, loss, total_l, avg_l
+            # B) Last-row tanpa kolom loss: d, sec, total_l, avg_l, return
+            #
+            # Deteksi B: is_last_row ATAU values[4] > 10 (kemungkinan return)
+            # Deteksi A: values[2] < 5 (nilai loss yang masuk akal)
+            if is_last_row or values[4] > 10.0:
+                # Skenario B: loss tidak ada di baris ini
+                distance  = values[0]
+                section   = values[1]
+                loss      = None   # last row = EOF, loss tidak ada
+                total_l   = values[2]
+                avg_l     = values[3]
+                return_val = abs(values[4])
             else:
-                try:
-                    v = float(tok)
-                    if abs(v) < 200:  # skip nilai aneh
-                        parsed.append(v)
-                except ValueError:
-                    continue
+                # Skenario A: ada loss, return yang hilang
+                distance  = values[0]
+                section   = values[1]
+                loss      = None if has_missing_loss else values[2]
+                total_l   = values[3]
+                avg_l     = values[4]
+                return_val = 45.0  # default
 
-        if len(parsed) < 4:
-            continue  # tidak cukup data
+        elif len(values) == 4:
+            # d, sec, total_l, return (last row, loss + avg hilang)
+            distance  = values[0]
+            section   = values[1]
+            loss      = None
+            total_l   = values[2]
+            avg_l     = 0.0
+            return_val = abs(values[3]) if abs(values[3]) > 5 else 45.0
 
-        # Urutan kolom setelah distance: section, loss, total_l, avg_l, return
-        # Index:                          0       1     2        3      4
-        section    = parsed[0] if len(parsed) > 0 and parsed[0] is not None else 0.0
-        loss_raw   = parsed[1] if len(parsed) > 1 else None
-        total_raw  = parsed[2] if len(parsed) > 2 and parsed[2] is not None else 0.0
-        avg_raw    = parsed[3] if len(parsed) > 3 and parsed[3] is not None else 0.0
-        ret_raw    = parsed[4] if len(parsed) > 4 and parsed[4] is not None else -45.0
-
-        # ── Koreksi loss ↔ total_l tertukar ──
-        # Heuristik: loss seharusnya < total_l untuk km yang sama.
-        # Jika loss > 5 dan total_l < 5 → kemungkinan tertukar.
-        loss_val  = loss_raw  # bisa None
-        total_val = total_raw if total_raw is not None else 0.0
-
-        if loss_val is not None:
-            if loss_val > 5.0 and total_val < loss_val and total_val > 0:
-                logger.info(f"[SWAP] loss({loss_val}) > total_l({total_val}), swapping")
-                loss_val, total_val = total_val, loss_val
-
-        # ── Koreksi avg_l ↔ return tertukar ──
-        # avg_l harusnya kecil (0.2 - 2.0 dB/km), return harusnya negatif besar (< -30)
-        # Jika avg_raw > 10 dan ret_raw adalah nilai kecil positif → kemungkinan tertukar.
-        avg_val = avg_raw
-        ret_val = ret_raw
-        if avg_val is not None and ret_val is not None:
-            if avg_val > 10.0 and 0 < ret_val < 10.0:
-                logger.info(f"[SWAP] avg_l({avg_val}) looks like return, swapping with ret({ret_val})")
-                avg_val, ret_val = ret_val, avg_val
-            # Pastikan return negatif
-            if ret_val > 0:
-                ret_val = -abs(ret_val)
-
+        else:
+            continue
+        
         rows.append({
             "distance": distance,
-            "section": section if section is not None else 0.0,
-            "loss": loss_val,       # bisa None (dari ---)
-            "total_l": total_val,
-            "avg_l": avg_val if avg_val is not None else 0.0,
-            "return": ret_val if ret_val is not None else -45.0,
+            "section":  section,
+            "loss":     loss,
+            "total_l":  total_l,
+            "avg_l":    avg_l,
+            "return":   -return_val if return_val > 0 else -45.0
         })
 
     # =====================================================
-    # 6. SORT BY DISTANCE
+    # 5. SORT BY DISTANCE
     # =====================================================
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 7. KM4 loss = None (End of Fiber), pad rows jika perlu
+    # 6. VALIDASI SWAP — heuristik kolom tertukar
     # =====================================================
-    if len(rows) >= 4:
+    for i, row in enumerate(rows):
+        # Swap loss ↔ total_l: loss harusnya < total_l untuk km yg sama
+        if row['loss'] is not None and row['loss'] > 5.0 and 0 < row['total_l'] < row['loss']:
+            old_loss = row['loss']
+            row['loss'] = row['total_l']
+            row['total_l'] = old_loss
+            logger.info(f"  KM{i+1}: [SWAP] loss({old_loss}) ↔ total_l({row['total_l']})")
+        
+        # Swap avg_l ↔ return: avg_l harus kecil (<2), return harus negatif besar (>30 abs)
+        # Hanya swap jika return bukan sudah default -45.0
+        ret_abs = abs(row['return'])
+        if row['avg_l'] > 10.0 and ret_abs < 10.0:
+            # avg_l sangat besar → kemungkinan ini adalah nilai return
+            old_avg = row['avg_l']
+            row['avg_l'] = ret_abs if ret_abs > 0 else 0.0
+            row['return'] = -old_avg
+            logger.info(f"  KM{i+1}: [SWAP] avg_l({old_avg}) ↔ return({row['return']})")
+
+    # =====================================================
+    # 7. FIBER CUT DETECTION - PAKAI TOTAL EVENTS
+    # =====================================================
+    is_fiber_cut = False
+    cut_km = -1
+    
+    if total_events == 2:
+        is_fiber_cut = True
+        cut_km = 2
+        logger.info(f"🔴 FIBER CUT KM 2 detected (Total Events:2)")
+    elif total_events == 3:
+        is_fiber_cut = True
+        cut_km = 3
+        logger.info(f"🔴 FIBER CUT KM 3 detected (Total Events:3)")
+    
+    # 🔥 Fallback: cek dari rows
+    if not is_fiber_cut and len(rows) >= 2:
+        for i, row in enumerate(rows):
+            km = i + 1
+            if km >= 2 and (row['loss'] is None or row['loss'] == 0.0) and row['total_l'] > 0:
+                is_fiber_cut = True
+                cut_km = km
+                logger.info(f"🔴 FIBER CUT detected at KM {cut_km}")
+                break
+
+    # =====================================================
+    # 8. NORMALISASI FIBER CUT
+    # =====================================================
+    if is_fiber_cut and cut_km == 2:
+        if len(rows) >= 2:
+            rows[1]['loss'] = None
+        
+        while len(rows) > 2:
+            rows.pop()
+        
+        last_dist = rows[-1]['distance'] if rows else 2.0
+        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+        rows.append({"distance": last_dist + 2.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+
+    elif is_fiber_cut and cut_km == 3:
+        if len(rows) >= 3:
+            rows[2]['loss'] = None
+        
+        if len(rows) < 4:
+            last_dist = rows[-1]['distance'] if rows else 3.0
+            rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+
+    # Normal: KM4 loss = None
+    if len(rows) >= 4 and not is_fiber_cut:
         rows[3]["loss"] = None
-    elif len(rows) == 3:
-        last_d = rows[-1]["distance"]
-        rows.append({
-            "distance": last_d + 1.0, "section": 0.0,
-            "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0
-        })
-    elif len(rows) == 2:
-        last_d = rows[-1]["distance"]
-        rows.append({
-            "distance": last_d + 1.0, "section": 0.0,
-            "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0
-        })
-        rows.append({
-            "distance": last_d + 2.0, "section": 0.0,
-            "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0
-        })
 
+    # =====================================================
+    # 9. PASTIKAN 4 ROWS
+    # =====================================================
     while len(rows) < 4:
-        last_d = rows[-1]["distance"] if rows else 0.0
         km = len(rows) + 1
+        last_dist = rows[-1]["distance"] if rows else float(km - 1)
         rows.append({
-            "distance": last_d + 1.0, "section": 0.0,
-            "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0
+            "distance": last_dist + 1.0,
+            "section": 0.0,
+            "loss": None if km == 4 else 0.0,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return": -45.0
         })
 
     # =====================================================
-    # 8. LOG
+    # 10. LOG
     # =====================================================
     logger.info("===== FINAL PARSED ROWS =====")
     for i, r in enumerate(rows, start=1):
-        logger.info(f"  KM{i}: dist={r['distance']}, loss={r['loss']}, "
-                    f"total_l={r['total_l']}, avg_l={r['avg_l']}, return={r['return']}")
-    logger.info(f"AVG TOTAL = {avg_total}")
+        logger.info(
+            f"  KM{i}: dist={r['distance']}, "
+            f"loss={r['loss']}, "
+            f"total_l={r['total_l']}, "
+            f"avg_l={r['avg_l']}, "
+            f"return={r['return']}"
+        )
+    logger.info(f"AVG TOTAL = {avg_total}, FIBER_CUT = {is_fiber_cut}, CUT_KM = {cut_km}")
 
     return rows, avg_total
 
@@ -1306,36 +1234,57 @@ async def parse_ocr_only(
     
     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
     
-    # 🔥 GUNAKAN HYBRID PARSER
     rows, avg_total = parse_otdr_hybrid(raw_text)
     
-    # KM4 loss = None (End of Fiber)
+    # 🔥 AUTO-DETECT FIBER CUT
+    mode, cut_km = detect_measurement_mode_from_rows(rows)
+    logger.info(f"[AUTO-DETECT] OCR mode: {mode}, cut_km: {cut_km}")
+    
+    # 🔥 Jika Fiber Cut, set loss di rows sesuai mode
+    if mode == 'fiber_cut_km2':
+        if len(rows) >= 2:
+            rows[1]['loss'] = None  # KM2 loss = None
+        if len(rows) >= 3:
+            rows[2]['loss'] = None  # KM3 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None  # KM4 loss = None
+    elif mode == 'fiber_cut_km3':
+        if len(rows) >= 3:
+            rows[2]['loss'] = None  # KM3 loss = None
+        if len(rows) >= 4:
+            rows[3]['loss'] = None  # KM4 loss = None
+    
+    # 🔥 PASTIKAN KM4 loss = None (End of Fiber)
     if len(rows) >= 4:
         rows[3]['loss'] = None
     
     prx_from_ocr = extract_prx(raw_text)
     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
     
-    # Auto-detect mode
-    detected_mode = detect_otdr_mode(rows)
-    
-    logger.info(f"📊 Parsed rows: {len(rows)} | Mode: {detected_mode}")
+    logger.info(f"📊 Parsed rows: {len(rows)}")
     for i, row in enumerate(rows):
         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
     
-    # Validasi minimal 1 baris punya distance
+    # 🔥 VALIDASI DENGAN AMAN
     valid = [r for r in rows if r['distance'] > 0.5]
-    if len(valid) < 1:
+    if len(valid) < 2:
+        # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
         while len(rows) < 4:
             km = len(rows) + 1
-            rows.append({"distance": float(km), "section": 0.0,
-                         "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+            rows.append({
+                "distance": float(km),
+                "section": 0.0,
+                "loss": None if km == 4 else 0.0,
+                "total_l": 0.0,
+                "avg_l": 0.0,
+                "return": -45.0
+            })
+        
         return {
             "success": False,
-            "error": f"Hanya {len(valid)} baris valid terdeteksi.",
+            "error": f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2).",
             "needs_manual": True,
-            "message": "Data tidak lengkap. Silakan input manual.",
-            "detected_mode": detected_mode,
+            "message": "Data yang terdeteksi tidak lengkap. Silakan input data secara manual.",
             "extracted": {
                 "distances": [rows[i]['distance'] for i in range(4)],
                 "losses": [rows[i]['loss'] for i in range(4)],
@@ -1346,25 +1295,35 @@ async def parse_ocr_only(
             },
             "prx": final_prx,
             "per_km": {
-                "km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3],
+                "km1": rows[0] if len(rows) > 0 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km2": rows[1] if len(rows) > 1 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km3": rows[2] if len(rows) > 2 else {"distance": 0, "loss": 0, "total_l": 0, "avg_l": 0, "return": 0},
+                "km4": rows[3] if len(rows) > 3 else {"distance": 0, "loss": None, "total_l": 0, "avg_l": 0, "return": 0},
             }
         }
     
-    # Pad ke 4 baris
+    # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
     while len(rows) < 4:
-        last_d = rows[-1]["distance"] if rows else 0.0
-        rows.append({"distance": last_d + 1.0, "section": 0.0,
-                     "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+        km = len(rows) + 1
+        rows.append({
+            "distance": float(km),
+            "section": 0.0,
+            "loss": None if km == 4 else 0.0,
+            "total_l": 0.0,
+            "avg_l": 0.0,
+            "return": -45.0
+        })
     
     logger.info("=" * 70)
-    logger.info(f"✅ OCR parsing completed | mode={detected_mode}")
+    logger.info("✅ OCR parsing completed (NO ML classification)")
     
     return {
         "success": True,
         "message": "OCR berhasil diekstrak. Silakan periksa dan edit data sebelum klasifikasi.",
         "raw_text": raw_text[:500],
         "ocr_method": ocr_method,
-        "detected_mode": detected_mode,
+        "detected_mode": mode,  
+        "cut_km": cut_km, 
         "extracted": {
             "distances": [rows[i]['distance'] for i in range(4)],
             "losses": [rows[i]['loss'] for i in range(4)],
@@ -2060,128 +2019,154 @@ async def detect_manual(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
-    """
-    Endpoint deteksi manual.
-    - Field kosong / null dikirim sebagai None, BUKAN 0
-    - Backend auto-detect mode (normal / fiber_cut_km2 / fiber_cut_km3)
-    - Normalisasi ke format model sebelum inferensi (loss cut = inf)
-    - Nilai asli (dengan None) disimpan ke DB untuk display --- di frontend
-    """
+    # ── DETEKSI MODE MANUAL ──
+    mode, cut_km = detect_manual_mode(payload)
+    logger.info(f"[AUTO-DETECT] Manual mode: {mode}, cut_km: {cut_km}")
 
-    # ── Ambil nilai dari payload, None jika kosong ──
-    def gn(key):
-        """Ambil nilai sebagai float atau None jika tidak ada / kosong"""
-        return safe_float(payload.get(key))
-
-    def gf(key, default=0.0):
-        """Ambil nilai sebagai float dengan fallback"""
-        v = safe_float(payload.get(key))
-        return v if v is not None else default
-
-    prx = gf('prx', -15.6)
-
-    d1 = gn('distance_1'); d2 = gn('distance_2')
-    d3 = gn('distance_3'); d4 = gn('distance_4')
-
-    l1 = gn('loss_1');  l2 = gn('loss_2');  l3 = gn('loss_3')
-    # loss_4 selalu None (End of Fiber)
-
-    tl1 = gn('total_l_1'); tl2 = gn('total_l_2')
-    tl3 = gn('total_l_3'); tl4 = gn('total_l_4')
-
-    al1 = gn('avg_l_1'); al2 = gn('avg_l_2')
-    al3 = gn('avg_l_3'); al4 = gn('avg_l_4')
-
-    r1 = gn('return_1'); r2 = gn('return_2')
-    r3 = gn('return_3'); r4 = gn('return_4')
-
-    avg_total = gn('avg_total')
-
-    # ── Auto-detect mode ──
-    mode = detect_mode_from_payload(payload)
-    logger.info(f"[MANUAL] detected_mode={mode}")
-
-    # ── Normalisasi ke format model ──
-    otdr_values = normalize_for_model(
-        l1, l2, l3,
-        tl1, tl2, tl3, tl4,
-        al1, al2, al3, al4,
-        r1, r2, r3, r4,
-        d1, d2, d3, d4,
-        avg_total, prx,
-        mode
-    )
-
-    # Sanitasi inf → angka besar sebelum masuk model (model menerima numpy float)
-    otdr_values_clean = sanitize_for_json(otdr_values)
-    logger.info(f"[MANUAL] otdr_values → model: {otdr_values_clean}")
-
+    def g(key, default=0.0):
+        try:
+            val = payload.get(key, default)
+            if val is None or val == "":
+                return default
+            return float(val)
+        except:
+            return default
+    
+    def get_loss(key):
+        val = payload.get(key)
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except:
+            return None
+    
+    d1 = g('distance_1', 0.0)
+    d2 = g('distance_2', 0.0)
+    d3 = g('distance_3', 0.0)
+    d4 = g('distance_4', 0.0)
+    
+    l1 = get_loss('loss_1') or 0.0
+    l2 = get_loss('loss_2') or 0.0
+    l3 = get_loss('loss_3') or 0.0
+    l4 = None  # selalu None (End of Fiber)
+    
+    tl1 = g('total_l_1', 0.0)
+    tl2 = g('total_l_2', 0.0)
+    tl3 = g('total_l_3', 0.0)
+    tl4 = g('total_l_4', 0.0)
+    
+    al1 = g('avg_l_1', 0.0)
+    al2 = g('avg_l_2', 0.0)
+    al3 = g('avg_l_3', 0.0)
+    al4 = g('avg_l_4', 0.0)
+    
+    avg_total = g('avg_total', 0.0)
+    
+    r1 = g('return_1', 0.0)
+    r2 = g('return_2', 0.0)
+    r3 = g('return_3', 0.0)
+    r4 = g('return_4', 0.0)
+    
+    prx = g('prx', -15.6)
+    
+    # ── DATA UNTUK NORMALISASI ──
+    parsed_data = {
+        'loss_1': l1,
+        'loss_2': l2,
+        'loss_3': l3,
+        'loss_4': l4,
+        'total_l_1': tl1,
+        'total_l_2': tl2,
+        'total_l_3': tl3,
+        'total_l_4': tl4,
+        'avg_l_1': al1,
+        'avg_l_2': al2,
+        'avg_l_3': al3,
+        'avg_l_4': al4,
+        'avg_total': avg_total,
+        'return_1': r1,
+        'return_2': r2,
+        'return_3': r3,
+        'return_4': r4,
+        'distance_1': d1,
+        'distance_2': d2,
+        'distance_3': d3,
+        'distance_4': d4,
+    }
+    
+    # ── NORMALISASI KE FORMAT MODEL ──
+    normalized = normalize_for_model(mode, cut_km, parsed_data)
+    
+    # ── OTDR VALUES UNTUK ML ──
+    otdr_values = {
+        'Prx (dBm)': prx,
+        'Distance 1': normalized.get('distance_1', d1),
+        'Distance 2': normalized.get('distance_2', d2),
+        'Distance 3': normalized.get('distance_3', d3),
+        'Distance 4': normalized.get('distance_4', d4),
+        'Loss 1': normalized.get('loss_1', l1) or 0.0,
+        'Loss 2': normalized.get('loss_2', l2) or 0.0,
+        'Loss 3': normalized.get('loss_3', l3) or 0.0,
+        'Total-L 1': normalized.get('total_l_1', tl1),
+        'Total-L 2': normalized.get('total_l_2', tl2),
+        'Total-L 3': normalized.get('total_l_3', tl3),
+        'Total-L 4': normalized.get('total_l_4', tl4),
+        'Avg-L 1': normalized.get('avg_l_1', al1),
+        'Avg-L 2': normalized.get('avg_l_2', al2),
+        'Avg-L 3': normalized.get('avg_l_3', al3),
+        'Avg-L 4': normalized.get('avg_l_4', al4),
+        'Avg-Total': normalized.get('avg_total', avg_total),
+        'Return 1': normalized.get('return_1', r1),
+        'Return 2': normalized.get('return_2', r2),
+        'Return 3': normalized.get('return_3', r3),
+        'Return 4': normalized.get('return_4', r4),
+    }
+    
+    logger.info(f"[MANUAL] mode={mode}, cut_km={cut_km}")
+    
     try:
-        pred = ml.predict_from_otdr(otdr_values_clean)
-        logger.info(f"🤖 ML prediction (manual, {mode}): {pred.get('prediction')}")
+        pred = ml.predict_from_otdr(otdr_values)
+        logger.info(f"🤖 ML prediction SUCCESS (manual): {pred.get('prediction')}")
     except Exception as e:
         logger.error(f"❌ ML prediction FAILED (manual): {e}")
         pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-
+        
     user_id = current_user.id if current_user else 1
-
-    # Nilai untuk DB: pakai nilai asli (None kalau memang kosong / fiber cut)
-    def db_val(v, fallback=None):
-        return v if v is not None else fallback
-
+    
     try:
         record = OtdrResult(
             user_id=user_id,
             timestamp=datetime.utcnow(),
             prx=prx,
-            distance_1=db_val(d1), distance_2=db_val(d2),
-            distance_3=db_val(d3), distance_4=db_val(d4),
-            loss_1=db_val(l1), loss_2=db_val(l2),
-            loss_3=db_val(l3), loss_4=None,   # selalu None (EOF)
-            total_l_1=db_val(tl1, 0.0), total_l_2=db_val(tl2, 0.0),
-            total_l_3=db_val(tl3, 0.0), total_l_4=db_val(tl4, 0.0),
-            avg_l_1=db_val(al1, 0.0), avg_l_2=db_val(al2, 0.0),
-            avg_l_3=db_val(al3, 0.0), avg_l_4=db_val(al4, 0.0),
-            avg_total=db_val(avg_total, 0.0),
-            return_1=db_val(r1, -45.0), return_2=db_val(r2, -45.0),
-            return_3=db_val(r3, -45.0), return_4=db_val(r4, -45.0),
+            distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
+            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=None,
+            total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
+            avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
+            avg_total=avg_total,
+            return_1=r1, return_2=r2, return_3=r3, return_4=r4,
             klasifikasi=pred.get("prediction"),
             status=pred.get("status"),
             confidence=pred.get("confidence"),
             source="manual",
-            raw_text=f"Manual Input | mode={mode}",
+            raw_text=f"Manual Input (detected: {mode}, cut_km: {cut_km})",
         )
         db.add(record)
         await db.commit()
         await db.refresh(record)
-
+        
         status_str = pred.get("status", "Normal")
         if status_str.lower() in ["warning", "critical"]:
             try:
-                loss_alert = [
-                    l1 if l1 is not None else 0.0,
-                    l2 if l2 is not None else 0.0,
-                    l3 if l3 is not None else 0.0,
-                    0.0
-                ]
+                loss_for_alert = [l1 or 0.0, l2 or 0.0, l3 or 0.0, 0.0]
                 await asyncio.to_thread(
                     send_telegram_alert,
                     classification=pred.get("prediction"),
                     status=status_str,
-                    loss=loss_alert,
-                    rl=[
-                        r1 if r1 is not None else -45.0,
-                        r2 if r2 is not None else -45.0,
-                        r3 if r3 is not None else -45.0,
-                        r4 if r4 is not None else -45.0,
-                    ],
+                    loss=loss_for_alert,
+                    rl=[r1, r2, r3, r4],
                     prx=prx,
-                    distances=[
-                        d1 if d1 is not None else 1.0,
-                        d2 if d2 is not None else 2.0,
-                        d3 if d3 is not None else 3.0,
-                        d4 if d4 is not None else 4.0,
-                    ],
+                    distances=[d1, d2, d3, d4],
                     timestamp=record.timestamp
                 )
                 record.telegram_alert_sent = True
@@ -2193,17 +2178,15 @@ async def detect_manual(
         logger.error(f"❌ DATABASE ERROR (manual): {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-    # Response: kembalikan nilai asli (None → frontend tampilkan ---)
+    
     return {
         "message": "Data manual berhasil diproses",
-        "detected_mode": mode,
         "extracted": {
             "distances": [d1, d2, d3, d4],
-            "losses": [l1, l2, l3, None],     # loss_4 selalu None
+            "losses": [l1, l2, l3, None],
             "total_ls": [tl1, tl2, tl3, tl4],
-            "avg_ls": [al1, al2, al3, al4],
             "returns": [r1, r2, r3, r4],
+            "avg_ls": [al1, al2, al3, al4],
             "avg_total": avg_total,
         },
         "prx": prx,
@@ -2212,6 +2195,8 @@ async def detect_manual(
         "confidence": pred.get("confidence"),
         "status": pred.get("status"),
         "id": record.id,
+        "detected_mode": mode,  # ← TAMBAHKAN
+        "cut_km": cut_km,       # ← TAMBAHKAN
     }
 
 # ============================================================

@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, AlertTriangle, Info, Edit3, CheckCircle, Send } from 'lucide-react';
 import { useSlide } from '../Context/SlideContext';
-import { triggerSlideAlert } from '../services/api';
+// import { triggerSlideAlert } from '../services/api';
 
 interface DetectionProps {
   refreshTrigger?: number;
@@ -49,6 +49,8 @@ interface OcrParseResult {
   message: string;
   raw_text: string;
   ocr_method: string;
+  detected_mode?: string; 
+  cut_km?: number;
   extracted: {
     distances: number[];
     losses: (number | null)[];
@@ -126,7 +128,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     }
   });
 
-  const [sentAlerts, setSentAlerts] = useState<Set<number>>(new Set());
+  // const [sentAlerts, setSentAlerts] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     localStorage.setItem('detection_display_timestamps', JSON.stringify(displayTimestamps));
@@ -162,39 +164,56 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 POPULATE FORM DARI OCR
-  const populateFormFromOcr = (ocrData: OcrParseResult) => {
-    const { extracted, prx } = ocrData;
-    
-    setManualForm({
-      prx: prx !== undefined && prx !== null ? prx.toString() : '',
-      avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
-      distance_1: extracted.distances[0]?.toString() || '',
-      distance_2: extracted.distances[1]?.toString() || '',
-      distance_3: extracted.distances[2]?.toString() || '',
-      distance_4: extracted.distances[3]?.toString() || '',
-      loss_1: extracted.losses[0]?.toString() || '',
-      loss_2: extracted.losses[1]?.toString() || '',
-      loss_3: extracted.losses[2]?.toString() || '',
-      loss_4: extracted.losses[3] !== null && extracted.losses[3] !== undefined && extracted.losses[3] !== 0 
-        ? extracted.losses[3].toString() 
-        : '',
-      total_l_1: extracted.total_ls[0]?.toString() || '',
-      total_l_2: extracted.total_ls[1]?.toString() || '',
-      total_l_3: extracted.total_ls[2]?.toString() || '',
-      total_l_4: extracted.total_ls[3]?.toString() || '',
-      avg_l_1: extracted.avg_ls[0]?.toString() || '',
-      avg_l_2: extracted.avg_ls[1]?.toString() || '',
-      avg_l_3: extracted.avg_ls[2]?.toString() || '',
-      avg_l_4: extracted.avg_ls[3]?.toString() || '',
-      return_1: extracted.returns[0]?.toString() || '',
-      return_2: extracted.returns[1]?.toString() || '',
-      return_3: extracted.returns[2]?.toString() || '',
-      return_4: extracted.returns[3]?.toString() || '',
-    });
-    
-    setIsOcrParsed(true);
+  // 🔥 GANTI fungsi populateFormFromOcr dengan ini
+
+const populateFormFromOcr = (ocrData: OcrParseResult) => {
+  const { extracted, prx, detected_mode } = ocrData;
+  
+  // 🔥 Deteksi apakah ini Fiber Cut
+  const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
+  const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
+  
+  // 🔥 Fungsi: null atau 0 → string kosong
+  const valToStr = (val: number | null | undefined): string => {
+    if (val === null || val === undefined || val === 0) return '';
+    return val.toString();
   };
+  
+  // 🔥 Fungsi khusus untuk loss: kosong jika Fiber Cut dan km >= cutKm
+  const lossVal = (val: number | null | undefined, km: number): string => {
+    if (isFiberCut && km >= cutKm) return '';
+    if (val === null || val === undefined || val === 0) return '';
+    return val.toString();
+  };
+  
+  setManualForm({
+    prx: prx !== undefined && prx !== null ? prx.toString() : '',
+    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
+    distance_1: valToStr(extracted.distances[0]),
+    distance_2: valToStr(extracted.distances[1]),
+    distance_3: valToStr(extracted.distances[2]),
+    distance_4: valToStr(extracted.distances[3]),
+    // 🔥 Loss: kosong jika Fiber Cut di titik cut
+    loss_1: lossVal(extracted.losses[0], 1),
+    loss_2: lossVal(extracted.losses[1], 2),
+    loss_3: lossVal(extracted.losses[2], 3),
+    loss_4: '', // selalu kosong - end of fiber
+    total_l_1: valToStr(extracted.total_ls[0]),
+    total_l_2: valToStr(extracted.total_ls[1]),
+    total_l_3: valToStr(extracted.total_ls[2]),
+    total_l_4: valToStr(extracted.total_ls[3]),
+    avg_l_1: valToStr(extracted.avg_ls[0]),
+    avg_l_2: valToStr(extracted.avg_ls[1]),
+    avg_l_3: valToStr(extracted.avg_ls[2]),
+    avg_l_4: valToStr(extracted.avg_ls[3]),
+    return_1: valToStr(extracted.returns[0]),
+    return_2: valToStr(extracted.returns[1]),
+    return_3: valToStr(extracted.returns[2]),
+    return_4: valToStr(extracted.returns[3]),
+  });
+  
+  setIsOcrParsed(true);
+};
 
   // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
   const handleOcrParse = async (file: File) => {
@@ -310,25 +329,25 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   const { currentIndex, setCurrentIndex, totalData, autoPlay } = useSlide();
   const [prevTotalData, setPrevTotalData] = useState(0);
 
-  useEffect(() => {
-    if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
-    const currentRecord = allHistory[currentIndex];
-    if (!currentRecord) return;
+  // useEffect(() => {
+  //   if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
+  //   const currentRecord = allHistory[currentIndex];
+  //   if (!currentRecord) return;
 
-    const status = currentRecord.status || '';
+  //   const status = currentRecord.status || '';
     
-    if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-      if (sentAlerts.has(currentRecord.id)) return;
+  //   if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
+  //     if (sentAlerts.has(currentRecord.id)) return;
       
-      triggerSlideAlert(currentRecord.id)
-        .then((res: { status: string }) => {
-          if (res.status === 'sent') {
-            setSentAlerts(prev => new Set(prev).add(currentRecord.id));
-          }
-        })
-        .catch((err: any) => console.error('Error triggering slide alert:', err));
-    }
-  }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
+  //     triggerSlideAlert(currentRecord.id)
+  //       .then((res: { status: string }) => {
+  //         if (res.status === 'sent') {
+  //           setSentAlerts(prev => new Set(prev).add(currentRecord.id));
+  //         }
+  //       })
+  //       .catch((err: any) => console.error('Error triggering slide alert:', err));
+  //   }
+  // }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
 
   // useEffect(() => {
   //   if (!autoPlay || allHistory.length === 0) return;
@@ -561,11 +580,11 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Prx (dBm)</label>
-                    <input type="number" step="0.01" required value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
+                    <input type="number" step="0.01" value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
-                    <input type="number" step="0.001" required value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
+                    <input type="number" step="0.001" value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
                   </div>
                 </div>
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
@@ -585,19 +604,19 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
                           <td className="p-2 font-bold text-white text-xs">Km {km}</td>
                           <td className="p-2">
-                            <input type="number" step="0.00001" required value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
                             <input type="number" step="0.001" required={km !== 4} disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.001" value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required value={manualForm[`avg_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.001" value={manualForm[`avg_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.01" required value={manualForm[`return_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.01" value={manualForm[`return_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                         </tr>
                       ))}
@@ -838,20 +857,20 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   </div>
                   {lastResult.extracted.total_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                      {lastResult.extracted.total_ls.map((tl: number | null, i: number) => (
+                      {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Total-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{tl === null || tl === undefined || tl === 0 ? '---' : tl.toString()} dB</span>
+                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : tl.toString()} dB</span>
                         </div>
                       ))}
                     </div>
                   )}
                   {lastResult.extracted.avg_ls && (
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                      {lastResult.extracted.avg_ls.map((al: number | null, i: number) => (
+                      {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Avg-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{al === null || al === undefined || al === 0 ? '---' : al.toString()} dB/km</span>
+                          <span className="text-white font-mono">{al === 0 ? '---' : al.toString()} dB/km</span>
                         </div>
                       ))}
                     </div>
@@ -859,18 +878,14 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">
-                        {lastResult.extracted.avg_total === null || lastResult.extracted.avg_total === 0
-                          ? '---'
-                          : (lastResult.extracted.avg_total as number).toFixed(2)} dB/km
-                      </span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : lastResult.extracted.avg_total.toFixed(2)} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                    {lastResult.extracted.returns?.map((r: number | null, i: number) => (
+                    {lastResult.extracted.returns?.map((r: number, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Return Km {i + 1}</span>
-                        <span className="text-white font-mono">{r === null || r === undefined ? '---' : r.toString()} dB</span>
+                        <span className="text-white font-mono">{r.toString()} dB</span>
                       </div>
                     ))}
                   </div>
