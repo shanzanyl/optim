@@ -164,8 +164,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 GANTI fungsi populateFormFromOcr dengan ini
-
+  // 🔥 POPULATE FORM DARI OCR
 const populateFormFromOcr = (ocrData: OcrParseResult) => {
   const { extracted, prx, detected_mode } = ocrData;
   
@@ -269,31 +268,44 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     setErrorMsg('');
     setLastResult(null);
 
-    const loss4 = manualForm.loss_4 ? parseFloat(manualForm.loss_4) : null;
+    // 🔥 Helper: parse angka, null jika kosong atau 0
+    const parseOrNull = (val: string): number | null => {
+      if (val === '' || val === null || val === undefined) return null;
+      const n = parseFloat(val);
+      return isNaN(n) ? null : n;
+    };
+
+    // 🔥 Helper: parse angka, 0 jika kosong (untuk Prx)
+    const parseOrZero = (val: string): number => {
+      if (val === '' || val === null || val === undefined) return 0;
+      const n = parseFloat(val);
+      return isNaN(n) ? 0 : n;
+    };
 
     const payload = {
-      prx: parseFloat(manualForm.prx) || 0.0,
-      avg_total: parseFloat(manualForm.avg_total) || 0.0,
-      distance_1: parseFloat(manualForm.distance_1) || 0.0,
-      distance_2: parseFloat(manualForm.distance_2) || 0.0,
-      distance_3: parseFloat(manualForm.distance_3) || 0.0,
-      distance_4: parseFloat(manualForm.distance_4) || 0.0,
-      loss_1: parseFloat(manualForm.loss_1) || 0.0,
-      loss_2: parseFloat(manualForm.loss_2) || 0.0,
-      loss_3: parseFloat(manualForm.loss_3) || 0.0,
-      loss_4: loss4,
-      total_l_1: parseFloat(manualForm.total_l_1) || 0.0,
-      total_l_2: parseFloat(manualForm.total_l_2) || 0.0,
-      total_l_3: parseFloat(manualForm.total_l_3) || 0.0,
-      total_l_4: parseFloat(manualForm.total_l_4) || 0.0,
-      avg_l_1: parseFloat(manualForm.avg_l_1) || 0.0,
-      avg_l_2: parseFloat(manualForm.avg_l_2) || 0.0,
-      avg_l_3: parseFloat(manualForm.avg_l_3) || 0.0,
-      avg_l_4: parseFloat(manualForm.avg_l_4) || 0.0,
-      return_1: parseFloat(manualForm.return_1) || 0.0,
-      return_2: parseFloat(manualForm.return_2) || 0.0,
-      return_3: parseFloat(manualForm.return_3) || 0.0,
-      return_4: parseFloat(manualForm.return_4) || 0.0,
+      prx: parseOrZero(manualForm.prx) || -15.6,
+      avg_total: parseOrNull(manualForm.avg_total) ?? 0.0,
+      distance_1: parseOrNull(manualForm.distance_1) ?? 0.0,
+      distance_2: parseOrNull(manualForm.distance_2) ?? 0.0,
+      distance_3: parseOrNull(manualForm.distance_3) ?? 0.0,
+      distance_4: parseOrNull(manualForm.distance_4) ?? 0.0,
+      // 🔥 Loss: null jika kosong atau 0
+      loss_1: parseOrNull(manualForm.loss_1) ?? 0.0,
+      loss_2: parseOrNull(manualForm.loss_2) ?? 0.0,
+      loss_3: parseOrNull(manualForm.loss_3), // ← BISA NULL!
+      loss_4: null, // selalu null - end of fiber
+      total_l_1: parseOrNull(manualForm.total_l_1) ?? 0.0,
+      total_l_2: parseOrNull(manualForm.total_l_2) ?? 0.0,
+      total_l_3: parseOrNull(manualForm.total_l_3) ?? 0.0,
+      total_l_4: parseOrNull(manualForm.total_l_4) ?? 0.0,
+      avg_l_1: parseOrNull(manualForm.avg_l_1) ?? 0.0,
+      avg_l_2: parseOrNull(manualForm.avg_l_2) ?? 0.0,
+      avg_l_3: parseOrNull(manualForm.avg_l_3) ?? 0.0,
+      avg_l_4: parseOrNull(manualForm.avg_l_4) ?? 0.0,
+      return_1: parseOrNull(manualForm.return_1) ?? 0.0,
+      return_2: parseOrNull(manualForm.return_2) ?? 0.0,
+      return_3: parseOrNull(manualForm.return_3) ?? 0.0,
+      return_4: parseOrNull(manualForm.return_4) ?? 0.0,
     };
 
     const token = localStorage.getItem('token');
@@ -607,7 +619,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                             <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required={km !== 4} disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
+                            <input type="number" step="0.001" disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
                           </td>
                           <td className="p-2">
                             <input type="number" step="0.001" value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
