@@ -162,35 +162,67 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 POPULATE FORM DARI OCR
+  // ── HELPER: konversi nilai OCR ke string form, nilai null/0 = kosong ──
+  // Untuk fiber cut, nilai setelah titik cut = null/0 dari backend → tetap kosong di form
+  const ocrValToStr = (val: number | null | undefined): string => {
+    if (val === null || val === undefined || val === 0) return '';
+    return val.toString();
+  };
+
+  // ── HELPER: deteksi titik cut dari losses OCR ──
+  // Mengembalikan km terakhir yang valid (1-4), atau 4 jika semua ada
+  const detectCutPoint = (losses: (number | null)[]): number => {
+    // Scan mundur: cari km terakhir yang memiliki loss valid (non-null, non-0)
+    for (let i = 2; i >= 0; i--) { // hanya periksa km1-km3 (loss_4 selalu null)
+      if (losses[i] !== null && losses[i] !== undefined && losses[i] !== 0) {
+        return i + 1; // km yang valid terakhir (1-indexed)
+      }
+    }
+    return 1;
+  };
+
+  // 🔥 POPULATE FORM DARI OCR - FIBER CUT AWARE
   const populateFormFromOcr = (ocrData: OcrParseResult) => {
     const { extracted, prx } = ocrData;
     
+    // Deteksi titik cut: km terakhir yang valid
+    const cutPoint = detectCutPoint(extracted.losses);
+    
+    // Untuk field setelah titik cut: biarkan kosong jika nilainya 0/null
+    // Untuk field sebelum/sama dengan titik cut: isi seperti biasa
+    const safeStr = (val: number | null | undefined, km: number, isCutSensitive: boolean = true): string => {
+      if (val === null || val === undefined) return '';
+      if (isCutSensitive && km > cutPoint && val === 0) return ''; // setelah cut → kosong
+      if (val === 0) return '';
+      return val.toString();
+    };
+
     setManualForm({
       prx: prx !== undefined && prx !== null ? prx.toString() : '',
       avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
-      distance_1: extracted.distances[0]?.toString() || '',
-      distance_2: extracted.distances[1]?.toString() || '',
-      distance_3: extracted.distances[2]?.toString() || '',
-      distance_4: extracted.distances[3]?.toString() || '',
-      loss_1: extracted.losses[0]?.toString() || '',
-      loss_2: extracted.losses[1]?.toString() || '',
-      loss_3: extracted.losses[2]?.toString() || '',
-      loss_4: extracted.losses[3] !== null && extracted.losses[3] !== undefined && extracted.losses[3] !== 0 
-        ? extracted.losses[3].toString() 
-        : '',
-      total_l_1: extracted.total_ls[0]?.toString() || '',
-      total_l_2: extracted.total_ls[1]?.toString() || '',
-      total_l_3: extracted.total_ls[2]?.toString() || '',
-      total_l_4: extracted.total_ls[3]?.toString() || '',
-      avg_l_1: extracted.avg_ls[0]?.toString() || '',
-      avg_l_2: extracted.avg_ls[1]?.toString() || '',
-      avg_l_3: extracted.avg_ls[2]?.toString() || '',
-      avg_l_4: extracted.avg_ls[3]?.toString() || '',
-      return_1: extracted.returns[0]?.toString() || '',
-      return_2: extracted.returns[1]?.toString() || '',
-      return_3: extracted.returns[2]?.toString() || '',
-      return_4: extracted.returns[3]?.toString() || '',
+      // Distance: isi semua selama ada nilainya (distance sendiri tidak terpengaruh cut)
+      distance_1: ocrValToStr(extracted.distances[0]),
+      distance_2: ocrValToStr(extracted.distances[1]),
+      distance_3: ocrValToStr(extracted.distances[2]),
+      distance_4: ocrValToStr(extracted.distances[3]),
+      // Loss: km setelah cut point → kosong; loss_4 selalu kosong (end of fiber)
+      loss_1: safeStr(extracted.losses[0], 1),
+      loss_2: safeStr(extracted.losses[1], 2),
+      loss_3: safeStr(extracted.losses[2], 3),
+      loss_4: '', // selalu kosong - end of fiber
+      // Total-L, Avg-L, Return: setelah cut point → kosong jika 0
+      total_l_1: safeStr(extracted.total_ls[0], 1),
+      total_l_2: safeStr(extracted.total_ls[1], 2),
+      total_l_3: safeStr(extracted.total_ls[2], 3),
+      total_l_4: safeStr(extracted.total_ls[3], 4),
+      avg_l_1: safeStr(extracted.avg_ls[0], 1),
+      avg_l_2: safeStr(extracted.avg_ls[1], 2),
+      avg_l_3: safeStr(extracted.avg_ls[2], 3),
+      avg_l_4: safeStr(extracted.avg_ls[3], 4),
+      return_1: safeStr(extracted.returns[0], 1),
+      return_2: safeStr(extracted.returns[1], 2),
+      return_3: safeStr(extracted.returns[2], 3),
+      return_4: safeStr(extracted.returns[3], 4),
     });
     
     setIsOcrParsed(true);
@@ -245,36 +277,52 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   };
 
   // 🔥 HANDLE KLASIFIKASI - KIRIM DATA KE /api/detect-manual
+  // FIBER CUT AWARE: field kosong setelah titik cut dikirim sebagai null, bukan 0
   const handleClassify = async () => {
     setImageStatus('uploading');
     setErrorMsg('');
     setLastResult(null);
 
-    const loss4 = manualForm.loss_4 ? parseFloat(manualForm.loss_4) : null;
+    // Helper: parse angka dari form, kembalikan null jika kosong
+    const parseOrNull = (val: string): number | null => {
+      if (val === '' || val === null || val === undefined) return null;
+      const n = parseFloat(val);
+      return isNaN(n) ? null : n;
+    };
 
+    // Helper: parse angka dari form, kembalikan 0 jika kosong (untuk field wajib)
+    const parseOrZero = (val: string): number => {
+      if (val === '' || val === null || val === undefined) return 0.0;
+      const n = parseFloat(val);
+      return isNaN(n) ? 0.0 : n;
+    };
+
+    // Field yang aman jika null (fiber cut aware): loss_1-3, distance_1-4, total_l, avg_l, return per km
+    // Backend akan melakukan normalisasi sebelum masuk model
     const payload = {
-      prx: parseFloat(manualForm.prx) || 0.0,
-      avg_total: parseFloat(manualForm.avg_total) || 0.0,
-      distance_1: parseFloat(manualForm.distance_1) || 0.0,
-      distance_2: parseFloat(manualForm.distance_2) || 0.0,
-      distance_3: parseFloat(manualForm.distance_3) || 0.0,
-      distance_4: parseFloat(manualForm.distance_4) || 0.0,
-      loss_1: parseFloat(manualForm.loss_1) || 0.0,
-      loss_2: parseFloat(manualForm.loss_2) || 0.0,
-      loss_3: parseFloat(manualForm.loss_3) || 0.0,
-      loss_4: loss4,
-      total_l_1: parseFloat(manualForm.total_l_1) || 0.0,
-      total_l_2: parseFloat(manualForm.total_l_2) || 0.0,
-      total_l_3: parseFloat(manualForm.total_l_3) || 0.0,
-      total_l_4: parseFloat(manualForm.total_l_4) || 0.0,
-      avg_l_1: parseFloat(manualForm.avg_l_1) || 0.0,
-      avg_l_2: parseFloat(manualForm.avg_l_2) || 0.0,
-      avg_l_3: parseFloat(manualForm.avg_l_3) || 0.0,
-      avg_l_4: parseFloat(manualForm.avg_l_4) || 0.0,
-      return_1: parseFloat(manualForm.return_1) || 0.0,
-      return_2: parseFloat(manualForm.return_2) || 0.0,
-      return_3: parseFloat(manualForm.return_3) || 0.0,
-      return_4: parseFloat(manualForm.return_4) || 0.0,
+      prx: parseOrZero(manualForm.prx) || -15.6,
+      avg_total: parseOrNull(manualForm.avg_total),
+      distance_1: parseOrNull(manualForm.distance_1),
+      distance_2: parseOrNull(manualForm.distance_2),
+      distance_3: parseOrNull(manualForm.distance_3),
+      distance_4: parseOrNull(manualForm.distance_4),
+      // loss_1-3: null jika kosong (fiber cut setelah km itu)
+      loss_1: parseOrNull(manualForm.loss_1),
+      loss_2: parseOrNull(manualForm.loss_2),
+      loss_3: parseOrNull(manualForm.loss_3),
+      loss_4: null, // selalu null - end of fiber
+      total_l_1: parseOrNull(manualForm.total_l_1),
+      total_l_2: parseOrNull(manualForm.total_l_2),
+      total_l_3: parseOrNull(manualForm.total_l_3),
+      total_l_4: parseOrNull(manualForm.total_l_4),
+      avg_l_1: parseOrNull(manualForm.avg_l_1),
+      avg_l_2: parseOrNull(manualForm.avg_l_2),
+      avg_l_3: parseOrNull(manualForm.avg_l_3),
+      avg_l_4: parseOrNull(manualForm.avg_l_4),
+      return_1: parseOrNull(manualForm.return_1),
+      return_2: parseOrNull(manualForm.return_2),
+      return_3: parseOrNull(manualForm.return_3),
+      return_4: parseOrNull(manualForm.return_4),
     };
 
     const token = localStorage.getItem('token');
@@ -547,7 +595,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                 )}
               </>
             ) : (
-              // 🔥 TAB INPUT MANUAL - TETAP PERTAHANKAN
+              // 🔥 TAB INPUT MANUAL - FIBER CUT AWARE
               <form onSubmit={(e) => { e.preventDefault(); handleClassify(); }} className="space-y-4">
                 {isOcrParsed && ocrParseResult && (
                   <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-3">
@@ -557,6 +605,17 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     </p>
                   </div>
                 )}
+
+                {/* 🔥 FIBER CUT HINT */}
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                  <p className="text-blue-400 text-[11px] flex items-start gap-1.5">
+                    <Info size={12} className="flex-shrink-0 mt-0.5" />
+                    <span>
+                      <b>Fiber Cut:</b> Field setelah titik cut boleh dikosongkan.
+                      Loss Km 4 selalu kosong (End of Fiber).
+                    </span>
+                  </p>
+                </div>
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -565,7 +624,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                   </div>
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
-                    <input type="number" step="0.001" required value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
+                    <input type="number" step="0.001" value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
                   </div>
                 </div>
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
@@ -583,21 +642,23 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
                     <tbody className="divide-y divide-[#3b4f6e]/30">
                       {[1, 2, 3, 4].map(km => (
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
-                          <td className="p-2 font-bold text-white text-xs">Km {km}</td>
+                          <td className="p-2 font-bold text-white text-xs">Km {km}{km === 4 ? <span className="text-slate-500 text-[9px] ml-1">(EOF)</span> : ''}</td>
                           <td className="p-2">
-                            <input type="number" step="0.00001" required value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            {/* Distance: tidak required untuk km 3-4 saat fiber cut */}
+                            <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder={km <= 2 ? '0.0' : '—'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required={km !== 4} disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
+                            {/* Loss: km4 selalu disabled, km2-3 tidak required (fiber cut) */}
+                            <input type="number" step="0.001" disabled={km === 4} value={km === 4 ? '' : manualForm[`loss_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`loss_${km}`]: e.target.value })} placeholder={km === 4 ? '—' : '0.0'} className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none disabled:opacity-45" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.001" value={manualForm[`total_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`total_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.001" required value={manualForm[`avg_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.001" value={manualForm[`avg_l_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`avg_l_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                           <td className="p-2">
-                            <input type="number" step="0.01" required value={manualForm[`return_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
+                            <input type="number" step="0.01" value={manualForm[`return_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`return_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
                         </tr>
                       ))}
