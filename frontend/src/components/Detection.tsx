@@ -49,6 +49,8 @@ interface OcrParseResult {
   message: string;
   raw_text: string;
   ocr_method: string;
+  detected_mode?: string; 
+  cut_km?: number;
   extracted: {
     distances: number[];
     losses: (number | null)[];
@@ -162,39 +164,56 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 POPULATE FORM DARI OCR
-  const populateFormFromOcr = (ocrData: OcrParseResult) => {
-    const { extracted, prx } = ocrData;
-    
-    setManualForm({
-      prx: prx !== undefined && prx !== null ? prx.toString() : '',
-      avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
-      distance_1: extracted.distances[0]?.toString() || '',
-      distance_2: extracted.distances[1]?.toString() || '',
-      distance_3: extracted.distances[2]?.toString() || '',
-      distance_4: extracted.distances[3]?.toString() || '',
-      loss_1: extracted.losses[0]?.toString() || '',
-      loss_2: extracted.losses[1]?.toString() || '',
-      loss_3: extracted.losses[2]?.toString() || '',
-      loss_4: extracted.losses[3] !== null && extracted.losses[3] !== undefined && extracted.losses[3] !== 0 
-        ? extracted.losses[3].toString() 
-        : '',
-      total_l_1: extracted.total_ls[0]?.toString() || '',
-      total_l_2: extracted.total_ls[1]?.toString() || '',
-      total_l_3: extracted.total_ls[2]?.toString() || '',
-      total_l_4: extracted.total_ls[3]?.toString() || '',
-      avg_l_1: extracted.avg_ls[0]?.toString() || '',
-      avg_l_2: extracted.avg_ls[1]?.toString() || '',
-      avg_l_3: extracted.avg_ls[2]?.toString() || '',
-      avg_l_4: extracted.avg_ls[3]?.toString() || '',
-      return_1: extracted.returns[0]?.toString() || '',
-      return_2: extracted.returns[1]?.toString() || '',
-      return_3: extracted.returns[2]?.toString() || '',
-      return_4: extracted.returns[3]?.toString() || '',
-    });
-    
-    setIsOcrParsed(true);
+  // 🔥 GANTI fungsi populateFormFromOcr dengan ini
+
+const populateFormFromOcr = (ocrData: OcrParseResult) => {
+  const { extracted, prx, detected_mode } = ocrData;
+  
+  // 🔥 Deteksi apakah ini Fiber Cut
+  const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
+  const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
+  
+  // 🔥 Fungsi: null atau 0 → string kosong
+  const valToStr = (val: number | null | undefined): string => {
+    if (val === null || val === undefined || val === 0) return '';
+    return val.toString();
   };
+  
+  // 🔥 Fungsi khusus untuk loss: kosong jika Fiber Cut dan km >= cutKm
+  const lossVal = (val: number | null | undefined, km: number): string => {
+    if (isFiberCut && km >= cutKm) return '';
+    if (val === null || val === undefined || val === 0) return '';
+    return val.toString();
+  };
+  
+  setManualForm({
+    prx: prx !== undefined && prx !== null ? prx.toString() : '',
+    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? extracted.avg_total.toString() : '',
+    distance_1: valToStr(extracted.distances[0]),
+    distance_2: valToStr(extracted.distances[1]),
+    distance_3: valToStr(extracted.distances[2]),
+    distance_4: valToStr(extracted.distances[3]),
+    // 🔥 Loss: kosong jika Fiber Cut di titik cut
+    loss_1: lossVal(extracted.losses[0], 1),
+    loss_2: lossVal(extracted.losses[1], 2),
+    loss_3: lossVal(extracted.losses[2], 3),
+    loss_4: '', // selalu kosong - end of fiber
+    total_l_1: valToStr(extracted.total_ls[0]),
+    total_l_2: valToStr(extracted.total_ls[1]),
+    total_l_3: valToStr(extracted.total_ls[2]),
+    total_l_4: valToStr(extracted.total_ls[3]),
+    avg_l_1: valToStr(extracted.avg_ls[0]),
+    avg_l_2: valToStr(extracted.avg_ls[1]),
+    avg_l_3: valToStr(extracted.avg_ls[2]),
+    avg_l_4: valToStr(extracted.avg_ls[3]),
+    return_1: valToStr(extracted.returns[0]),
+    return_2: valToStr(extracted.returns[1]),
+    return_3: valToStr(extracted.returns[2]),
+    return_4: valToStr(extracted.returns[3]),
+  });
+  
+  setIsOcrParsed(true);
+};
 
   // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
   const handleOcrParse = async (file: File) => {
