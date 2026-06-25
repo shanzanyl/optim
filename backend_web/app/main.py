@@ -912,7 +912,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         if not nums:
             continue
         
-        # 🔥 CARI DISTANCE SEJATI (minimal 3 digit desimal)
+        # 🔥 CARI DISTANCE SEJATI
         distance_idx = None
         for j, val in enumerate(nums):
             if 0.8 <= val <= 4.5:
@@ -934,82 +934,26 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             continue
         
         values = nums[distance_idx:]
-
-        # 🔥 CEK "---" untuk loss = None
-        has_missing_loss = bool(re.search(r'---|—|–', line))
-
-        # ─────────────────────────────────────────────────────────────
-        # Deteksi apakah ini "last event row" (baris terakhir tabel OTDR).
-        # Baris terakhir OTDR biasanya tidak punya kolom Loss (sudah EOF),
-        # sehingga hanya ada: distance, section, total_l, avg_l, return
-        # ATAU: distance, section, total_l, return (4 nilai saja).
-        #
-        # Cara deteksi: jika total_l (values[3]) > loss yang wajar (>3)
-        # DAN avg_l (values[4]) sangat besar (>5) → kolom loss tidak ada,
-        # semua bergeser ke kiri.
-        #
-        # Rule aman:
-        #   len(values) == 5  → bisa jadi last row (loss hilang) atau row biasa dengan 5 kolom
-        #   → cek dengan heuristik: values[2] (slot loss) > 2 dan values[4] > 5
-        #     → kemungkinan besar total_l masuk slot loss, avg_l masuk slot total_l, return masuk avg_l
-        # ─────────────────────────────────────────────────────────────
-
-        # Apakah ini row terakhir (End-of-Fiber / Last Event)?
-        # Tandai jika: baris mengandung "H" atau "Last Event" atau total_events match terakhir
-        is_last_row = bool(re.search(r'\bH\b|Last\s*Event', line, re.IGNORECASE))
-
-        if len(values) >= 6:
-            # Baris lengkap: distance, section, loss, total_l, avg_l, return
-            distance  = values[0]
-            section   = values[1]
-            loss      = None if has_missing_loss else values[2]
-            total_l   = values[3]
-            avg_l     = values[4]
-            return_val = abs(values[5])
-
-        elif len(values) == 5:
-            # Bisa 2 skenario:
-            # A) Baris normal tapi 1 kolom hilang (biasanya return hilang): d, sec, loss, total_l, avg_l
-            # B) Last-row tanpa kolom loss: d, sec, total_l, avg_l, return
-            #
-            # Deteksi B: is_last_row ATAU values[4] > 10 (kemungkinan return)
-            # Deteksi A: values[2] < 5 (nilai loss yang masuk akal)
-            if is_last_row or values[4] > 10.0:
-                # Skenario B: loss tidak ada di baris ini
-                distance  = values[0]
-                section   = values[1]
-                loss      = None   # last row = EOF, loss tidak ada
-                total_l   = values[2]
-                avg_l     = values[3]
-                return_val = abs(values[4])
-            else:
-                # Skenario A: ada loss, return yang hilang
-                distance  = values[0]
-                section   = values[1]
-                loss      = None if has_missing_loss else values[2]
-                total_l   = values[3]
-                avg_l     = values[4]
-                return_val = 45.0  # default
-
-        elif len(values) == 4:
-            # d, sec, total_l, return (last row, loss + avg hilang)
-            distance  = values[0]
-            section   = values[1]
-            loss      = None
-            total_l   = values[2]
-            avg_l     = 0.0
-            return_val = abs(values[3]) if abs(values[3]) > 5 else 45.0
-
-        else:
-            continue
+        
+        distance = values[0] if len(values) > 0 else 0.0
+        section = values[1] if len(values) > 1 else 0.0
+        loss = values[2] if len(values) > 2 else 0.0
+        total_l = values[3] if len(values) > 3 else 0.0
+        avg_l = values[4] if len(values) > 4 else 0.0
+        return_val = abs(values[5]) if len(values) > 5 else 0.0
+        
+        # 🔥 CEK "---"
+        has_missing_loss = re.search(r'---|—|–', line)
+        if has_missing_loss:
+            loss = None
         
         rows.append({
             "distance": distance,
-            "section":  section,
-            "loss":     loss,
-            "total_l":  total_l,
-            "avg_l":    avg_l,
-            "return":   -return_val if return_val > 0 else -45.0
+            "section": section,
+            "loss": loss,
+            "total_l": total_l,
+            "avg_l": avg_l,
+            "return": -return_val if return_val > 0 else -45.0
         })
 
     # =====================================================
@@ -1018,25 +962,20 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 6. VALIDASI SWAP — heuristik kolom tertukar
+    # 6. VALIDASI SWAP
     # =====================================================
     for i, row in enumerate(rows):
-        # Swap loss ↔ total_l: loss harusnya < total_l untuk km yg sama
-        if row['loss'] is not None and row['loss'] > 5.0 and 0 < row['total_l'] < row['loss']:
+        if row['loss'] is not None and row['loss'] > 5.0 and row['total_l'] < 5.0:
             old_loss = row['loss']
             row['loss'] = row['total_l']
             row['total_l'] = old_loss
-            logger.info(f"  KM{i+1}: [SWAP] loss({old_loss}) ↔ total_l({row['total_l']})")
+            logger.info(f"  KM{i+1}: Swapped loss ↔ total_l")
         
-        # Swap avg_l ↔ return: avg_l harus kecil (<2), return harus negatif besar (>30 abs)
-        # Hanya swap jika return bukan sudah default -45.0
-        ret_abs = abs(row['return'])
-        if row['avg_l'] > 10.0 and ret_abs < 10.0:
-            # avg_l sangat besar → kemungkinan ini adalah nilai return
+        if row['avg_l'] > 2.0 and abs(row['return']) < 10.0:
             old_avg = row['avg_l']
-            row['avg_l'] = ret_abs if ret_abs > 0 else 0.0
+            row['avg_l'] = abs(row['return'])
             row['return'] = -old_avg
-            logger.info(f"  KM{i+1}: [SWAP] avg_l({old_avg}) ↔ return({row['return']})")
+            logger.info(f"  KM{i+1}: Swapped avg_l ↔ return")
 
     # =====================================================
     # 7. FIBER CUT DETECTION - PAKAI TOTAL EVENTS
