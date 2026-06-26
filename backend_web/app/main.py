@@ -24,6 +24,8 @@ import cv2
 import requests
 import tempfile
 
+from app import ml          # Model OTDR (LightGBM)
+from app import ml_sor      # Model SOR (Random Forest) - BARU
 from app.database import Base, engine, get_db, AsyncSessionLocal
 from app.models import User, OtdrResult
 from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest
@@ -32,7 +34,6 @@ from app.auth import (
     get_current_user, get_optional_user, get_current_admin
 )
 from app.parseotdr import parse_otdr_table, extract_prx
-from app import ml
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -2572,3 +2573,126 @@ async def setup_telegram_webhook():
         return response.json()
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================================
+# DASHBOARD - PROCESS SOR EXCEL FILE (RANDOM FOREST)
+# ============================================================
+
+@app.post("/api/dashboard/process-sor")
+async def process_sor_file(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
+    """
+    import pandas as pd
+    import io
+    
+    logger.info("=" * 70)
+    logger.info("🔄 Starting SOR Processing with Random Forest...")
+    
+    # 1. Validasi file (support CSV + Excel)
+    ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
+    if not file.filename.endswith(ALLOWED_EXTENSIONS):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File harus berformat: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+    
+    # 2. Baca file (CSV atau Excel)
+    try:
+        content = await file.read()
+        
+        if file.filename.endswith('.csv'):
+            # Baca sebagai CSV
+            df = pd.read_csv(io.BytesIO(content))
+            logger.info(f"✅ CSV loaded: {len(df)} rows, {len(df.columns)} columns")
+        else:
+            # Baca sebagai Excel
+            df = pd.read_excel(io.BytesIO(content))
+            logger.info(f"✅ Excel loaded: {len(df)} rows, {len(df.columns)} columns")
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Gagal membaca file: {str(e)}"
+        )
+    
+    # 3. Cari kolom Backscatter
+    backscatter_col = None
+    possible_cols = ['Backscatter (dB)', 'Backscatter', 'backscatter', 'dB', 'scatter']
+    for col in df.columns:
+        col_lower = col.lower().strip()
+        for possible in possible_cols:
+            if possible.lower() in col_lower:
+                backscatter_col = col
+                break
+        if backscatter_col:
+            break
+    
+    if backscatter_col is None:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Kolom 'Backscatter (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
+        )
+    
+    # 4. Ambil data Backscatter
+    backscatter_data = df[backscatter_col].dropna().values.tolist()
+    
+    if len(backscatter_data) < 128:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 titik diperlukan."
+        )
+    
+    # 5. Cek model SOR sudah loaded
+    if ml_sor.sor_model is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Model Random Forest belum dimuat. Pastikan file model ada di folder models/sor/"
+        )
+    
+    # 6. Sliding Window dengan stride 1
+    window_size = 128
+    predictions = []
+    
+    logger.info(f"📊 Sliding window: size={window_size}, total={len(backscatter_data) - window_size + 1}")
+    
+    for start in range(len(backscatter_data) - window_size + 1):
+        window = backscatter_data[start:start + window_size]
+        
+        try:
+            result = ml_sor.predict_sor_window(window)
+            predictions.append({
+                "start": start,
+                "end": start + window_size - 1,
+                "prediction": result["prediction"],
+                "confidence": result["confidence"]
+            })
+        except Exception as e:
+            logger.error(f"Prediction error at window {start}: {e}")
+            predictions.append({
+                "start": start,
+                "end": start + window_size - 1,
+                "prediction": "Error",
+                "confidence": 0.0
+            })
+    
+    logger.info(f"✅ Predictions: {len(predictions)} windows")
+    
+    # 7. Return response
+    return {
+        "success": True,
+        "backscatter": backscatter_data,
+        "predictions": predictions,
+        "total_windows": len(predictions),
+        "window_size": window_size,
+        "total_points": len(backscatter_data),
+        "filename": file.filename,
+        "metadata": {
+            "columns": df.columns.tolist(),
+            "rows": len(df),
+        }
+    }

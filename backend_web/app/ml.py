@@ -1,45 +1,41 @@
-# ml.py - FIXED VERSION
+# backend_web/app/ml.py
+# Model LightGBM untuk Detection - Update path ke models/otdr/
+
 import joblib
 import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import os
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
-os.environ['OMP_NUM_THREADS'] = '1'
-
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
-# PATH
+# PATH - Model LightGBM untuk OTDR (folder models/otdr/)
+# ══════════════════════════════════════════════════════════════════
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-MODEL_PATHS = [
-    BASE_DIR.parent / "lgbm_model.joblib",
-    Path.cwd() / "lgbm_model.joblib",
-    BASE_DIR / "lgbm_model.joblib",
+# Cari model di folder models/otdr/
+OTDR_MODEL_PATHS = [
+    BASE_DIR / "models" / "otdr" / "lgbm_model.joblib",
+    Path.cwd() / "models" / "otdr" / "lgbm_model.joblib",
 ]
 
-ENCODER_PATHS = [
-    BASE_DIR.parent / "label_encoder.joblib",
-    Path.cwd() / "label_encoder.joblib",
-    BASE_DIR / "label_encoder.joblib",
+OTDR_ENCODER_PATHS = [
+    BASE_DIR / "models" / "otdr" / "label_encoder.joblib",
+    Path.cwd() / "models" / "otdr" / "label_encoder.joblib",
 ]
 
-FEATURE_ORDER_PATHS = [
-    BASE_DIR.parent / "feature_order.json",
-    Path.cwd() / "feature_order.json",
-    BASE_DIR / "feature_order.json",
+OTDR_FEATURE_PATHS = [
+    BASE_DIR / "models" / "otdr" / "feature_order.json",
+    Path.cwd() / "models" / "otdr" / "feature_order.json",
 ]
 
-SCALER_PATHS = [
-    BASE_DIR.parent / "robust_scaler.joblib",
-    Path.cwd() / "robust_scaler.joblib",
-    BASE_DIR / "robust_scaler.joblib",
+OTDR_SCALER_PATHS = [
+    BASE_DIR / "models" / "otdr" / "robust_scaler.joblib",
+    Path.cwd() / "models" / "otdr" / "robust_scaler.joblib",
 ]
 
 # ══════════════════════════════════════════════════════════════════
@@ -52,7 +48,7 @@ robust_scaler = None
 feature_columns = None
 
 # Load model
-for path in MODEL_PATHS:
+for path in OTDR_MODEL_PATHS:
     if path.exists():
         try:
             lgbm_model = joblib.load(path)
@@ -62,7 +58,7 @@ for path in MODEL_PATHS:
             logger.warning(f"Failed to load {path}: {e}")
 
 # Load encoder
-for path in ENCODER_PATHS:
+for path in OTDR_ENCODER_PATHS:
     if path.exists():
         try:
             label_encoder = joblib.load(path)
@@ -72,7 +68,7 @@ for path in ENCODER_PATHS:
             logger.warning(f"Failed to load {path}: {e}")
 
 # Load feature order
-for path in FEATURE_ORDER_PATHS:
+for path in OTDR_FEATURE_PATHS:
     if path.exists():
         try:
             with open(path, 'r') as f:
@@ -84,7 +80,7 @@ for path in FEATURE_ORDER_PATHS:
             logger.warning(f"Failed to load {path}: {e}")
 
 # Load robust scaler
-for path in SCALER_PATHS:
+for path in OTDR_SCALER_PATHS:
     if path.exists():
         try:
             robust_scaler = joblib.load(path)
@@ -122,13 +118,12 @@ def get_status(label: str) -> str:
     return STATUS_MAP.get(label, "Warning")
 
 # ══════════════════════════════════════════════════════════════════
-# PREDICT FUNCTION - FIXED
+# PREDICT FUNCTION (SAMA SEPERTI SEBELUMNYA)
 # ══════════════════════════════════════════════════════════════════
 
 def predict_from_otdr(otdr_values: dict) -> dict:
-    """Prediksi menggunakan LightGBM model dengan error handling"""
+    """Prediksi menggunakan LightGBM model"""
     
-    # If no model, return default based on rules
     if lgbm_model is None:
         logger.warning("⚠️ Model not available, using rule-based prediction")
         
@@ -154,8 +149,6 @@ def predict_from_otdr(otdr_values: dict) -> dict:
             "prediction": prediction,
             "confidence": confidence,
             "status": get_status(prediction),
-            "is_known": None,
-            "recon_error": None,
         }
     
     try:
@@ -182,7 +175,6 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         if label_encoder is not None:
             label = label_encoder.inverse_transform([pred_int])[0]
         else:
-            # Fallback labels
             labels = ["Normal", "Bending", "Bad Splice", "Air Gap", "Dirty Connector", "Nearly Cut", "Fiber Cut"]
             label = labels[pred_int % len(labels)]
         
@@ -198,8 +190,6 @@ def predict_from_otdr(otdr_values: dict) -> dict:
             "prediction": str(label),
             "confidence": round(confidence, 2),
             "status": get_status(str(label)),
-            "is_known": True,
-            "recon_error": None,
         }
         
     except Exception as e:
@@ -225,6 +215,4 @@ def predict_from_otdr(otdr_values: dict) -> dict:
             "prediction": prediction,
             "confidence": 70.0,
             "status": get_status(prediction),
-            "is_known": None,
-            "recon_error": None,
         }
