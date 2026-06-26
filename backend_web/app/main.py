@@ -864,9 +864,13 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
 # OTDR PARSER (DIPERBAIKI - TANPA ROUND)
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+# OTDR PARSER (DIPERBAIKI - FIBER CUT AWARE)
+# ═══════════════════════════════════════════════════════════════════
+
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR - DIPERBAIKI UNTUK FIBER CUT
+    Parse teks OCR OTDR - FIBER CUT AWARE
     """
     text = raw_text.replace(",", ".")
 
@@ -883,7 +887,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             avg_total = float(m2.group(1))
 
     # =====================================================
-    # 2. TOTAL EVENTS
+    # 2. TOTAL EVENTS - DETEKSI FIBER CUT
     # =====================================================
     total_events = 4
     total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
@@ -892,36 +896,58 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         logger.info(f"[TOTAL EVENTS] = {total_events}")
 
     # =====================================================
-    # 3. EKSTRAK BARIS
+    # 3. CLEAN LINES
     # =====================================================
     lines = []
     for line in text.splitlines():
         line = re.sub(r'\s+', ' ', line).strip()
-        if line and re.search(r'\b[1-4]\.\d{3,5}\b', line):
+        if line:
             lines.append(line)
 
     # =====================================================
-    # 4. PARSE SETIAP BARIS - DIPERBAIKI
+    # 4. DETECT EVENT LINES (harus ada distance 1.xxx - 4.xxx)
+    # =====================================================
+    event_lines = []
+    for line in lines:
+        if re.search(r'\b[1-4]\.\d{3,5}\b', line):
+            event_lines.append(line)
+
+    # =====================================================
+    # 5. MERGE OCR BROKEN ROW
+    # =====================================================
+    merged = []
+    i = 0
+    while i < len(event_lines):
+        row = event_lines[i]
+        nums = re.findall(r'\d+\.\d+', row)
+        while len(nums) < 5 and i + 1 < len(event_lines):
+            i += 1
+            row += " " + event_lines[i]
+            nums = re.findall(r'\d+\.\d+', row)
+        merged.append(row)
+        i += 1
+
+    # =====================================================
+    # 6. PARSE EACH ROW
     # =====================================================
     rows = []
-    
-    for line in lines:
-        nums = re.findall(r'-?\d+\.?\d*', line)
-        nums = [float(x) for x in nums if abs(float(x)) < 100]
-        
+    for idx, row in enumerate(merged):
+        nums = [
+            float(x) for x in re.findall(r'-?\d+\.?\d*', row)
+            if abs(float(x)) < 100
+        ]
+
         if not nums:
             continue
-        
-        # 🔥 CARI DISTANCE SEJATI
-        # Distance sejati: 1.004xx, 2.006xx, 3.010xx, 4.014xx
-        # Ciri: 3-5 digit desimal
+
+        # 🔥 CARI DISTANCE SEJATI (skip nomor event seperti 3.1, 4.1)
         distance_idx = None
         for j, val in enumerate(nums):
             if 0.8 <= val <= 4.5:
                 val_str = str(val)
                 if '.' in val_str:
                     decimal_part = val_str.split('.')[1]
-                    # 🔥 HANYA AMBIL YANG 3-5 DIGIT DESIMAL
+                    # 🔥 HANYA AMBIL YANG 3-5 DIGIT DESIMAL (distance sejati)
                     if len(decimal_part) >= 3:
                         distance_idx = j
                         break
@@ -933,48 +959,53 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
                     val_str = str(val)
                     if '.' in val_str:
                         decimal_part = val_str.split('.')[1]
-                        # 🔥 SKIP jika 1 digit desimal (3.1, 4.1) → nomor event
                         if len(decimal_part) >= 2:
                             distance_idx = j
                             break
-        
-        # 🔥 Jika masih tidak ada, skip baris ini
+
         if distance_idx is None:
             continue
-        
-        values = nums[distance_idx:]
-        
-        # 🔥 LOG UNTUK DEBUG
-        logger.info(f"Line: {line[:50]}... → nums={nums}, distance_idx={distance_idx}, values={values}")
-        
-        distance = values[0] if len(values) > 0 else 0.0
-        section = values[1] if len(values) > 1 else 0.0
-        loss = values[2] if len(values) > 2 else 0.0
-        total_l = values[3] if len(values) > 3 else 0.0
-        avg_l = values[4] if len(values) > 4 else 0.0
-        return_val = abs(values[5]) if len(values) > 5 else 0.0
-        
-        # 🔥 CEK "---"
-        has_missing_loss = re.search(r'---|—|–', line)
-        if has_missing_loss:
-            loss = None
-        
+
+        nums = nums[distance_idx:]
+
+        # 🔥 CEK "---" (loss tidak terbaca)
+        has_missing_loss = re.search(r'---|—|–', row)
+
+        if len(nums) >= 6:
+            distance = nums[0]
+            section = nums[1]
+            loss = None if has_missing_loss else (nums[2] if nums[2] is not None else 0.0)
+            total_l = nums[3] if nums[3] is not None else 0.0
+            avg_l = nums[4] if nums[4] is not None else 0.0
+            return_val = nums[5] if nums[5] is not None else 0.0
+
+        elif len(nums) == 5:
+            distance = nums[0]
+            section = nums[1]
+            loss = None if has_missing_loss else 0.0
+            total_l = nums[2] if nums[2] is not None else 0.0
+            avg_l = nums[3] if nums[3] is not None else 0.0
+            return_val = nums[4] if nums[4] is not None else 0.0
+
+        else:
+            continue
+
         rows.append({
             "distance": distance,
             "section": section,
             "loss": loss,
             "total_l": total_l,
             "avg_l": avg_l,
-            "return": -return_val if return_val > 0 else -45.0
+            "return": -abs(return_val) if return_val != 0 else -45.0
         })
 
     # =====================================================
-    # 5. SORT BY DISTANCE
+    # 7. SORT BY DISTANCE
     # =====================================================
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 6. VALIDASI: Perbaiki nilai yang salah
+    # 8. VALIDASI: Perbaiki nilai yang salah
     # =====================================================
     for i, row in enumerate(rows):
         # 🔥 Jika loss > 5 dan total_l < 5 → swap
@@ -983,33 +1014,34 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             row['loss'] = row['total_l']
             row['total_l'] = old_loss
             logger.info(f"  KM{i+1}: Swapped loss ↔ total_l")
-    
+        
         # 🔥 Jika avg_l > 2 dan return < 10 → swap
         if row['avg_l'] > 2.0 and abs(row['return']) < 10.0:
             old_avg = row['avg_l']
             row['avg_l'] = abs(row['return'])
             row['return'] = -old_avg
             logger.info(f"  KM{i+1}: Swapped avg_l ↔ return")
-    
+        
         # 🔥 Jika total_l dan avg_l tertukar
         if row['total_l'] < 5.0 and row['avg_l'] > 10.0:
             old_total = row['total_l']
             row['total_l'] = row['avg_l']
             row['avg_l'] = old_total
             logger.info(f"  KM{i+1}: Swapped total_l ↔ avg_l")
-    
-        # 🔥 TAMBAHKAN: Pastikan semua nilai positif (untuk loss, total_l, avg_l)
+        
+        # 🔥 Pastikan semua nilai positif
         if row['loss'] is not None:
             row['loss'] = abs(row['loss'])
         row['total_l'] = abs(row['total_l'])
         row['avg_l'] = abs(row['avg_l'])
 
     # =====================================================
-    # 7. FIBER CUT DETECTION
+    # 9. FIBER CUT DETECTION
     # =====================================================
     is_fiber_cut = False
     cut_km = -1
     
+    # 🔥 Dari Total Events
     if total_events == 2:
         is_fiber_cut = True
         cut_km = 2
@@ -1030,11 +1062,12 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
                 break
 
     # =====================================================
-    # 8. NORMALISASI FIBER CUT
+    # 10. NORMALISASI FIBER CUT
     # =====================================================
     if is_fiber_cut and cut_km == 2:
         if len(rows) >= 2:
             rows[1]['loss'] = None
+            logger.info(f"  KM2 loss set to None")
         
         while len(rows) > 2:
             rows.pop()
@@ -1046,6 +1079,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     elif is_fiber_cut and cut_km == 3:
         if len(rows) >= 3:
             rows[2]['loss'] = None
+            logger.info(f"  KM3 loss set to None")
         
         if len(rows) < 4:
             last_dist = rows[-1]['distance'] if rows else 3.0
@@ -1056,7 +1090,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         rows[3]["loss"] = None
 
     # =====================================================
-    # 9. PASTIKAN 4 ROWS
+    # 11. PASTIKAN 4 ROWS
     # =====================================================
     while len(rows) < 4:
         km = len(rows) + 1
@@ -1071,7 +1105,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         })
 
     # =====================================================
-    # 10. LOG
+    # 12. LOG HASIL
     # =====================================================
     logger.info("===== FINAL PARSED ROWS =====")
     for i, r in enumerate(rows, start=1):
@@ -1229,7 +1263,11 @@ async def parse_ocr_only(
     
     logger.info(f"📊 Parsed rows: {len(rows)}")
     for i, row in enumerate(rows):
-        logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
+        logger.info(f"   KM{i+1}: dist={row['distance']}, loss={row['loss']}, total_l={row['total_l']}")
+    
+    # 🔥 DEBUG: Pastikan loss KM3 = None untuk Fiber Cut
+    if mode == 'fiber_cut_km3' and len(rows) >= 3:
+        logger.info(f"🔍 DEBUG: KM3 loss = {rows[2].get('loss')} (type: {type(rows[2].get('loss'))})")
     
     # 🔥 VALIDASI DENGAN AMAN
     valid = [r for r in rows if r['distance'] > 0.5]
@@ -1252,11 +1290,11 @@ async def parse_ocr_only(
             "needs_manual": True,
             "message": "Data yang terdeteksi tidak lengkap. Silakan input data secara manual.",
             "extracted": {
-                "distances": [rows[i]['distance'] for i in range(4)],
-                "losses": [rows[i]['loss'] for i in range(4)],
-                "total_ls": [rows[i]['total_l'] for i in range(4)],
-                "avg_ls": [rows[i]['avg_l'] for i in range(4)],
-                "returns": [rows[i]['return'] for i in range(4)],
+                "distances": [rows[i]['distance'] if i < len(rows) else 0 for i in range(4)],
+                "losses": [rows[i]['loss'] if i < len(rows) else None for i in range(4)],
+                "total_ls": [rows[i]['total_l'] if i < len(rows) else 0 for i in range(4)],
+                "avg_ls": [rows[i]['avg_l'] if i < len(rows) else 0 for i in range(4)],
+                "returns": [rows[i]['return'] if i < len(rows) else 0 for i in range(4)],
                 "avg_total": avg_total if avg_total else 0,
             },
             "prx": final_prx,
@@ -1280,6 +1318,19 @@ async def parse_ocr_only(
             "return": -45.0
         })
     
+    # 🔥 Pastikan loss untuk Fiber Cut tetap None di response
+    # (mencegah perubahan None menjadi 0 di proses mapping)
+    loss_values = []
+    for i, row in enumerate(rows):
+        loss_val = row.get('loss')
+        # 🔥 Jika loss adalah 0 dan ini adalah Fiber Cut di KM3, tetap None
+        if mode == 'fiber_cut_km3' and i == 2 and (loss_val == 0 or loss_val is None):
+            loss_values.append(None)
+        elif mode == 'fiber_cut_km2' and i >= 1 and (loss_val == 0 or loss_val is None):
+            loss_values.append(None)
+        else:
+            loss_values.append(loss_val)
+    
     logger.info("=" * 70)
     logger.info("✅ OCR parsing completed (NO ML classification)")
     
@@ -1292,7 +1343,7 @@ async def parse_ocr_only(
         "cut_km": cut_km, 
         "extracted": {
             "distances": [rows[i]['distance'] for i in range(4)],
-            "losses": [rows[i]['loss'] for i in range(4)],
+            "losses": loss_values,  # 🔥 GUNAKAN loss_values yang sudah dipastikan None
             "total_ls": [rows[i]['total_l'] for i in range(4)],
             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
             "returns": [rows[i]['return'] for i in range(4)],

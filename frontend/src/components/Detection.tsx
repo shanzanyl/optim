@@ -165,27 +165,36 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // Detection.tsx - populateFormFromOcr
 
+// 🔥 PERBAIKI: formatLossValue
+const formatLossValue = (value: number | null | undefined) => {
+  // 🔥 Jika value = null, undefined, atau 0 → tampilkan ---
+  if (value === null || value === undefined || value === 0) return '---';
+  return Math.abs(value).toFixed(2);
+};
+
+// 🔥 PERBAIKI: populateFormFromOcr
 const populateFormFromOcr = (ocrData: OcrParseResult) => {
   const { extracted, prx, detected_mode } = ocrData;
   
   const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
   const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
   
-  // 🔥 Untuk loss, total_l, avg_l: ambil nilai absolut (positif)
+  // 🔥 Untuk nilai yang harus positif (loss, total_l, avg_l, distance)
   const valToStr = (val: number | null | undefined): string => {
     if (val === null || val === undefined || val === 0) return '';
     return Math.abs(val).toString();
   };
   
-  // 🔥 Untuk return: TETAP NEGATIF, jangan pakai Math.abs()
+  // 🔥 Untuk return: TETAP NEGATIF
   const returnToStr = (val: number | null | undefined): string => {
     if (val === null || val === undefined) return '';
-    return val.toString();  // ← TETAP NEGATIF
+    return val.toString();
   };
   
+  // 🔥 Untuk loss: kosong jika Fiber Cut dan km >= cutKm
   const lossVal = (val: number | null | undefined, km: number): string => {
+    // 🔥 Jika Fiber Cut dan km >= cutKm → kosong
     if (isFiberCut && km >= cutKm) return '';
     if (val === null || val === undefined || val === 0) return '';
     return Math.abs(val).toString();
@@ -198,10 +207,11 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     distance_2: valToStr(extracted.distances[1]),
     distance_3: valToStr(extracted.distances[2]),
     distance_4: valToStr(extracted.distances[3]),
+    // 🔥 Loss: kosong jika Fiber Cut di titik cut
     loss_1: lossVal(extracted.losses[0], 1),
     loss_2: lossVal(extracted.losses[1], 2),
     loss_3: lossVal(extracted.losses[2], 3),
-    loss_4: '',
+    loss_4: '', // selalu kosong - end of fiber
     total_l_1: valToStr(extracted.total_ls[0]),
     total_l_2: valToStr(extracted.total_ls[1]),
     total_l_3: valToStr(extracted.total_ls[2]),
