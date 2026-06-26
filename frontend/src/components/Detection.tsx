@@ -165,52 +165,60 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
     return `${day}/${month}/${year} ${hours}.${minutes}`;
   };
 
-  // 🔥 POPULATE FORM DARI OCR - DIPERBAIKI
-  const populateFormFromOcr = (ocrData: OcrParseResult) => {
-    const { extracted, prx, detected_mode } = ocrData;
-    
-    const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
-    const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
-    
-    // 🔥 Ambil nilai absolut (positif)
-    const valToStr = (val: number | null | undefined): string => {
-      if (val === null || val === undefined || val === 0) return '';
-      return Math.abs(val).toString();
-    };
-    
-    const lossVal = (val: number | null | undefined, km: number): string => {
-      if (isFiberCut && km >= cutKm) return '';
-      if (val === null || val === undefined || val === 0) return '';
-      return Math.abs(val).toString();
-    };
-    
-    setManualForm({
-      prx: prx !== undefined && prx !== null ? prx.toString() : '',
-      avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? Math.abs(extracted.avg_total).toString() : '',
-      distance_1: valToStr(extracted.distances[0]),
-      distance_2: valToStr(extracted.distances[1]),
-      distance_3: valToStr(extracted.distances[2]),
-      distance_4: valToStr(extracted.distances[3]),
-      loss_1: lossVal(extracted.losses[0], 1),
-      loss_2: lossVal(extracted.losses[1], 2),
-      loss_3: lossVal(extracted.losses[2], 3),
-      loss_4: '',
-      total_l_1: valToStr(extracted.total_ls[0]),
-      total_l_2: valToStr(extracted.total_ls[1]),
-      total_l_3: valToStr(extracted.total_ls[2]),
-      total_l_4: valToStr(extracted.total_ls[3]),
-      avg_l_1: valToStr(extracted.avg_ls[0]),
-      avg_l_2: valToStr(extracted.avg_ls[1]),
-      avg_l_3: valToStr(extracted.avg_ls[2]),
-      avg_l_4: valToStr(extracted.avg_ls[3]),
-      return_1: valToStr(extracted.returns[0]),
-      return_2: valToStr(extracted.returns[1]),
-      return_3: valToStr(extracted.returns[2]),
-      return_4: valToStr(extracted.returns[3]),
-    });
-    
-    setIsOcrParsed(true);
+  // Detection.tsx - populateFormFromOcr
+
+const populateFormFromOcr = (ocrData: OcrParseResult) => {
+  const { extracted, prx, detected_mode } = ocrData;
+  
+  const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
+  const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
+  
+  // 🔥 Untuk loss, total_l, avg_l: ambil nilai absolut (positif)
+  const valToStr = (val: number | null | undefined): string => {
+    if (val === null || val === undefined || val === 0) return '';
+    return Math.abs(val).toString();
   };
+  
+  // 🔥 Untuk return: TETAP NEGATIF, jangan pakai Math.abs()
+  const returnToStr = (val: number | null | undefined): string => {
+    if (val === null || val === undefined) return '';
+    return val.toString();  // ← TETAP NEGATIF
+  };
+  
+  const lossVal = (val: number | null | undefined, km: number): string => {
+    if (isFiberCut && km >= cutKm) return '';
+    if (val === null || val === undefined || val === 0) return '';
+    return Math.abs(val).toString();
+  };
+  
+  setManualForm({
+    prx: prx !== undefined && prx !== null ? prx.toString() : '',
+    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? Math.abs(extracted.avg_total).toString() : '',
+    distance_1: valToStr(extracted.distances[0]),
+    distance_2: valToStr(extracted.distances[1]),
+    distance_3: valToStr(extracted.distances[2]),
+    distance_4: valToStr(extracted.distances[3]),
+    loss_1: lossVal(extracted.losses[0], 1),
+    loss_2: lossVal(extracted.losses[1], 2),
+    loss_3: lossVal(extracted.losses[2], 3),
+    loss_4: '',
+    total_l_1: valToStr(extracted.total_ls[0]),
+    total_l_2: valToStr(extracted.total_ls[1]),
+    total_l_3: valToStr(extracted.total_ls[2]),
+    total_l_4: valToStr(extracted.total_ls[3]),
+    avg_l_1: valToStr(extracted.avg_ls[0]),
+    avg_l_2: valToStr(extracted.avg_ls[1]),
+    avg_l_3: valToStr(extracted.avg_ls[2]),
+    avg_l_4: valToStr(extracted.avg_ls[3]),
+    // 🔥 Return: tetap negatif
+    return_1: returnToStr(extracted.returns[0]),
+    return_2: returnToStr(extracted.returns[1]),
+    return_3: returnToStr(extracted.returns[2]),
+    return_4: returnToStr(extracted.returns[3]),
+  });
+  
+  setIsOcrParsed(true);
+};
 
   // 🔥 HANDLE OCR PARSE - PAKAI ENDPOINT /api/parse-ocr
   const handleOcrParse = async (file: File) => {
