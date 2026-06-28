@@ -146,13 +146,22 @@ const MainDashboard = () => {
     setUploadProgress(10);
 
     try {
+      // BUG FIX: token bisa null → dikirim sebagai literal "null" → backend 401/403
       const token = localStorage.getItem('token');
+      console.log('[DASHBOARD] UPLOAD START:', file.name, 'size:', file.size);
+      console.log('[DASHBOARD] TOKEN EXISTS:', !!token, token ? `...${token.slice(-10)}` : 'NULL');
+
+      if (!token) {
+        throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
+      }
       
       setUploadProgress(30);
       setStatusMessage('Memproses data...');
       setStatus('processing');
       
       const API_URL = import.meta.env.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
+      console.log('[DASHBOARD] API_URL:', API_URL);
+      console.log('[DASHBOARD] Sending fetch to:', `${API_URL}/api/dashboard/process-sor`);
       
       const response = await fetch(`${API_URL}/api/dashboard/process-sor`, {
         method: 'POST',
@@ -161,6 +170,7 @@ const MainDashboard = () => {
         },
         body: formData,
       });
+      console.log('[DASHBOARD] RESPONSE STATUS:', response.status, response.statusText);
 
       setUploadProgress(70);
 

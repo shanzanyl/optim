@@ -431,8 +431,9 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "https://ashy-mushroom-0feb76700.7.azurestaticapps.net",
-        "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net",
-        "*"
+        # BUG FIX: wildcard "*" + allow_credentials=True adalah kombinasi ilegal per spec CORS.
+        # Browser menolak SEMUA preflight OPTIONS request → "Failed to fetch" / "403 Not authenticated".
+        # Solusi: hilangkan "*", daftarkan origin secara eksplisit.
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -449,7 +450,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 from PIL import Image, ImageEnhance
 from typing import List, Dict, Tuple
 
-logger = logging.getLogger(__name__)
+# NOTE: logger sudah didefinisikan di atas (line ~39), tidak perlu deklarasi ulang
 
 def preprocess_image_simple(image_bytes: bytes) -> list:
     """Preprocessing lebih agresif untuk OCR - OPTIMASI"""
@@ -2587,59 +2588,67 @@ async def process_sor_file(
     """
     Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
     """
-    import pandas as pd
-    import io
-    
+    # ── LOG: MAIN START ──
     logger.info("=" * 70)
-    logger.info("🔄 Starting SOR Processing with Random Forest...")
-    
+    logger.info("[SOR] ▶ ENTER PROCESS_SOR")
+    logger.info(f"[SOR]   user={current_user.email} (id={current_user.id})")
+    logger.info(f"[SOR]   filename={file.filename}, content_type={file.content_type}")
+
+    # ── LOG: AUTH SUCCESS ──
+    logger.info("[SOR] ✅ AUTH SUCCESS — token valid, user ditemukan")
+
     # 1. Validasi file (support CSV + Excel)
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
-    if not file.filename.endswith(ALLOWED_EXTENSIONS):
+    if not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
+        logger.warning(f"[SOR] ❌ FILE REJECTED: {file.filename}")
         raise HTTPException(
             status_code=400, 
             detail=f"File harus berformat: {', '.join(ALLOWED_EXTENSIONS)}"
         )
-    
+
     # 2. Baca file (CSV atau Excel)
+    logger.info("[SOR] ── STEP 1: READ FILE ──")
     try:
         content = await file.read()
+        logger.info(f"[SOR]   file size = {len(content)} bytes")
         
-        if file.filename.endswith('.csv'):
-            # Baca sebagai CSV
+        if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(content))
-            logger.info(f"✅ CSV loaded: {len(df)} rows, {len(df.columns)} columns")
         else:
-            # Baca sebagai Excel
             df = pd.read_excel(io.BytesIO(content))
-            logger.info(f"✅ Excel loaded: {len(df)} rows, {len(df.columns)} columns")
             
+        logger.info(f"[SOR] ✅ READ EXCEL/CSV: {len(df)} rows × {len(df.columns)} columns")
+        logger.info(f"[SOR]   columns = {df.columns.tolist()}")
+
     except Exception as e:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Gagal membaca file: {str(e)}"
-        )
+        logger.error(f"[SOR] ❌ READ FILE FAILED: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Gagal membaca file: {str(e)}")
     
     # 3. Cari kolom Backscatter
+    logger.info("[SOR] ── STEP 2: FIND BACKSCATTER COLUMN ──")
     backscatter_col = None
-    possible_cols = ['Backscatter (dB)', 'Backscatter', 'backscatter', 'dB', 'scatter']
+    possible_cols = ['backscatter (db)', 'backscatter', 'db', 'scatter', 'amplitude']
     for col in df.columns:
         col_lower = col.lower().strip()
         for possible in possible_cols:
-            if possible.lower() in col_lower:
+            if possible in col_lower:
                 backscatter_col = col
                 break
         if backscatter_col:
             break
     
     if backscatter_col is None:
+        logger.error(f"[SOR] ❌ BACKSCATTER COLUMN NOT FOUND. Available: {df.columns.tolist()}")
         raise HTTPException(
             status_code=400, 
             detail=f"Kolom 'Backscatter (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
         )
     
+    logger.info(f"[SOR] ✅ BACKSCATTER COLUMN FOUND: '{backscatter_col}'")
+
     # 4. Ambil data Backscatter
-    backscatter_data = df[backscatter_col].dropna().values.tolist()
+    backscatter_data = pd.to_numeric(df[backscatter_col], errors='coerce').dropna().values.tolist()
+    logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
     
     if len(backscatter_data) < 128:
         raise HTTPException(
@@ -2648,20 +2657,32 @@ async def process_sor_file(
         )
     
     # 5. Cek model SOR sudah loaded
+    logger.info("[SOR] ── STEP 3: CHECK MODEL ──")
     if ml_sor.sor_model is None:
+        logger.error("[SOR] ❌ SOR MODEL IS NONE — model belum dimuat!")
+        logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
         raise HTTPException(
             status_code=500,
             detail="Model Random Forest belum dimuat. Pastikan file model ada di folder models/sor/"
         )
+    logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
+    logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
+    logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
     
     # 6. Sliding Window dengan stride 1
     window_size = 128
     predictions = []
+    total_windows = len(backscatter_data) - window_size + 1
     
-    logger.info(f"📊 Sliding window: size={window_size}, total={len(backscatter_data) - window_size + 1}")
+    logger.info(f"[SOR] ── STEP 4: SLIDING WINDOW START ──")
+    logger.info(f"[SOR]   window_size={window_size}, stride=1, total_windows={total_windows}")
     
-    for start in range(len(backscatter_data) - window_size + 1):
+    for start in range(total_windows):
         window = backscatter_data[start:start + window_size]
+        
+        # Log setiap 500 window agar tidak flood
+        if start % 500 == 0:
+            logger.info(f"[SOR]   WINDOW {start}/{total_windows} processing...")
         
         try:
             result = ml_sor.predict_sor_window(window)
@@ -2672,7 +2693,7 @@ async def process_sor_file(
                 "confidence": result["confidence"]
             })
         except Exception as e:
-            logger.error(f"Prediction error at window {start}: {e}")
+            logger.error(f"[SOR] ❌ PREDICTION ERROR at window {start}: {e}", exc_info=True)
             predictions.append({
                 "start": start,
                 "end": start + window_size - 1,
@@ -2680,7 +2701,9 @@ async def process_sor_file(
                 "confidence": 0.0
             })
     
-    logger.info(f"✅ Predictions: {len(predictions)} windows")
+    logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
+    logger.info(f"[SOR] ── RETURN RESPONSE ──")
+    logger.info("=" * 70)
     
     # 7. Return response
     return {
