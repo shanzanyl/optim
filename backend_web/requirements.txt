@@ -49,3 +49,7 @@ anyio==4.6.2
 python-dateutil==2.9.0.post0
 pytz==2024.2
 pydantic==2.9.0
+
+# SOR
+openpyxl==3.1.5
+xlrd==2.0.1
