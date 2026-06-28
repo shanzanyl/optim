@@ -346,8 +346,8 @@ const MainDashboard = () => {
 
     const displayedData = data.backscatter.slice(0, currentPointIndex + 1);
     
-    let windowStart = null;
-    let windowEnd = null;
+    let windowStart: number | null = null;
+    let windowEnd: number | null = null;
     let windowData: (number | null)[] = [];
     
     if (currentPredictionIndex >= 0 && currentPredictionIndex < data.predictions.length) {
@@ -471,14 +471,14 @@ const MainDashboard = () => {
         title: {
           display: true,
           text: 'Time',
-          color: '#94a3b8',
+          color: '#ffffff',
           font: { weight: 'bold' as const, size: 12 },
         },
         grid: {
           color: '#3d4e6b',
         },
         ticks: {
-          color: '#94a3b8',
+          color: '#ffffff',
           maxTicksLimit: 20,
         },
       },
@@ -486,14 +486,14 @@ const MainDashboard = () => {
         title: {
           display: true,
           text: 'Backscatter (dB)',
-          color: '#94a3b8',
+          color: '#ffffff',
           font: { weight: 'bold' as const, size: 12 },
         },
         grid: {
           color: '#3d4e6b',
         },
         ticks: {
-          color: '#94a3b8',
+          color: '#ffffff',
         },
         reverse: true,
       },
@@ -528,7 +528,7 @@ const MainDashboard = () => {
           <div className="w-full sm:w-auto">
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white flex items-center gap-2">
               <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 flex-shrink-0" />
-              <span className="truncate">OTDR Monitoring Simulator</span>
+              <span className="truncate">Optical Monitoring</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 truncate">
             </p>
@@ -583,7 +583,7 @@ const MainDashboard = () => {
               </span>
             </div>
             {data && (
-              <div className="flex items-center gap-1 sm:gap-3 text-[10px] sm:text-xs text-slate-400 flex-wrap">
+              <div className="flex items-center gap-1 sm:gap-3 text-[10px] sm:text-xs text-white flex-wrap">
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Titik: {data.total_points}</span>
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Window: {data.total_windows}</span>
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e] hidden sm:inline">Size: {data.window_size}</span>
@@ -640,7 +640,7 @@ const MainDashboard = () => {
                     <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-slate-500" />
                   </div>
                   <p className="font-medium text-white text-sm sm:text-base">Upload file SOR untuk memulai monitoring</p>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx) dengan kolom Backscatter</p>
+                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx)</p>
                 </div>
               </div>
             )}
@@ -697,7 +697,7 @@ const MainDashboard = () => {
 
           {/* Current Prediction */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
             {currentPrediction ? (
               <div>
                 <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -721,7 +721,7 @@ const MainDashboard = () => {
 
           {/* Status */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
                 status === 'playing' ? 'bg-green-500 animate-pulse' :
@@ -747,7 +747,7 @@ const MainDashboard = () => {
 
           {/* Zoom Controls */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
             <div className="flex gap-1.5 sm:gap-2">
               <button
                 onClick={() => {
@@ -796,11 +796,11 @@ const MainDashboard = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-xs sm:text-sm">
                 <thead className="bg-[#0f1a2e] sticky top-0">
-                  <tr className="text-slate-400 font-medium text-[9px] sm:text-xs border-b border-[#3b4f6e]">
+                  <tr className="text-white font-medium text-[9px] sm:text-xs border-b border-[#3b4f6e]">
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Time</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left hidden xs:table-cell">Window</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Prediction</th>
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Conf.</th>
+                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -811,7 +811,7 @@ const MainDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    history.slice(-50).reverse().map((entry, i) => (
+                    history.slice(-500).reverse().map((entry, i) => (
                       <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
                         <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 whitespace-nowrap">{entry.time}</td>
                         <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 hidden xs:table-cell">{entry.window}</td>
