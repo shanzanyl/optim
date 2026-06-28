@@ -2668,39 +2668,24 @@ async def process_sor_file(
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
     logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
     logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
-    
-    # 6. Sliding Window dengan stride 1
+
+    # 6. BATCH PREDICT — semua window sekaligus, jauh lebih cepat dari loop
     window_size = 128
-    predictions = []
     total_windows = len(backscatter_data) - window_size + 1
-    
-    logger.info(f"[SOR] ── STEP 4: SLIDING WINDOW START ──")
-    logger.info(f"[SOR]   window_size={window_size}, stride=1, total_windows={total_windows}")
-    
-    for start in range(total_windows):
-        window = backscatter_data[start:start + window_size]
-        
-        # Log setiap 500 window agar tidak flood
-        if start % 500 == 0:
-            logger.info(f"[SOR]   WINDOW {start}/{total_windows} processing...")
-        
-        try:
-            result = ml_sor.predict_sor_window(window)
-            predictions.append({
-                "start": start,
-                "end": start + window_size - 1,
-                "prediction": result["prediction"],
-                "confidence": result["confidence"]
-            })
-        except Exception as e:
-            logger.error(f"[SOR] ❌ PREDICTION ERROR at window {start}: {e}", exc_info=True)
-            predictions.append({
-                "start": start,
-                "end": start + window_size - 1,
-                "prediction": "Error",
-                "confidence": 0.0
-            })
-    
+
+    logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
+    logger.info(f"[SOR]   window_size={window_size}, total_windows={total_windows}")
+
+    try:
+        predictions = await asyncio.to_thread(
+            ml_sor.predict_sor_batch,
+            backscatter_data,
+            window_size,
+        )
+    except Exception as e:
+        logger.error(f"[SOR] ❌ BATCH PREDICT FAILED: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Prediksi gagal: {str(e)}")
+
     logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
     logger.info(f"[SOR] ── RETURN RESPONSE ──")
     logger.info("=" * 70)

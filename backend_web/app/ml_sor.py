@@ -1,5 +1,5 @@
 # backend_web/app/ml_sor.py
-# Model Random Forest untuk Dashboard SOR
+# Model Random Forest untuk Dashboard SOR — BATCH PREDICT
 
 import joblib
 import json
@@ -12,47 +12,33 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════════════════════════
-# PATH - Model Random Forest untuk SOR
-# ══════════════════════════════════════════════════════════════════
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SOR_MODEL_PATHS = [
     BASE_DIR / "models" / "sor" / "random_forest_model.pkl",
     Path.cwd() / "models" / "sor" / "random_forest_model.pkl",
 ]
-
 SOR_SCALER_PATHS = [
     BASE_DIR / "models" / "sor" / "scaler.pkl",
     Path.cwd() / "models" / "sor" / "scaler.pkl",
 ]
-
 SOR_FEATURE_PATHS = [
     BASE_DIR / "models" / "sor" / "feature_names.json",
     Path.cwd() / "models" / "sor" / "feature_names.json",
 ]
-
 SOR_LABEL_PATHS = [
     BASE_DIR / "models" / "sor" / "label_encoder_classes.json",
     Path.cwd() / "models" / "sor" / "label_encoder_classes.json",
 ]
 
-# ══════════════════════════════════════════════════════════════════
-# LOAD MODEL
-# ══════════════════════════════════════════════════════════════════
-
 sor_model = None
 sor_scaler = None
 sor_feature_names = None
 sor_label_classes = None
-
-# Cache DataFrame columns — dibuat sekali saat load, dipakai di setiap predict
 _df_columns = None
 
 
 def load_sor_models():
-    """Load semua model Random Forest untuk SOR"""
     global sor_model, sor_scaler, sor_feature_names, sor_label_classes, _df_columns
 
     logger.info("=" * 50)
@@ -63,7 +49,6 @@ def load_sor_models():
     for p in SOR_MODEL_PATHS:
         logger.info(f"[ML_SOR]   model path check: {p} → exists={p.exists()}")
 
-    # Load model
     for path in SOR_MODEL_PATHS:
         if path.exists():
             try:
@@ -73,7 +58,6 @@ def load_sor_models():
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    # Load scaler
     for path in SOR_SCALER_PATHS:
         if path.exists():
             try:
@@ -83,110 +67,155 @@ def load_sor_models():
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    # Load feature names
     for path in SOR_FEATURE_PATHS:
         if path.exists():
             try:
                 with open(path, 'r') as f:
                     sor_feature_names = json.load(f)
-                logger.info(f"[ML_SOR] ✅ feature names loaded: {path} ({len(sor_feature_names)} features)")
+                logger.info(f"[ML_SOR] ✅ feature names loaded ({len(sor_feature_names)} features)")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    # Load label classes
     for path in SOR_LABEL_PATHS:
         if path.exists():
             try:
                 with open(path, 'r') as f:
                     sor_label_classes = json.load(f)
-                logger.info(f"[ML_SOR] ✅ label classes loaded: {sor_label_classes}")
+                logger.info(f"[ML_SOR] ✅ label classes: {sor_label_classes}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    # Siapkan nama kolom DataFrame — pakai feature_names kalau ada,
-    # fallback ke t000..t127 supaya scaler tidak komplain
-    if sor_feature_names:
-        _df_columns = sor_feature_names
-    else:
-        _df_columns = [f"t{i:03d}" for i in range(128)]
-
-    logger.info(f"[ML_SOR]   _df_columns (sample): {_df_columns[:5]} ... {_df_columns[-3:]}")
+    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(128)]
+    logger.info(f"[ML_SOR]   columns sample: {_df_columns[:3]} ... {_df_columns[-3:]}")
 
     if sor_model is None:
         logger.warning("[ML_SOR] ⚠️ SOR model NOT FOUND!")
-        logger.warning(f"[ML_SOR]   Paths tried: {[str(p) for p in SOR_MODEL_PATHS]}")
     else:
         logger.info(f"[ML_SOR] ✅ All artifacts ready. type={type(sor_model).__name__}")
-
     logger.info("=" * 50)
     return sor_model is not None
 
 
-def predict_sor_window(window_data: list) -> dict:
+def predict_sor_batch(backscatter_data: list, window_size: int = 128) -> list:
     """
-    Prediksi satu window dengan Random Forest.
+    BATCH PREDICT — semua window diprediksi sekaligus dalam satu .predict() call.
+    
+    Jauh lebih cepat dari loop per-window:
+    - Sebelumnya: 7738 × model.predict() = ~10 menit
+    - Sekarang:   1 × model.predict(7738 rows) = ~5-15 detik
 
-    FIX UTAMA: kirim input sebagai pd.DataFrame dengan nama kolom
-    yang sama seperti saat training → hilangkan UserWarning dari scaler.
+    Args:
+        backscatter_data: list nilai Backscatter (dB) dari CSV
+        window_size: ukuran sliding window (default 128)
+
+    Returns:
+        list of dict: [{start, end, prediction, confidence}, ...]
     """
     if sor_model is None:
         raise Exception("[ML_SOR] sor_model is None — model belum dimuat")
 
-    if len(window_data) != 128:
-        raise ValueError(f"[ML_SOR] window_data panjangnya {len(window_data)}, harus 128")
+    n = len(backscatter_data)
+    total_windows = n - window_size + 1
 
-    # Konversi ke numpy, cek NaN/Inf
-    arr = np.array(window_data, dtype=np.float64)
-    if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
-        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    if total_windows <= 0:
+        raise ValueError(f"[ML_SOR] Data hanya {n} titik, tidak cukup untuk window size {window_size}")
 
-    # Bungkus sebagai DataFrame dengan nama kolom yang benar
-    # → scaler tidak akan raise UserWarning lagi
-    X = pd.DataFrame([arr], columns=_df_columns)
+    logger.info(f"[ML_SOR] 🔄 Building matrix {total_windows} × {window_size}...")
 
-    # Normalisasi
-    if sor_scaler is not None:
-        # Suppress warning sepenuhnya — kita sudah handle dengan DataFrame
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            X_scaled = sor_scaler.transform(X)
-    else:
-        X_scaled = X.values
+    # Bangun matrix semua window sekaligus — shape: (total_windows, 128)
+    arr = np.array(backscatter_data, dtype=np.float64)
+    
+    # Vectorized sliding window menggunakan stride tricks (zero-copy, sangat cepat)
+    shape = (total_windows, window_size)
+    strides = (arr.strides[0], arr.strides[0])
+    X_all = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides).copy()
 
-    # Prediksi
+    # Cek dan bersihkan NaN/Inf
+    if np.any(np.isnan(X_all)) or np.any(np.isinf(X_all)):
+        logger.warning("[ML_SOR] ⚠️ Data mengandung NaN/Inf, dibersihkan dengan 0")
+        X_all = np.nan_to_num(X_all, nan=0.0, posinf=0.0, neginf=0.0)
+
+    logger.info(f"[ML_SOR] ✅ Matrix built: shape={X_all.shape}")
+
+    # Bungkus sebagai DataFrame agar scaler tidak warning
+    X_df = pd.DataFrame(X_all, columns=_df_columns)
+
+    # Normalisasi batch
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        pred = sor_model.predict(X_scaled)[0]
+        if sor_scaler is not None:
+            X_scaled = sor_scaler.transform(X_df)
+        else:
+            X_scaled = X_df.values
 
-    # Confidence
-    confidence = 95.0
-    if hasattr(sor_model, 'predict_proba'):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            proba = sor_model.predict_proba(X_scaled)[0]
-        confidence = float(np.max(proba) * 100)
+    logger.info(f"[ML_SOR] 🔄 Running batch predict on {total_windows} windows...")
+
+    # Prediksi SEMUA window sekaligus — ini yang menghemat 99% waktu
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        preds = sor_model.predict(X_scaled)
+
+        confidences = None
+        if hasattr(sor_model, 'predict_proba'):
+            probas = sor_model.predict_proba(X_scaled)
+            confidences = np.max(probas, axis=1) * 100
+
+    logger.info(f"[ML_SOR] ✅ Batch predict selesai: {len(preds)} prediksi")
 
     # Decode label
-    if sor_label_classes is not None:
+    def decode(pred):
+        if sor_label_classes is None:
+            return str(pred)
         if isinstance(sor_label_classes, list):
             if isinstance(pred, (int, np.integer)):
-                pred_label = sor_label_classes[pred] if pred < len(sor_label_classes) else str(pred)
-            else:
-                pred_label = str(pred)
-        elif isinstance(sor_label_classes, dict):
-            pred_label = sor_label_classes.get(str(pred), str(pred))
-        else:
-            pred_label = str(pred)
-    else:
-        pred_label = str(pred)
+                return sor_label_classes[pred] if pred < len(sor_label_classes) else str(pred)
+            return str(pred)
+        if isinstance(sor_label_classes, dict):
+            return sor_label_classes.get(str(pred), str(pred))
+        return str(pred)
 
-    return {
-        "prediction": pred_label,
-        "confidence": round(confidence, 2)
-    }
+    # Susun hasil
+    results = []
+    for i, pred in enumerate(preds):
+        conf = float(confidences[i]) if confidences is not None else 95.0
+        results.append({
+            "start": i,
+            "end": i + window_size - 1,
+            "prediction": decode(pred),
+            "confidence": round(conf, 2),
+        })
+
+    return results
 
 
-# Auto-load saat import
+# Fungsi lama dipertahankan untuk kompatibilitas (tidak dipakai di endpoint baru)
+def predict_sor_window(window_data: list) -> dict:
+    if sor_model is None:
+        raise Exception("[ML_SOR] sor_model is None")
+    if len(window_data) != 128:
+        raise ValueError(f"window_data panjangnya {len(window_data)}, harus 128")
+    arr = np.array(window_data, dtype=np.float64)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    X = pd.DataFrame([arr], columns=_df_columns)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        X_scaled = sor_scaler.transform(X) if sor_scaler else X.values
+        pred = sor_model.predict(X_scaled)[0]
+        confidence = 95.0
+        if hasattr(sor_model, 'predict_proba'):
+            proba = sor_model.predict_proba(X_scaled)[0]
+            confidence = float(np.max(proba) * 100)
+
+    def decode(p):
+        if sor_label_classes is None: return str(p)
+        if isinstance(sor_label_classes, list):
+            return sor_label_classes[p] if isinstance(p, (int, np.integer)) and p < len(sor_label_classes) else str(p)
+        if isinstance(sor_label_classes, dict): return sor_label_classes.get(str(p), str(p))
+        return str(p)
+
+    return {"prediction": decode(pred), "confidence": round(confidence, 2)}
+
+
 load_sor_models()
