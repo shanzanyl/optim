@@ -27,8 +27,11 @@ import tempfile
 from app import ml          # Model OTDR (LightGBM)
 from app import ml_sor      # Model SOR (Random Forest) - BARU
 from app.database import Base, engine, get_db, AsyncSessionLocal
-from app.models import User, OtdrResult
-from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest
+from app.models import User, OtdrResult, DashboardResult
+from app.schemas import (
+    UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest,
+    DashboardResultResponse, DashboardStatisticsResponse,
+)
 from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_optional_user, get_current_admin
@@ -176,9 +179,53 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         except Exception as e:
             logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
 
-# ═══════════════════════════════════════════════════════════════════
-# FUNGSI MAPPING KOLOM
-# ═══════════════════════════════════════════════════════════════════
+
+def send_telegram_dashboard(dominant_class: str, severity: str):
+    """
+    Notifikasi Telegram khusus Dashboard SOR (Random Forest).
+    Format sederhana — hanya classification, severity, dan waktu.
+    Tidak dikirim jika hasil Normal.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.info("[TELEGRAM-DASHBOARD] Token/chat_id belum dikonfigurasi, alert dibatalkan.")
+        return
+
+    severity_lower = severity.lower()
+    if severity_lower == "normal":
+        logger.info(f"[TELEGRAM-DASHBOARD] Hasil Normal, alert tidak dikirim.")
+        return
+
+    severity_icon = "🔴" if severity_lower == "critical" else "🟡"
+    local_time = datetime.utcnow() + timedelta(hours=7)
+    time_str = local_time.strftime("%d %b %Y %H:%M:%S")
+
+    message = (
+        f"🚨 <b>OTDR MONITORING ALERT</b> 🚨\n\n"
+        f"Gangguan terdeteksi.\n\n"
+        f"<b>Classification</b>\n"
+        f"{dominant_class}\n\n"
+        f"<b>Severity</b>\n"
+        f"{severity_icon} {severity.capitalize()}\n\n"
+        f"<b>Detection Time</b>\n"
+        f"{time_str}"
+    )
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    chat_ids = [cid.strip() for cid in str(TELEGRAM_CHAT_ID).split(",") if cid.strip()]
+
+    for chat_id in chat_ids:
+        try:
+            response = requests.post(
+                url,
+                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                logger.info(f"[TELEGRAM-DASHBOARD] Alert '{dominant_class}' ({severity}) dikirim ke {chat_id}.")
+            else:
+                logger.error(f"[TELEGRAM-DASHBOARD] Gagal kirim ke {chat_id}: {response.text}")
+        except Exception as e:
+            logger.error(f"[TELEGRAM-DASHBOARD] Error koneksi ke {chat_id}: {e}")
 
 REQUIRED_FEATURES = [
     "Prx (dBm)", "Distance 1", "Distance 2", "Distance 3", "Distance 4",
@@ -431,9 +478,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "https://ashy-mushroom-0feb76700.7.azurestaticapps.net",
-        # BUG FIX: wildcard "*" + allow_credentials=True adalah kombinasi ilegal per spec CORS.
-        # Browser menolak SEMUA preflight OPTIONS request → "Failed to fetch" / "403 Not authenticated".
-        # Solusi: hilangkan "*", daftarkan origin secara eksplisit.
+        "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net",
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -450,7 +496,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 from PIL import Image, ImageEnhance
 from typing import List, Dict, Tuple
 
-# NOTE: logger sudah didefinisikan di atas (line ~39), tidak perlu deklarasi ulang
+logger = logging.getLogger(__name__)
 
 def preprocess_image_simple(image_bytes: bytes) -> list:
     """Preprocessing lebih agresif untuk OCR - OPTIMASI"""
@@ -2587,95 +2633,92 @@ async def process_sor_file(
 ):
     """
     Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
+    Hasil otomatis disimpan ke tabel dashboard_results setelah prediksi selesai.
     """
-    # ── LOG: MAIN START ──
     logger.info("=" * 70)
     logger.info("[SOR] ▶ ENTER PROCESS_SOR")
     logger.info(f"[SOR]   user={current_user.email} (id={current_user.id})")
     logger.info(f"[SOR]   filename={file.filename}, content_type={file.content_type}")
-
-    # ── LOG: AUTH SUCCESS ──
     logger.info("[SOR] ✅ AUTH SUCCESS — token valid, user ditemukan")
 
-    # 1. Validasi file (support CSV + Excel)
+    # 1. Validasi file
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
     if not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
-        logger.warning(f"[SOR] ❌ FILE REJECTED: {file.filename}")
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"File harus berformat: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # 2. Baca file (CSV atau Excel)
+    # 2. Baca file
     logger.info("[SOR] ── STEP 1: READ FILE ──")
     try:
         content = await file.read()
         logger.info(f"[SOR]   file size = {len(content)} bytes")
-        
         if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(content))
         else:
             df = pd.read_excel(io.BytesIO(content))
-            
-        logger.info(f"[SOR] ✅ READ EXCEL/CSV: {len(df)} rows × {len(df.columns)} columns")
+        logger.info(f"[SOR] ✅ READ FILE: {len(df)} rows × {len(df.columns)} columns")
         logger.info(f"[SOR]   columns = {df.columns.tolist()}")
-
     except Exception as e:
         logger.error(f"[SOR] ❌ READ FILE FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Gagal membaca file: {str(e)}")
-    
+
     # 3. Cari kolom Backscatter
     logger.info("[SOR] ── STEP 2: FIND BACKSCATTER COLUMN ──")
     backscatter_col = None
-    possible_cols = ['backscatter (db)', 'backscatter', 'db', 'scatter', 'amplitude']
     for col in df.columns:
         col_lower = col.lower().strip()
-        for possible in possible_cols:
-            if possible in col_lower:
-                backscatter_col = col
-                break
-        if backscatter_col:
+        if any(k in col_lower for k in ['backscatter', 'scatter', ' db', '(db)']):
+            backscatter_col = col
             break
-    
     if backscatter_col is None:
-        logger.error(f"[SOR] ❌ BACKSCATTER COLUMN NOT FOUND. Available: {df.columns.tolist()}")
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Kolom 'Backscatter (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
         )
-    
     logger.info(f"[SOR] ✅ BACKSCATTER COLUMN FOUND: '{backscatter_col}'")
 
-    # 4. Ambil data Backscatter
-    backscatter_data = pd.to_numeric(df[backscatter_col], errors='coerce').dropna().values.tolist()
+    # Cari kolom Distance (opsional — untuk sumbu X grafik)
+    distance_col = None
+    for col in df.columns:
+        col_lower = col.lower().strip()
+        if any(k in col_lower for k in ['distance', 'dist', 'jarak']):
+            distance_col = col
+            break
+    if distance_col:
+        logger.info(f"[SOR] ✅ DISTANCE COLUMN FOUND: '{distance_col}'")
+    else:
+        logger.info("[SOR] ℹ️  Distance column not found — frontend akan gunakan index")
+
+    # 4. Ambil data Backscatter (dan Distance jika ada)
+    # Gunakan index baris yang sama agar Backscatter & Distance selalu sejajar
+    df_clean = df[[backscatter_col] + ([distance_col] if distance_col else [])].copy()
+    df_clean[backscatter_col] = pd.to_numeric(df_clean[backscatter_col], errors='coerce')
+    if distance_col:
+        df_clean[distance_col] = pd.to_numeric(df_clean[distance_col], errors='coerce')
+    df_clean = df_clean.dropna(subset=[backscatter_col])
+
+    backscatter_data = df_clean[backscatter_col].values.tolist()
+    distance_data = df_clean[distance_col].values.tolist() if distance_col else []
+
     logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
-    
     if len(backscatter_data) < 128:
         raise HTTPException(
             status_code=400,
-            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 titik diperlukan."
+            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 diperlukan."
         )
-    
-    # 5. Cek model SOR sudah loaded
+
+    # 5. Cek model
     logger.info("[SOR] ── STEP 3: CHECK MODEL ──")
     if ml_sor.sor_model is None:
-        logger.error("[SOR] ❌ SOR MODEL IS NONE — model belum dimuat!")
-        logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
-        raise HTTPException(
-            status_code=500,
-            detail="Model Random Forest belum dimuat. Pastikan file model ada di folder models/sor/"
-        )
+        raise HTTPException(status_code=500, detail="Model Random Forest belum dimuat.")
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
-    logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
-    logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
 
-    # 6. BATCH PREDICT — semua window sekaligus, jauh lebih cepat dari loop
+    # 6. Batch predict
     window_size = 128
     total_windows = len(backscatter_data) - window_size + 1
-
-    logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
-    logger.info(f"[SOR]   window_size={window_size}, total_windows={total_windows}")
-
+    logger.info(f"[SOR] ── STEP 4: BATCH PREDICT — {total_windows} windows ──")
     try:
         predictions = await asyncio.to_thread(
             ml_sor.predict_sor_batch,
@@ -2685,22 +2728,165 @@ async def process_sor_file(
     except Exception as e:
         logger.error(f"[SOR] ❌ BATCH PREDICT FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Prediksi gagal: {str(e)}")
+    logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows")
 
-    logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
-    logger.info(f"[SOR] ── RETURN RESPONSE ──")
+    # 7. Hitung statistik & simpan ke DB
+    logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
+    class_counts: dict = {}
+    for p in predictions:
+        cls = p["prediction"]
+        class_counts[cls] = class_counts.get(cls, 0) + 1
+
+    total_pred = len(predictions)
+    dominant_class = max(class_counts, key=class_counts.get) if class_counts else "unknown"
+    dominant_count = class_counts.get(dominant_class, 0)
+    dominant_pct = round((dominant_count / total_pred * 100), 2) if total_pred > 0 else 0.0
+
+    try:
+        db_record = DashboardResult(
+            user_id=current_user.id,
+            filename=file.filename,
+            total_points=len(backscatter_data),
+            total_windows=total_pred,
+            dominant_class=dominant_class,
+            dominant_percentage=dominant_pct,
+            prediction_summary=json.dumps(class_counts),
+        )
+        db.add(db_record)
+        await db.commit()
+        await db.refresh(db_record)
+        logger.info(f"[SOR] ✅ SAVED TO DB: id={db_record.id}, dominant={dominant_class} ({dominant_pct}%)")
+    except Exception as e:
+        logger.error(f"[SOR] ❌ DB SAVE FAILED: {e}", exc_info=True)
+        # Tidak raise — prediksi tetap dikembalikan walau DB gagal
+
+    # 8. Kirim Telegram Dashboard (hanya Warning / Critical)
+    cls_lower = dominant_class.lower()
+    if cls_lower == "normal":
+        severity = "Normal"
+    elif any(k in cls_lower for k in ["cut", "nearly"]):
+        severity = "Critical"
+    else:
+        severity = "Warning"
+
+    logger.info(f"[SOR] ── STEP 6: TELEGRAM — dominant={dominant_class}, severity={severity} ──")
+    try:
+        await asyncio.to_thread(send_telegram_dashboard, dominant_class, severity)
+    except Exception as e:
+        logger.error(f"[SOR] ❌ TELEGRAM FAILED: {e}", exc_info=True)
+        # Tidak raise — response tetap dikembalikan walau Telegram gagal
+
+    logger.info("[SOR] ── RETURN RESPONSE ──")
     logger.info("=" * 70)
-    
-    # 7. Return response
+
     return {
         "success": True,
         "backscatter": backscatter_data,
+        "distance": distance_data,       # [] jika kolom Distance tidak ditemukan
         "predictions": predictions,
         "total_windows": len(predictions),
         "window_size": window_size,
         "total_points": len(backscatter_data),
         "filename": file.filename,
+        "summary": {
+            "class_counts": class_counts,
+            "dominant_class": dominant_class,
+            "dominant_percentage": dominant_pct,
+            "severity": severity,
+        },
         "metadata": {
             "columns": df.columns.tolist(),
             "rows": len(df),
         }
     }
+
+
+# ── Dashboard History Endpoints ────────────────────────────────────────────────
+
+@app.get("/api/dashboard/history", response_model=list[DashboardResultResponse])
+async def get_dashboard_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mengembalikan daftar history klasifikasi Dashboard milik user, terbaru di atas."""
+    result = await db.execute(
+        select(DashboardResult)
+        .where(DashboardResult.user_id == current_user.id)
+        .order_by(DashboardResult.created_at.desc())
+    )
+    rows = result.scalars().all()
+
+    out = []
+    for r in rows:
+        summary = None
+        if r.prediction_summary:
+            try:
+                summary = json.loads(r.prediction_summary)
+            except Exception:
+                summary = {}
+        out.append(DashboardResultResponse(
+            id=r.id,
+            filename=r.filename,
+            dominant_class=r.dominant_class,
+            dominant_percentage=r.dominant_percentage,
+            total_points=r.total_points,
+            total_windows=r.total_windows,
+            prediction_summary=summary,
+            created_at=r.created_at,
+        ))
+    return out
+
+
+@app.get("/api/dashboard/statistics", response_model=DashboardStatisticsResponse)
+async def get_dashboard_statistics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Statistik keseluruhan seluruh history klasifikasi Dashboard milik user."""
+    result = await db.execute(
+        select(DashboardResult)
+        .where(DashboardResult.user_id == current_user.id)
+    )
+    rows = result.scalars().all()
+
+    total_files = len(rows)
+    total_predictions = sum(r.total_windows for r in rows)
+
+    # Gabungkan class_distribution dari semua history
+    class_distribution: dict = {}
+    for r in rows:
+        if r.prediction_summary:
+            try:
+                summary = json.loads(r.prediction_summary)
+                for cls, count in summary.items():
+                    class_distribution[cls] = class_distribution.get(cls, 0) + count
+            except Exception:
+                pass
+
+    return DashboardStatisticsResponse(
+        total_files=total_files,
+        total_predictions=total_predictions,
+        class_distribution=class_distribution,
+    )
+
+
+@app.delete("/api/dashboard/history/{history_id}")
+async def delete_dashboard_history(
+    history_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Hapus satu history klasifikasi Dashboard milik user."""
+    result = await db.execute(
+        select(DashboardResult).where(
+            DashboardResult.id == history_id,
+            DashboardResult.user_id == current_user.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="History tidak ditemukan")
+    await db.delete(record)
+    await db.commit()
+    logger.info(f"[DASHBOARD] Deleted history id={history_id} by user={current_user.email}")
+    return {"success": True, "message": f"History id={history_id} berhasil dihapus"}

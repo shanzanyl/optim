@@ -104,3 +104,24 @@ class ManualClassifyRequest(BaseModel):
     return_2: float
     return_3: float
     return_4: float
+
+
+# ── Dashboard History ──────────────────────────────────
+class DashboardResultResponse(BaseModel):
+    id: int
+    filename: str
+    dominant_class: str
+    dominant_percentage: float
+    total_points: int
+    total_windows: int
+    prediction_summary: Optional[dict] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DashboardStatisticsResponse(BaseModel):
+    total_files: int
+    total_predictions: int
+    class_distribution: dict

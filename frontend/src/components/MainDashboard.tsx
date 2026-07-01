@@ -48,6 +48,7 @@ type PredictionResult = {
 type ProcessedData = {
   success: boolean;
   backscatter: number[];
+  distance: number[];        // kolom Distance (m) dari CSV — [] jika tidak ada
   predictions: PredictionResult[];
   total_windows: number;
   window_size: number;
@@ -67,6 +68,23 @@ type HistoryEntry = {
 };
 
 type StatusType = 'idle' | 'uploading' | 'processing' | 'ready' | 'playing' | 'paused' | 'complete' | 'error';
+
+type DashboardHistoryItem = {
+  id: number;
+  filename: string;
+  dominant_class: string;
+  dominant_percentage: number;
+  total_points: number;
+  total_windows: number;
+  prediction_summary: Record<string, number> | null;
+  created_at: string;
+};
+
+type DashboardStats = {
+  total_files: number;
+  total_predictions: number;
+  class_distribution: Record<string, number>;
+};
 
 // ─────────────────────────────────────────────────────────────
 // KOMPONEN PEMBANTU
@@ -98,7 +116,12 @@ const StatusBadge = ({ status }: { status: string | null | undefined }) => {
 // KOMPONEN UTAMA
 // ─────────────────────────────────────────────────────────────
 
-const MainDashboard = () => {
+type MainDashboardProps = {
+  refreshTrigger?: number;
+  onDataChange?: () => void;
+};
+
+const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => {
   // ── State ──
   const [data, setData] = useState<ProcessedData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -118,6 +141,11 @@ const MainDashboard = () => {
   const chartRef = useRef<any>(null);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ── Classification History (DB) ──
+  const [dbHistory, setDbHistory] = useState<DashboardHistoryItem[]>([]);
+  const [dbStats, setDbStats] = useState<DashboardStats | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // ── Playback speed ──
   const PLAYBACK_INTERVAL_MS = 30;
 
@@ -130,6 +158,71 @@ const MainDashboard = () => {
     const seconds = String(totalSec % 60).padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
   };
+
+  // ── API Base URL ──
+  const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
+
+  // ── Fetch Classification History dari DB ──
+  const fetchDbHistory = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/dashboard/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDbHistory(data);
+      }
+    } catch (e) {
+      console.error('[DASHBOARD] fetchDbHistory error:', e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [API_URL]);
+
+  // ── Fetch Statistics untuk Pie Chart ──
+  const fetchStats = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/dashboard/statistics`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDbStats(data);
+      }
+    } catch (e) {
+      console.error('[DASHBOARD] fetchStats error:', e);
+    }
+  }, [API_URL]);
+
+  // ── Delete History ──
+  const handleDeleteHistory = useCallback(async (id: number) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    if (!window.confirm('Hapus history ini?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/dashboard/history/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setDbHistory(prev => prev.filter(h => h.id !== id));
+        fetchStats();
+      }
+    } catch (e) {
+      console.error('[DASHBOARD] deleteHistory error:', e);
+    }
+  }, [API_URL, fetchStats]);
+
+  // ── Load history & stats on mount ──
+  useEffect(() => {
+    fetchDbHistory();
+    fetchStats();
+  }, [fetchDbHistory, fetchStats]);
 
   // ── Handle Upload ──
   const handleUpload = useCallback(async (file: File) => {
@@ -146,22 +239,11 @@ const MainDashboard = () => {
     setUploadProgress(10);
 
     try {
-      // BUG FIX: token bisa null → dikirim sebagai literal "null" → backend 401/403
       const token = localStorage.getItem('token');
-      console.log('[DASHBOARD] UPLOAD START:', file.name, 'size:', file.size);
-      console.log('[DASHBOARD] TOKEN EXISTS:', !!token, token ? `...${token.slice(-10)}` : 'NULL');
-
-      if (!token) {
-        throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
-      }
       
       setUploadProgress(30);
       setStatusMessage('Memproses data...');
       setStatus('processing');
-      
-      const API_URL = import.meta.env.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
-      console.log('[DASHBOARD] API_URL:', API_URL);
-      console.log('[DASHBOARD] Sending fetch to:', `${API_URL}/api/dashboard/process-sor`);
       
       const response = await fetch(`${API_URL}/api/dashboard/process-sor`, {
         method: 'POST',
@@ -170,7 +252,6 @@ const MainDashboard = () => {
         },
         body: formData,
       });
-      console.log('[DASHBOARD] RESPONSE STATUS:', response.status, response.statusText);
 
       setUploadProgress(70);
 
@@ -204,6 +285,9 @@ const MainDashboard = () => {
             // Ignore
           }
         }
+        // Refresh history & stats setelah upload berhasil
+        fetchDbHistory();
+        fetchStats();
       } else {
         throw new Error(result.message || 'Proses gagal');
       }
@@ -340,70 +424,41 @@ const MainDashboard = () => {
     };
   }, [isPlaying, data]);
 
-  // ── Chart Data ──
+  // ── Chart Data — hanya Backscatter trace, sumbu X = Distance ──
   const chartData = useMemo(() => {
     if (!data) return null;
 
     const displayedData = data.backscatter.slice(0, currentPointIndex + 1);
-    
-    let windowStart: number | null = null;
-    let windowEnd: number | null = null;
-    let windowData: (number | null)[] = [];
-    
-    if (currentPredictionIndex >= 0 && currentPredictionIndex < data.predictions.length) {
-      const pred = data.predictions[currentPredictionIndex];
-      windowStart = pred.start;
-      windowEnd = pred.end;
-      
-      windowData = displayedData.map((val, i) => {
-        if (i >= windowStart && i <= windowEnd && i < displayedData.length) {
-          return val;
-        }
-        return null;
-      });
-    }
+
+    // Gunakan Distance jika tersedia, fallback ke index (0, 1, 2, ...)
+    const hasDistance = data.distance && data.distance.length === data.backscatter.length;
+    const labels = displayedData.map((_, i) => {
+      if (hasDistance) {
+        const distM = data.distance[i];
+        // Tampilkan dalam km dengan 3 desimal: 0.000 km
+        return (distM / 1000).toFixed(3);
+      }
+      return i.toString();
+    });
 
     return {
-      labels: displayedData.map((_, i) => formatTime(i)),
+      labels,
       datasets: [
         {
           label: 'Backscatter (dB)',
           data: displayedData,
           borderColor: '#3b82f6',
-          backgroundColor: 'rgba(59, 130, 246, 0.15)',
-          borderWidth: 2,
+          backgroundColor: 'rgba(59, 130, 246, 0.08)',
+          borderWidth: 1.5,
           pointRadius: 0,
-          tension: 0.3,
+          tension: 0.2,
           fill: true,
-        },
-        ...(windowStart !== null && windowEnd !== null ? [{
-          label: '📍 Current Window',
-          data: windowData,
-          borderColor: '#f59e0b',
-          backgroundColor: 'rgba(245, 158, 11, 0.2)',
-          borderWidth: 3,
-          pointRadius: 0,
-          tension: 0.3,
-          fill: true,
-        }] : []),
-        {
-          label: 'Current Position',
-          data: displayedData.map((val, i) => {
-            if (i === currentPointIndex) return val;
-            return null;
-          }),
-          borderColor: '#ef4444',
-          backgroundColor: 'rgba(239, 68, 68, 0.5)',
-          borderWidth: 2,
-          pointRadius: 6,
-          pointBackgroundColor: '#ef4444',
-          showLine: false,
         },
       ],
     };
-  }, [data, currentPointIndex, currentPredictionIndex]);
+  }, [data, currentPointIndex]);
 
-  // ── Chart Options (Dark Theme) ──
+  // ── Chart Options ──
   const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -413,15 +468,7 @@ const MainDashboard = () => {
     },
     plugins: {
       legend: {
-        display: true,
-        position: 'top' as const,
-        labels: {
-          color: '#e2e8f0',
-          font: {
-            size: 11,
-            weight: 'bold' as const,
-          },
-        },
+        display: false,   // Sembunyikan legend — hanya ada satu dataset
       },
       tooltip: {
         backgroundColor: '#1e2f50',
@@ -430,31 +477,21 @@ const MainDashboard = () => {
         borderColor: '#3b4f6e',
         borderWidth: 1,
         cornerRadius: 8,
-        padding: 12,
+        padding: 10,
         callbacks: {
+          title: function(items: any[]) {
+            if (!items.length) return '';
+            return `Distance: ${items[0].label} km`;
+          },
           label: function(context: any) {
-            if (context.datasetIndex === 0) {
-              return `Backscatter: ${context.parsed.y.toFixed(2)} dB`;
-            }
-            if (context.datasetIndex === 1 && context.parsed.y !== null) {
-              return `Window: ${context.parsed.y.toFixed(2)} dB`;
-            }
-            if (context.datasetIndex === 2 && context.parsed.y !== null) {
-              return `📍 Position: ${context.parsed.y.toFixed(2)} dB`;
-            }
-            return '';
+            return `Backscatter: ${context.parsed.y.toFixed(3)} dB`;
           }
         }
       },
       zoom: {
         zoom: {
-          wheel: {
-            enabled: true,
-            speed: 0.05,
-          },
-          pinch: {
-            enabled: true,
-          },
+          wheel: { enabled: true, speed: 0.05 },
+          pinch: { enabled: true },
           mode: 'x' as const,
         },
         pan: {
@@ -470,31 +507,29 @@ const MainDashboard = () => {
       x: {
         title: {
           display: true,
-          text: 'Time',
-          color: '#ffffff',
+          text: 'Distance (km)',
+          color: '#94a3b8',
           font: { weight: 'bold' as const, size: 12 },
         },
-        grid: {
-          color: '#3d4e6b',
-        },
+        grid: { color: '#2a3d60' },
         ticks: {
-          color: '#ffffff',
+          color: '#94a3b8',
           maxTicksLimit: 20,
+          callback: function(val: any, index: number) {
+            // Tampilkan label setiap N tick agar tidak terlalu padat
+            return index % 5 === 0 ? val : '';
+          }
         },
       },
       y: {
         title: {
           display: true,
           text: 'Backscatter (dB)',
-          color: '#ffffff',
+          color: '#94a3b8',
           font: { weight: 'bold' as const, size: 12 },
         },
-        grid: {
-          color: '#3d4e6b',
-        },
-        ticks: {
-          color: '#ffffff',
-        },
+        grid: { color: '#2a3d60' },
+        ticks: { color: '#94a3b8' },
         reverse: true,
       },
     },
@@ -528,7 +563,7 @@ const MainDashboard = () => {
           <div className="w-full sm:w-auto">
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white flex items-center gap-2">
               <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 flex-shrink-0" />
-              <span className="truncate">Optical Monitoring</span>
+              <span className="truncate">OTDR Monitoring Simulator</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 truncate">
             </p>
@@ -583,7 +618,7 @@ const MainDashboard = () => {
               </span>
             </div>
             {data && (
-              <div className="flex items-center gap-1 sm:gap-3 text-[10px] sm:text-xs text-white flex-wrap">
+              <div className="flex items-center gap-1 sm:gap-3 text-[10px] sm:text-xs text-slate-400 flex-wrap">
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Titik: {data.total_points}</span>
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Window: {data.total_windows}</span>
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e] hidden sm:inline">Size: {data.window_size}</span>
@@ -640,7 +675,7 @@ const MainDashboard = () => {
                     <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-slate-500" />
                   </div>
                   <p className="font-medium text-white text-sm sm:text-base">Upload file SOR untuk memulai monitoring</p>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx)</p>
+                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx) dengan kolom Backscatter</p>
                 </div>
               </div>
             )}
@@ -697,7 +732,7 @@ const MainDashboard = () => {
 
           {/* Current Prediction */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
             {currentPrediction ? (
               <div>
                 <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -721,7 +756,7 @@ const MainDashboard = () => {
 
           {/* Status */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
                 status === 'playing' ? 'bg-green-500 animate-pulse' :
@@ -747,7 +782,7 @@ const MainDashboard = () => {
 
           {/* Zoom Controls */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-white uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
+            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
             <div className="flex gap-1.5 sm:gap-2">
               <button
                 onClick={() => {
@@ -796,11 +831,11 @@ const MainDashboard = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-xs sm:text-sm">
                 <thead className="bg-[#0f1a2e] sticky top-0">
-                  <tr className="text-white font-medium text-[9px] sm:text-xs border-b border-[#3b4f6e]">
+                  <tr className="text-slate-400 font-medium text-[9px] sm:text-xs border-b border-[#3b4f6e]">
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Time</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left hidden xs:table-cell">Window</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Prediction</th>
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Confidence</th>
+                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Conf.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -811,7 +846,7 @@ const MainDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    history.slice(-500).reverse().map((entry, i) => (
+                    history.slice(-50).reverse().map((entry, i) => (
                       <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
                         <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 whitespace-nowrap">{entry.time}</td>
                         <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 hidden xs:table-cell">{entry.window}</td>
@@ -835,7 +870,7 @@ const MainDashboard = () => {
           </div>
         </div>
 
-        {/* Info Panel - Responsive */}
+        {/* Info Panel */}
         {data && (
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 sm:p-4 text-xs sm:text-sm text-blue-400">
             <div className="flex items-start gap-2 sm:gap-3">
@@ -852,6 +887,184 @@ const MainDashboard = () => {
             </div>
           </div>
         )}
+
+        {/* ── Classification History + Fault Distribution ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          {/* Classification History Table */}
+          <div className="lg:col-span-2 bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a3d60]">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 bg-blue-400 rounded-full" />
+                <span className="text-white text-sm font-semibold">Classification History</span>
+                <span className="text-slate-400 text-xs">({dbHistory.length} entri)</span>
+              </div>
+              <button
+                onClick={() => { fetchDbHistory(); fetchStats(); }}
+                className="text-slate-400 hover:text-white transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="w-full text-[10px] sm:text-xs">
+                <thead className="bg-[#0f1e35] text-slate-400 uppercase tracking-wide sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 text-left w-10">No</th>
+                    <th className="px-3 py-2 text-left">Time</th>
+                    <th className="px-3 py-2 text-left">Classification Result</th>
+                    <th className="px-3 py-2 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyLoading ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-slate-500">Memuat...</td>
+                    </tr>
+                  ) : dbHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-8 text-center text-slate-500">
+                        Belum ada history klasifikasi.
+                      </td>
+                    </tr>
+                  ) : (
+                    dbHistory.map((item, idx) => {
+                      const cls = item.dominant_class.toLowerCase();
+
+                      // Tentukan status berdasarkan dominant_class
+                      const getStatus = (c: string): 'Normal' | 'Warning' | 'Critical' => {
+                        if (c === 'normal') return 'Normal';
+                        if (c.includes('cut') || c.includes('nearly')) return 'Critical';
+                        return 'Warning';
+                      };
+                      const itemStatus = getStatus(cls);
+
+                      const statusBadge: Record<string, string> = {
+                        Normal:   'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+                        Warning:  'bg-amber-500/20  text-amber-400  border border-amber-500/30',
+                        Critical: 'bg-red-500/20    text-red-400    border border-red-500/30',
+                      };
+                      const statusDot: Record<string, string> = {
+                        Normal:   'bg-emerald-400',
+                        Warning:  'bg-amber-400',
+                        Critical: 'bg-red-400',
+                      };
+
+                      const clsBadge =
+                        cls === 'normal' ? 'bg-emerald-500/20 text-emerald-400' :
+                        cls.includes('cut') || cls.includes('nearly') ? 'bg-red-500/20 text-red-400' :
+                        cls.includes('bend') ? 'bg-amber-500/20 text-amber-400' :
+                        cls.includes('air') || cls.includes('gap') ? 'bg-purple-500/20 text-purple-400' :
+                        cls.includes('splice') ? 'bg-orange-500/20 text-orange-400' :
+                        cls.includes('dirty') || cls.includes('connector') ? 'bg-cyan-500/20 text-cyan-400' :
+                        'bg-blue-500/20 text-blue-400';
+
+                      // Format tanggal: 25 Jul 2026 14:32:18
+                      const formatDate = (iso: string) => {
+                        const d = new Date(iso);
+                        return d.toLocaleDateString('id-ID', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                        }) + ' ' + d.toLocaleTimeString('id-ID', {
+                          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+                        });
+                      };
+
+                      return (
+                        <tr key={item.id} className="border-t border-[#2a3d60]/50 hover:bg-[#2a3d60]/20">
+                          <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="px-3 py-2 text-slate-400 font-mono whitespace-nowrap">
+                            {item.created_at ? formatDate(item.created_at) : '-'}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold capitalize ${clsBadge}`}>
+                              {item.dominant_class.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold ${statusBadge[itemStatus]}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${statusDot[itemStatus]}`} />
+                              {itemStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Fault Distribution Pie Chart */}
+          <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
+              <span className="w-1 h-4 bg-purple-400 rounded-full" />
+              <span className="text-white text-sm font-semibold">Fault Distribution</span>
+            </div>
+            <div className="p-4">
+              {!dbStats || Object.keys(dbStats.class_distribution).length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-xs text-center">
+                  <TrendingUp className="w-8 h-8 mb-2 opacity-30" />
+                  <p>Belum ada data statistik.</p>
+                  <p className="mt-1">Upload file SOR untuk melihat distribusi.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Summary stats */}
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <div className="bg-[#0f1e35] rounded-xl p-2.5 text-center">
+                      <p className="text-[10px] text-slate-400">Total File</p>
+                      <p className="text-lg font-bold text-white">{dbStats.total_files}</p>
+                    </div>
+                    <div className="bg-[#0f1e35] rounded-xl p-2.5 text-center">
+                      <p className="text-[10px] text-slate-400">Total Prediksi</p>
+                      <p className="text-lg font-bold text-white">{dbStats.total_predictions.toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  {/* Distribution bars */}
+                  <div className="space-y-2">
+                    {(() => {
+                      const dist = dbStats.class_distribution;
+                      const total = Object.values(dist).reduce((a, b) => a + b, 0);
+                      const colors: Record<string, string> = {
+                        normal:   '#10b981',
+                        bending:  '#f59e0b',
+                        air_gap:  '#a855f7',
+                        fiber_cut:'#ef4444',
+                        bad_splice:'#3b82f6',
+                        connector:'#06b6d4',
+                        dirty:    '#f97316',
+                      };
+                      return Object.entries(dist)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([cls, count]) => {
+                          const pct = total > 0 ? (count / total * 100) : 0;
+                          const color = colors[cls.toLowerCase().replace(/\s+/g, '_')] || '#6366f1';
+                          return (
+                            <div key={cls}>
+                              <div className="flex justify-between text-[10px] mb-0.5">
+                                <span className="text-slate-300 capitalize">{cls.replace(/_/g, ' ')}</span>
+                                <span className="text-slate-400 font-mono">{pct.toFixed(1)}%</span>
+                              </div>
+                              <div className="h-1.5 bg-[#0f1e35] rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${pct}%`, backgroundColor: color }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        });
+                    })()}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+        </div>{/* end grid Classification History + Fault Distribution */}
 
       </main>
     </div>

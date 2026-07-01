@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import MainDashboard from "../components/MainDashboard";
 import Detection from "../components/Detection";
-import History from "../components/History";
+// import History from "../components/History";
 import Overview from "../components/Overview";
 import Adminpage from "../components/Adminpage";
 // import Chatbot from "../components/chatbot";
@@ -162,7 +162,7 @@ export default function App() {
                       <span className="hidden sm:inline">Detection</span>
                     </button>
 
-                    <button
+                    {/* <button
                       onClick={() => setActiveTab('history')}
                       className={`flex items-center gap-1 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-semibold transition-all ${
                         activeTab === 'history' 
@@ -172,7 +172,7 @@ export default function App() {
                     >
                       <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       <span className="hidden sm:inline">History</span>
-                    </button>
+                    </button> */}
 
                     {isAdmin && (
                       <button
@@ -239,10 +239,10 @@ export default function App() {
                 onDataChange={handleDataChange}
               />
             )}
-            {activeTab === 'history' && (
+            {/* {activeTab === 'history' && (
               <History refreshTrigger={refreshTrigger} />
             )}
-            {activeTab === 'admin' && isAdmin && <Adminpage />}
+            {activeTab === 'admin' && isAdmin && <Adminpage />} */}
           </main>
 
         </div>

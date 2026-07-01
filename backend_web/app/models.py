@@ -75,3 +75,21 @@ class OtdrResult(Base):
     telegram_alert_sent = Column(Boolean, default=False, server_default="false")
 
     owner = relationship("User", back_populates="results")
+
+
+class DashboardResult(Base):
+    """Menyimpan hasil klasifikasi Dashboard SOR (Random Forest)."""
+    __tablename__ = "dashboard_results"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    user_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
+    filename            = Column(String(255), nullable=False)
+    total_points        = Column(Integer, nullable=False)
+    total_windows       = Column(Integer, nullable=False)
+    dominant_class      = Column(String(100), nullable=False)
+    dominant_percentage = Column(Float, nullable=False)
+    # JSON string: {"normal": 5400, "bending": 1600, "air_gap": 738}
+    prediction_summary  = Column(Text, nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+
+    owner = relationship("User", backref="dashboard_results")
