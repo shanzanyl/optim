@@ -273,7 +273,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         setData(result);
         setStatus('ready');
         setStatusMessage(`Siap diputar! ${result.total_points} titik data, ${result.total_windows} window`);
-        setCurrentPointIndex(0);
+        // -1 = belum mulai diputar, grafik kosong sampai Play ditekan
+        setCurrentPointIndex(-1);
         setCurrentPredictionIndex(-1);
         setHistory([]);
         setIsPlaying(false);
@@ -305,14 +306,15 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   // ── Playback Control ──
   const startPlayback = useCallback(() => {
     if (!data) return;
-    
-    if (status === 'complete' || currentPointIndex >= data.total_points - 1) {
+
+    // Reset jika: belum mulai (-1), sudah selesai, atau sudah di titik akhir
+    if (currentPointIndex < 0 || status === 'complete' || currentPointIndex >= data.total_points - 1) {
       setCurrentPointIndex(0);
       setCurrentPredictionIndex(-1);
       setHistory([]);
       setStatus('ready');
     }
-    
+
     setIsPlaying(true);
     setStatus('playing');
     setStatusMessage('Memutar trace...');
@@ -426,7 +428,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   // ── Chart Data — Backscatter trace, sumbu X = Distance (linear scale) ──
   const chartData = useMemo(() => {
-    if (!data) return null;
+    if (!data || currentPointIndex < 0) return null;
 
     const displayedData = data.backscatter.slice(0, currentPointIndex + 1);
 
@@ -462,16 +464,20 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   }, [data, currentPointIndex]);
 
   // ── Chart Options ──
-  // xMax dihitung dari data distance aktual agar sumbu X tidak extend melewati trace
+  // xMax mengikuti currentPointIndex agar sumbu X tumbuh bertahap seiring animasi
   const xMax = useMemo(() => {
-    if (!data) return undefined;
+    if (!data || currentPointIndex < 0) return undefined;
     const distArr = data.distance ?? [];
-    if (distArr.length > 0) {
-      const validDist = distArr.filter(v => v !== null && v !== undefined) as number[];
-      if (validDist.length > 0) return Math.max(...validDist);
+    const hasDistance =
+      distArr.length === data.backscatter.length &&
+      distArr.some(v => v !== null && v !== undefined);
+
+    if (hasDistance) {
+      const d = distArr[currentPointIndex];
+      return d !== null && d !== undefined ? Number(d) : undefined;
     }
-    return data.total_points - 1;
-  }, [data]);
+    return currentPointIndex;
+  }, [data, currentPointIndex]);
 
   const chartOptions = useMemo(() => ({
     responsive: true,
