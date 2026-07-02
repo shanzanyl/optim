@@ -479,7 +479,8 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "https://ashy-mushroom-0feb76700.7.azurestaticapps.net",
         "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net",
-        "*"
+        # CATATAN: jangan tambahkan "*" di sini.
+        # "*" + allow_credentials=True adalah kombinasi ilegal CORS → browser blok semua request.
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -2779,10 +2780,25 @@ async def process_sor_file(
     logger.info("[SOR] ── RETURN RESPONSE ──")
     logger.info("=" * 70)
 
+    # Sanitize NaN/inf → None agar JSON serializable
+    def sanitize(val):
+        if val is None:
+            return None
+        try:
+            f = float(val)
+            if f != f or f == float('inf') or f == float('-inf'):  # NaN / inf
+                return None
+            return f
+        except Exception:
+            return None
+
+    clean_backscatter = [sanitize(v) for v in backscatter_data]
+    clean_distance    = [sanitize(v) for v in distance_data]
+
     return {
         "success": True,
-        "backscatter": backscatter_data,
-        "distance": distance_data,       # [] jika kolom Distance tidak ditemukan
+        "backscatter": clean_backscatter,
+        "distance": clean_distance,
         "predictions": predictions,
         "total_windows": len(predictions),
         "window_size": window_size,
