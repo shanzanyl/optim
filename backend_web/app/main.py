@@ -2656,7 +2656,19 @@ async def process_sor_file(
         content = await file.read()
         logger.info(f"[SOR]   file size = {len(content)} bytes")
         if file.filename.lower().endswith('.csv'):
+            # Coba baca dulu dengan setting default (titik sebagai desimal)
             df = pd.read_csv(io.BytesIO(content))
+            # Deteksi apakah kolom numerik gagal di-parse (kemungkinan pakai koma desimal)
+            sample_cols = df.select_dtypes(include='object').columns.tolist()
+            has_comma_decimal = False
+            for col in sample_cols:
+                sample = df[col].dropna().head(5).astype(str)
+                if sample.str.contains(r'^\d+,\d+$', regex=True).any():
+                    has_comma_decimal = True
+                    break
+            if has_comma_decimal:
+                logger.info("[SOR]   Detected comma decimal separator — re-reading with decimal=','")
+                df = pd.read_csv(io.BytesIO(content), decimal=',')
         else:
             df = pd.read_excel(io.BytesIO(content))
         logger.info(f"[SOR] ✅ READ FILE: {len(df)} rows × {len(df.columns)} columns")
@@ -2698,12 +2710,18 @@ async def process_sor_file(
     df_clean[backscatter_col] = pd.to_numeric(df_clean[backscatter_col], errors='coerce')
     if distance_col:
         df_clean[distance_col] = pd.to_numeric(df_clean[distance_col], errors='coerce')
-    df_clean = df_clean.dropna(subset=[backscatter_col])
+
+    # Drop baris yang Backscatter-nya NaN.
+    # Jika Distance juga ada, drop baris yang Distance-nya NaN agar kedua array
+    # selalu sejajar dan tidak ada null di tengah-tengah.
+    drop_cols = [backscatter_col] + ([distance_col] if distance_col else [])
+    df_clean = df_clean.dropna(subset=drop_cols)
 
     backscatter_data = df_clean[backscatter_col].values.tolist()
-    distance_data = df_clean[distance_col].values.tolist() if distance_col else []
+    distance_data    = df_clean[distance_col].values.tolist() if distance_col else []
 
     logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
+    logger.info(f"[SOR]   distance points   = {len(distance_data)}")
     if len(backscatter_data) < 128:
         raise HTTPException(
             status_code=400,
@@ -2868,16 +2886,13 @@ async def get_dashboard_statistics(
     total_files = len(rows)
     total_predictions = sum(r.total_windows for r in rows)
 
-    # Gabungkan class_distribution dari semua history
+    # Fault Distribution: hitung berdasarkan dominant_class
+    # 1 file = 1 hitungan, bukan berdasarkan jumlah window
     class_distribution: dict = {}
     for r in rows:
-        if r.prediction_summary:
-            try:
-                summary = json.loads(r.prediction_summary)
-                for cls, count in summary.items():
-                    class_distribution[cls] = class_distribution.get(cls, 0) + count
-            except Exception:
-                pass
+        cls = r.dominant_class
+        if cls:
+            class_distribution[cls] = class_distribution.get(cls, 0) + 1
 
     return DashboardStatisticsResponse(
         total_files=total_files,

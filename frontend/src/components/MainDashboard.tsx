@@ -433,10 +433,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     // Gunakan Distance jika tersedia, fallback ke index (0, 1, 2, ...)
     const hasDistance = data.distance && data.distance.length === data.backscatter.length;
     const labels = displayedData.map((_, i) => {
-      if (hasDistance) {
-        const distM = data.distance[i];
-        // Tampilkan dalam km dengan 3 desimal: 0.000 km
-        return (distM / 1000).toFixed(3);
+      if (hasDistance && data.distance[i] !== null && data.distance[i] !== undefined) {
+        // Tampilkan dalam meter dengan 4 desimal
+        return Number(data.distance[i]).toFixed(4);
       }
       return i.toString();
     });
@@ -481,7 +480,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         callbacks: {
           title: function(items: any[]) {
             if (!items.length) return '';
-            return `Distance: ${items[0].label} km`;
+            return `Distance: ${items[0].label} m`;
           },
           label: function(context: any) {
             return `Backscatter: ${context.parsed.y.toFixed(3)} dB`;
@@ -507,7 +506,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       x: {
         title: {
           display: true,
-          text: 'Distance (km)',
+          text: 'Distance (m)',
           color: '#94a3b8',
           font: { weight: 'bold' as const, size: 12 },
         },
@@ -996,7 +995,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
           </div>
 
-          {/* Fault Distribution Pie Chart */}
+          {/* Fault Distribution — Donut Chart */}
           <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
               <span className="w-1 h-4 bg-purple-400 rounded-full" />
@@ -1004,63 +1003,129 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
             <div className="p-4">
               {!dbStats || Object.keys(dbStats.class_distribution).length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-xs text-center">
+                <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center">
                   <TrendingUp className="w-8 h-8 mb-2 opacity-30" />
-                  <p>Belum ada data statistik.</p>
+                  <p>Belum ada data.</p>
                   <p className="mt-1">Upload file SOR untuk melihat distribusi.</p>
                 </div>
-              ) : (
-                <>
-                  {/* Summary stats */}
-                  <div className="grid grid-cols-2 gap-2 mb-4">
-                    <div className="bg-[#0f1e35] rounded-xl p-2.5 text-center">
-                      <p className="text-[10px] text-slate-400">Total File</p>
-                      <p className="text-lg font-bold text-white">{dbStats.total_files}</p>
-                    </div>
-                    <div className="bg-[#0f1e35] rounded-xl p-2.5 text-center">
-                      <p className="text-[10px] text-slate-400">Total Prediksi</p>
-                      <p className="text-lg font-bold text-white">{dbStats.total_predictions.toLocaleString()}</p>
-                    </div>
-                  </div>
+              ) : (() => {
+                // Urutan kategori tetap (sesuai spec)
+                const CLASS_ORDER = [
+                  'normal', 'bending', 'bad_splice', 'dirty_connector',
+                  'air_gap', 'nearly_cut', 'fiber_cut',
+                ];
+                const CLASS_LABELS: Record<string, string> = {
+                  normal:           'Normal',
+                  bending:          'Bending',
+                  bad_splice:       'Bad Splice',
+                  dirty_connector:  'Dirty Connector',
+                  air_gap:          'Air Gap',
+                  nearly_cut:       'Nearly Cut',
+                  fiber_cut:        'Fiber Cut',
+                };
+                const COLORS: Record<string, string> = {
+                  normal:           '#10b981',
+                  bending:          '#f59e0b',
+                  bad_splice:       '#3b82f6',
+                  dirty_connector:  '#06b6d4',
+                  air_gap:          '#a855f7',
+                  nearly_cut:       '#f97316',
+                  fiber_cut:        '#ef4444',
+                };
 
-                  {/* Distribution bars */}
-                  <div className="space-y-2">
-                    {(() => {
-                      const dist = dbStats.class_distribution;
-                      const total = Object.values(dist).reduce((a, b) => a + b, 0);
-                      const colors: Record<string, string> = {
-                        normal:   '#10b981',
-                        bending:  '#f59e0b',
-                        air_gap:  '#a855f7',
-                        fiber_cut:'#ef4444',
-                        bad_splice:'#3b82f6',
-                        connector:'#06b6d4',
-                        dirty:    '#f97316',
-                      };
-                      return Object.entries(dist)
-                        .sort(([, a], [, b]) => b - a)
-                        .map(([cls, count]) => {
-                          const pct = total > 0 ? (count / total * 100) : 0;
-                          const color = colors[cls.toLowerCase().replace(/\s+/g, '_')] || '#6366f1';
-                          return (
-                            <div key={cls}>
-                              <div className="flex justify-between text-[10px] mb-0.5">
-                                <span className="text-slate-300 capitalize">{cls.replace(/_/g, ' ')}</span>
-                                <span className="text-slate-400 font-mono">{pct.toFixed(1)}%</span>
-                              </div>
-                              <div className="h-1.5 bg-[#0f1e35] rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full transition-all duration-500"
-                                  style={{ width: `${pct}%`, backgroundColor: color }}
-                                />
-                              </div>
+                // Normalisasi key dari API (bisa pakai spasi atau underscore)
+                const rawDist = dbStats.class_distribution;
+                const dist: Record<string, number> = {};
+                Object.entries(rawDist).forEach(([k, v]) => {
+                  const normalized = k.toLowerCase().replace(/\s+/g, '_');
+                  dist[normalized] = (dist[normalized] || 0) + v;
+                });
+
+                const total = Object.values(dist).reduce((a, b) => a + b, 0);
+                if (total === 0) return null;
+
+                // Bangun segments untuk donut
+                type Segment = { key: string; count: number; pct: number; color: string; label: string };
+                const segments: Segment[] = CLASS_ORDER
+                  .filter(k => dist[k] > 0)
+                  .map(k => ({
+                    key: k,
+                    count: dist[k],
+                    pct: dist[k] / total,
+                    color: COLORS[k] || '#6366f1',
+                    label: CLASS_LABELS[k] || k,
+                  }));
+
+                // SVG Donut Chart
+                const R = 60, r = 38, cx = 80, cy = 80;
+                const circumference = 2 * Math.PI * R;
+                let cumPct = 0;
+                const arcs = segments.map(seg => {
+                  const startPct = cumPct;
+                  cumPct += seg.pct;
+                  return { ...seg, startPct, endPct: cumPct };
+                });
+
+                const describeArc = (startPct: number, endPct: number) => {
+                  const gap = 0.008; // gap kecil antar segment
+                  const s = (startPct + gap / 2) * 2 * Math.PI - Math.PI / 2;
+                  const e = (endPct - gap / 2) * 2 * Math.PI - Math.PI / 2;
+                  const x1 = cx + R * Math.cos(s), y1 = cy + R * Math.sin(s);
+                  const x2 = cx + R * Math.cos(e), y2 = cy + R * Math.sin(e);
+                  const x3 = cx + r * Math.cos(e), y3 = cy + r * Math.sin(e);
+                  const x4 = cx + r * Math.cos(s), y4 = cy + r * Math.sin(s);
+                  const large = (endPct - startPct) > 0.5 ? 1 : 0;
+                  return `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${r} ${r} 0 ${large} 0 ${x4} ${y4} Z`;
+                };
+
+                return (
+                  <div className="flex flex-col gap-4">
+                    {/* Donut SVG */}
+                    <div className="flex justify-center">
+                      <svg viewBox="0 0 160 160" className="w-40 h-40">
+                        {arcs.map(seg => (
+                          <path
+                            key={seg.key}
+                            d={describeArc(seg.startPct, seg.endPct)}
+                            fill={seg.color}
+                            opacity={0.9}
+                          />
+                        ))}
+                        {/* Teks tengah */}
+                        <text x={cx} y={cy - 8} textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
+                          {total}
+                        </text>
+                        <text x={cx} y={cy + 10} textAnchor="middle" fill="#94a3b8" fontSize="9">
+                          total files
+                        </text>
+                      </svg>
+                    </div>
+
+                    {/* Legend + count */}
+                    <div className="space-y-1.5">
+                      {CLASS_ORDER.map(k => {
+                        const count = dist[k] || 0;
+                        return (
+                          <div key={k} className="flex items-center justify-between text-[10px]">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                                style={{ backgroundColor: COLORS[k] || '#6366f1', opacity: count > 0 ? 1 : 0.25 }}
+                              />
+                              <span className={count > 0 ? 'text-slate-300' : 'text-slate-600'}>
+                                {CLASS_LABELS[k]}
+                              </span>
                             </div>
-                          );
-                        });
-                    })()}
+                            <span className={`font-mono font-semibold ${count > 0 ? 'text-white' : 'text-slate-600'}`}>
+                              {count}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </>
-              )}
+                );
+              })()}
             </div>
           </div>
 
