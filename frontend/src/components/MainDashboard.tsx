@@ -139,7 +139,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   // Chart refs
   const chartRef = useRef<any>(null);
-  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const playbackIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Classification History (DB) ──
   const [dbHistory, setDbHistory] = useState<DashboardHistoryItem[]>([]);
@@ -429,14 +429,21 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     if (!data) return null;
 
     const displayedData = data.backscatter.slice(0, currentPointIndex + 1);
-    const hasDistance = data.distance && data.distance.length === data.backscatter.length;
 
-    // Gunakan format {x, y} agar Chart.js bisa membuat skala linear yang benar.
-    // Jika tidak ada distance, fallback ke index sebagai x.
-    const points = displayedData.map((val, i) => ({
-      x: hasDistance && data.distance[i] != null ? Number(data.distance[i]) : i,
-      y: val,
-    }));
+    // Pastikan distance tersedia dan valid (non-null, panjang sama)
+    const distArr = data.distance ?? [];
+    const hasDistance =
+      distArr.length === data.backscatter.length &&
+      distArr.some(v => v !== null && v !== undefined);
+
+    // Format {x, y}: x = Distance (m), y = Backscatter (dB)
+    const points = displayedData.map((val, i) => {
+      const d = distArr[i];
+      return {
+        x: hasDistance && d !== null && d !== undefined ? Number(d) : i,
+        y: val !== null && val !== undefined ? Number(val) : null,
+      };
+    }).filter(p => p.y !== null);
 
     return {
       datasets: [
@@ -459,13 +466,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     responsive: true,
     maintainAspectRatio: false,
     interaction: {
-      mode: 'index' as const,
+      mode: 'nearest' as const,  // nearest: cari titik terdekat berdasarkan x aktual
+      axis: 'x' as const,
       intersect: false,
     },
     plugins: {
-      legend: {
-        display: false,
-      },
+      legend: { display: false },
       tooltip: {
         backgroundColor: '#1e2f50',
         titleColor: '#ffffff',
@@ -477,13 +483,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         callbacks: {
           title: function(items: any[]) {
             if (!items.length) return '';
-            const x = items[0].parsed.x;
-            return `Distance: ${Number(x).toFixed(4)} m`;
+            // parsed.x adalah nilai Distance aktual dari {x,y} dataset
+            const x = Number(items[0].parsed.x);
+            return `Distance: ${x.toFixed(4)} m`;
           },
           label: function(context: any) {
-            return `Backscatter: ${context.parsed.y.toFixed(3)} dB`;
-          }
-        }
+            return `Backscatter: ${Number(context.parsed.y).toFixed(3)} dB`;
+          },
+        },
       },
       zoom: {
         zoom: {
@@ -496,13 +503,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           mode: 'x' as const,
         },
         limits: {
-          x: { minRange: 0.001 },
+          x: { minRange: 0.0001 },
         },
       },
     },
     scales: {
       x: {
-        type: 'linear' as const,   // ← key fix: linear scale, bukan category
+        type: 'linear' as const,
         title: {
           display: true,
           text: 'Distance (m)',
@@ -512,10 +519,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         grid: { color: '#2a3d60' },
         ticks: {
           color: '#94a3b8',
-          maxTicksLimit: 10,
+          maxTicksLimit: 8,
+          // Callback menerima nilai numerik aktual dari skala linear
           callback: function(val: any) {
-            return Number(val).toFixed(4);
-          }
+            const n = Number(val);
+            // Format adaptif: kalau range kecil tampilkan lebih desimal
+            return n < 1 ? n.toFixed(4) : n.toFixed(3);
+          },
         },
       },
       y: {
