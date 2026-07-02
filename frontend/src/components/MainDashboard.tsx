@@ -424,28 +424,25 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     };
   }, [isPlaying, data]);
 
-  // ── Chart Data — hanya Backscatter trace, sumbu X = Distance ──
+  // ── Chart Data — Backscatter trace, sumbu X = Distance (linear scale) ──
   const chartData = useMemo(() => {
     if (!data) return null;
 
     const displayedData = data.backscatter.slice(0, currentPointIndex + 1);
-
-    // Gunakan Distance jika tersedia, fallback ke index (0, 1, 2, ...)
     const hasDistance = data.distance && data.distance.length === data.backscatter.length;
-    const labels = displayedData.map((_, i) => {
-      if (hasDistance && data.distance[i] !== null && data.distance[i] !== undefined) {
-        // Tampilkan dalam meter dengan 4 desimal
-        return Number(data.distance[i]).toFixed(4);
-      }
-      return i.toString();
-    });
+
+    // Gunakan format {x, y} agar Chart.js bisa membuat skala linear yang benar.
+    // Jika tidak ada distance, fallback ke index sebagai x.
+    const points = displayedData.map((val, i) => ({
+      x: hasDistance && data.distance[i] != null ? Number(data.distance[i]) : i,
+      y: val,
+    }));
 
     return {
-      labels,
       datasets: [
         {
           label: 'Backscatter (dB)',
-          data: displayedData,
+          data: points,
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59, 130, 246, 0.08)',
           borderWidth: 1.5,
@@ -467,7 +464,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     },
     plugins: {
       legend: {
-        display: false,   // Sembunyikan legend — hanya ada satu dataset
+        display: false,
       },
       tooltip: {
         backgroundColor: '#1e2f50',
@@ -480,7 +477,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         callbacks: {
           title: function(items: any[]) {
             if (!items.length) return '';
-            return `Distance: ${items[0].label} m`;
+            const x = items[0].parsed.x;
+            return `Distance: ${Number(x).toFixed(4)} m`;
           },
           label: function(context: any) {
             return `Backscatter: ${context.parsed.y.toFixed(3)} dB`;
@@ -498,12 +496,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           mode: 'x' as const,
         },
         limits: {
-          x: { minRange: 10 },
+          x: { minRange: 0.001 },
         },
       },
     },
     scales: {
       x: {
+        type: 'linear' as const,   // ← key fix: linear scale, bukan category
         title: {
           display: true,
           text: 'Distance (m)',
@@ -513,10 +512,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         grid: { color: '#2a3d60' },
         ticks: {
           color: '#94a3b8',
-          maxTicksLimit: 20,
-          callback: function(val: any, index: number) {
-            // Tampilkan label setiap N tick agar tidak terlalu padat
-            return index % 5 === 0 ? val : '';
+          maxTicksLimit: 10,
+          callback: function(val: any) {
+            return Number(val).toFixed(4);
           }
         },
       },
