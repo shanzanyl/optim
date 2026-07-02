@@ -139,7 +139,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   // Chart refs
   const chartRef = useRef<any>(null);
-  const playbackIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Classification History (DB) ──
   const [dbHistory, setDbHistory] = useState<DashboardHistoryItem[]>([]);
@@ -462,11 +462,22 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   }, [data, currentPointIndex]);
 
   // ── Chart Options ──
+  // xMax dihitung dari data distance aktual agar sumbu X tidak extend melewati trace
+  const xMax = useMemo(() => {
+    if (!data) return undefined;
+    const distArr = data.distance ?? [];
+    if (distArr.length > 0) {
+      const validDist = distArr.filter(v => v !== null && v !== undefined) as number[];
+      if (validDist.length > 0) return Math.max(...validDist);
+    }
+    return data.total_points - 1;
+  }, [data]);
+
   const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     interaction: {
-      mode: 'nearest' as const,  // nearest: cari titik terdekat berdasarkan x aktual
+      mode: 'nearest' as const,
       axis: 'x' as const,
       intersect: false,
     },
@@ -483,7 +494,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         callbacks: {
           title: function(items: any[]) {
             if (!items.length) return '';
-            // parsed.x adalah nilai Distance aktual dari {x,y} dataset
             const x = Number(items[0].parsed.x);
             return `Distance: ${x.toFixed(4)} m`;
           },
@@ -510,6 +520,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     scales: {
       x: {
         type: 'linear' as const,
+        min: 0,
+        max: xMax,   // ← sumbu X berhenti tepat di titik terakhir data
         title: {
           display: true,
           text: 'Distance (m)',
@@ -520,10 +532,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         ticks: {
           color: '#94a3b8',
           maxTicksLimit: 8,
-          // Callback menerima nilai numerik aktual dari skala linear
           callback: function(val: any) {
             const n = Number(val);
-            // Format adaptif: kalau range kecil tampilkan lebih desimal
             return n < 1 ? n.toFixed(4) : n.toFixed(3);
           },
         },
@@ -540,7 +550,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         reverse: true,
       },
     },
-  }), []);
+  }), [xMax]);
 
   // ── Current Prediction Info ──
   const currentPrediction = useMemo(() => {
@@ -1007,9 +1017,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
               <span className="w-1 h-4 bg-purple-400 rounded-full" />
-              <span className="text-white text-sm font-semibold">Fault Distribution</span>
+              <span className="text-white text-sm font-semibold tracking-widest uppercase">Fault Distribution</span>
             </div>
-            <div className="p-4">
+            <div className="p-5">
               {!dbStats || Object.keys(dbStats.class_distribution).length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center">
                   <TrendingUp className="w-8 h-8 mb-2 opacity-30" />
@@ -1017,31 +1027,30 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   <p className="mt-1">Upload file SOR untuk melihat distribusi.</p>
                 </div>
               ) : (() => {
-                // Urutan kategori tetap (sesuai spec)
                 const CLASS_ORDER = [
                   'normal', 'bending', 'bad_splice', 'dirty_connector',
                   'air_gap', 'nearly_cut', 'fiber_cut',
                 ];
                 const CLASS_LABELS: Record<string, string> = {
-                  normal:           'Normal',
-                  bending:          'Bending',
-                  bad_splice:       'Bad Splice',
-                  dirty_connector:  'Dirty Connector',
-                  air_gap:          'Air Gap',
-                  nearly_cut:       'Nearly Cut',
-                  fiber_cut:        'Fiber Cut',
+                  normal:          'NORMAL',
+                  bending:         'BENDING',
+                  bad_splice:      'BAD SPLICE',
+                  dirty_connector: 'DIRTY CONNECTOR',
+                  air_gap:         'AIR GAP',
+                  nearly_cut:      'HAMPIR PUTUS',
+                  fiber_cut:       'FIBER CUT',
                 };
                 const COLORS: Record<string, string> = {
-                  normal:           '#10b981',
-                  bending:          '#f59e0b',
-                  bad_splice:       '#3b82f6',
-                  dirty_connector:  '#06b6d4',
-                  air_gap:          '#a855f7',
-                  nearly_cut:       '#f97316',
-                  fiber_cut:        '#ef4444',
+                  normal:          '#10b981',
+                  bending:         '#f59e0b',
+                  bad_splice:      '#3b82f6',
+                  dirty_connector: '#a855f7',
+                  air_gap:         '#ef4444',
+                  nearly_cut:      '#f97316',
+                  fiber_cut:       '#ec4899',
                 };
 
-                // Normalisasi key dari API (bisa pakai spasi atau underscore)
+                // Normalisasi key dari API
                 const rawDist = dbStats.class_distribution;
                 const dist: Record<string, number> = {};
                 Object.entries(rawDist).forEach(([k, v]) => {
@@ -1052,21 +1061,19 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 const total = Object.values(dist).reduce((a, b) => a + b, 0);
                 if (total === 0) return null;
 
-                // Bangun segments untuk donut
-                type Segment = { key: string; count: number; pct: number; color: string; label: string };
-                const segments: Segment[] = CLASS_ORDER
-                  .filter(k => dist[k] > 0)
+                // Bangun segments — hanya yang punya data
+                type Seg = { key: string; count: number; pct: number; color: string };
+                const segments: Seg[] = CLASS_ORDER
+                  .filter(k => (dist[k] || 0) > 0)
                   .map(k => ({
                     key: k,
                     count: dist[k],
                     pct: dist[k] / total,
                     color: COLORS[k] || '#6366f1',
-                    label: CLASS_LABELS[k] || k,
                   }));
 
-                // SVG Donut Chart
-                const R = 60, r = 38, cx = 80, cy = 80;
-                const circumference = 2 * Math.PI * R;
+                // SVG Donut — lebih besar, tanpa teks tengah
+                const R = 80, r = 52, cx = 100, cy = 100;
                 let cumPct = 0;
                 const arcs = segments.map(seg => {
                   const startPct = cumPct;
@@ -1075,7 +1082,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 });
 
                 const describeArc = (startPct: number, endPct: number) => {
-                  const gap = 0.008; // gap kecil antar segment
+                  const gap = 0.006;
                   const s = (startPct + gap / 2) * 2 * Math.PI - Math.PI / 2;
                   const e = (endPct - gap / 2) * 2 * Math.PI - Math.PI / 2;
                   const x1 = cx + R * Math.cos(s), y1 = cy + R * Math.sin(s);
@@ -1086,50 +1093,54 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   return `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${r} ${r} 0 ${large} 0 ${x4} ${y4} Z`;
                 };
 
+                // Legend 2 kolom
+                const legendItems = CLASS_ORDER.map(k => ({
+                  key: k,
+                  label: CLASS_LABELS[k],
+                  count: dist[k] || 0,
+                  color: COLORS[k] || '#6366f1',
+                  active: (dist[k] || 0) > 0,
+                }));
+                const col1 = legendItems.filter((_, i) => i % 2 === 0);
+                const col2 = legendItems.filter((_, i) => i % 2 === 1);
+
                 return (
-                  <div className="flex flex-col gap-4">
-                    {/* Donut SVG */}
+                  <div className="flex flex-col gap-5">
+                    {/* Donut SVG — lebih besar, tanpa teks tengah */}
                     <div className="flex justify-center">
-                      <svg viewBox="0 0 160 160" className="w-40 h-40">
+                      <svg viewBox="0 0 200 200" className="w-48 h-48">
                         {arcs.map(seg => (
                           <path
                             key={seg.key}
                             d={describeArc(seg.startPct, seg.endPct)}
                             fill={seg.color}
-                            opacity={0.9}
                           />
                         ))}
-                        {/* Teks tengah */}
-                        <text x={cx} y={cy - 8} textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
-                          {total}
-                        </text>
-                        <text x={cx} y={cy + 10} textAnchor="middle" fill="#94a3b8" fontSize="9">
-                          total files
-                        </text>
                       </svg>
                     </div>
 
-                    {/* Legend + count */}
-                    <div className="space-y-1.5">
-                      {CLASS_ORDER.map(k => {
-                        const count = dist[k] || 0;
-                        return (
-                          <div key={k} className="flex items-center justify-between text-[10px]">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                                style={{ backgroundColor: COLORS[k] || '#6366f1', opacity: count > 0 ? 1 : 0.25 }}
-                              />
-                              <span className={count > 0 ? 'text-slate-300' : 'text-slate-600'}>
-                                {CLASS_LABELS[k]}
+                    {/* Legend 2 kolom */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      {[col1, col2].map((col, ci) => (
+                        <div key={ci} className="flex flex-col gap-2">
+                          {col.map(item => (
+                            <div key={item.key} className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className="w-2 h-2 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: item.color, opacity: item.active ? 1 : 0.25 }}
+                                />
+                                <span className={`text-[9px] font-semibold tracking-wide truncate ${item.active ? 'text-slate-300' : 'text-slate-600'}`}>
+                                  {item.label}
+                                </span>
+                              </div>
+                              <span className={`text-[10px] font-bold font-mono flex-shrink-0 ${item.active ? 'text-white' : 'text-slate-600'}`}>
+                                {item.count}
                               </span>
                             </div>
-                            <span className={`font-mono font-semibold ${count > 0 ? 'text-white' : 'text-slate-600'}`}>
-                              {count}
-                            </span>
-                          </div>
-                        );
-                      })}
+                          ))}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 );
