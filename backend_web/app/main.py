@@ -2705,15 +2705,31 @@ async def process_sor_file(
         logger.info("[SOR] ℹ️  Distance column not found — frontend akan gunakan index")
 
     # 4. Ambil data Backscatter (dan Distance jika ada)
-    # Gunakan index baris yang sama agar Backscatter & Distance selalu sejajar
     df_clean = df[[backscatter_col] + ([distance_col] if distance_col else [])].copy()
+
+    # Parse Backscatter — coba koma desimal jika titik gagal
     df_clean[backscatter_col] = pd.to_numeric(df_clean[backscatter_col], errors='coerce')
+    if df_clean[backscatter_col].isna().sum() > len(df_clean) * 0.5:
+        df_clean[backscatter_col] = pd.to_numeric(
+            df_clean[backscatter_col].astype(str).str.replace(',', '.', regex=False),
+            errors='coerce'
+        )
+
+    # Parse Distance — coba koma desimal jika titik gagal
     if distance_col:
         df_clean[distance_col] = pd.to_numeric(df_clean[distance_col], errors='coerce')
+        nan_count = df_clean[distance_col].isna().sum()
+        logger.info(f"[SOR]   Distance NaN setelah parse pertama: {nan_count}/{len(df_clean)}")
+        if nan_count > len(df_clean) * 0.3:
+            # Kolom ini pakai koma sebagai desimal — ganti koma → titik lalu parse ulang
+            logger.info("[SOR]   Distance: detected comma decimal, re-parsing...")
+            df_clean[distance_col] = pd.to_numeric(
+                df[distance_col].astype(str).str.replace(',', '.', regex=False),
+                errors='coerce'
+            )
+            logger.info(f"[SOR]   Distance NaN setelah re-parse: {df_clean[distance_col].isna().sum()}/{len(df_clean)}")
 
-    # Drop baris yang Backscatter-nya NaN.
-    # Jika Distance juga ada, drop baris yang Distance-nya NaN agar kedua array
-    # selalu sejajar dan tidak ada null di tengah-tengah.
+    # Drop baris yang Backscatter atau Distance-nya NaN
     drop_cols = [backscatter_col] + ([distance_col] if distance_col else [])
     df_clean = df_clean.dropna(subset=drop_cols)
 
@@ -2722,6 +2738,8 @@ async def process_sor_file(
 
     logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
     logger.info(f"[SOR]   distance points   = {len(distance_data)}")
+    if distance_data:
+        logger.info(f"[SOR]   distance range    = {distance_data[0]:.4f} ~ {distance_data[-1]:.4f} m")
     if len(backscatter_data) < 128:
         raise HTTPException(
             status_code=400,
