@@ -2939,3 +2939,22 @@ async def delete_dashboard_history(
     await db.commit()
     logger.info(f"[DASHBOARD] Deleted history id={history_id} by user={current_user.email}")
     return {"success": True, "message": f"History id={history_id} berhasil dihapus"}
+
+@app.post("/api/admin/make-admin/{user_id}")
+async def make_admin(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan")
+
+    if user.is_admin:
+        return {"message": f"User {user.email} sudah menjadi admin"}
+
+    user.is_admin = True
+    user.is_approved = True   # admin otomatis dianggap disetujui
+    await db.commit()
+    return {"message": f"User {user.email} berhasil dijadikan admin"}

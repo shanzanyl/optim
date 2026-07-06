@@ -912,10 +912,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         )}
 
         {/* ── Classification History + Fault Distribution ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-          {/* Classification History Table */}
-          <div className="lg:col-span-2 bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
+          {/* Classification History Table — 3/5 lebar */}
+          <div className="lg:col-span-3 bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a3d60]">
               <div className="flex items-center gap-2">
                 <span className="w-1 h-4 bg-blue-400 rounded-full" />
@@ -1019,24 +1019,20 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
           </div>
 
-          {/* Fault Distribution — Donut Chart */}
-          <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
+          {/* Fault Distribution — Donut Chart — 2/5 lebar */}
+          <div className="lg:col-span-2 bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
               <span className="w-1 h-4 bg-purple-400 rounded-full" />
               <span className="text-white text-sm font-semibold tracking-widest uppercase">Fault Distribution</span>
             </div>
             <div className="p-5">
               {!dbStats || Object.keys(dbStats.class_distribution).length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center">
+                <div className="flex flex-col items-center justify-center h-56 text-slate-500 text-xs text-center">
                   <TrendingUp className="w-8 h-8 mb-2 opacity-30" />
                   <p>Belum ada data.</p>
                   <p className="mt-1">Upload file SOR untuk melihat distribusi.</p>
                 </div>
               ) : (() => {
-                const CLASS_ORDER = [
-                  'normal', 'bending', 'bad_splice', 'dirty_connector',
-                  'air_gap', 'nearly_cut', 'fiber_cut',
-                ];
                 const CLASS_LABELS: Record<string, string> = {
                   normal:          'NORMAL',
                   bending:         'BENDING',
@@ -1067,28 +1063,30 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 const total = Object.values(dist).reduce((a, b) => a + b, 0);
                 if (total === 0) return null;
 
-                // Bangun segments — hanya yang punya data
-                type Seg = { key: string; count: number; pct: number; color: string };
-                const segments: Seg[] = CLASS_ORDER
-                  .filter(k => (dist[k] || 0) > 0)
-                  .map(k => ({
+                // Hanya kelas yang count > 0
+                type Seg = { key: string; count: number; pct: number; color: string; label: string };
+                const activeSegments: Seg[] = Object.entries(dist)
+                  .filter(([, count]) => count > 0)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([k, count]) => ({
                     key: k,
-                    count: dist[k],
-                    pct: dist[k] / total,
+                    count,
+                    pct: count / total,
                     color: COLORS[k] || '#6366f1',
+                    label: CLASS_LABELS[k] || k.replace(/_/g, ' ').toUpperCase(),
                   }));
 
-                // SVG Donut — lebih besar, tanpa teks tengah
-                const R = 80, r = 52, cx = 100, cy = 100;
+                // SVG Donut — proporsional dengan panel
+                const R = 85, r = 54, cx = 100, cy = 100;
                 let cumPct = 0;
-                const arcs = segments.map(seg => {
+                const arcs = activeSegments.map(seg => {
                   const startPct = cumPct;
                   cumPct += seg.pct;
                   return { ...seg, startPct, endPct: cumPct };
                 });
 
                 const describeArc = (startPct: number, endPct: number) => {
-                  const gap = 0.006;
+                  const gap = activeSegments.length > 1 ? 0.005 : 0;
                   const s = (startPct + gap / 2) * 2 * Math.PI - Math.PI / 2;
                   const e = (endPct - gap / 2) * 2 * Math.PI - Math.PI / 2;
                   const x1 = cx + R * Math.cos(s), y1 = cy + R * Math.sin(s);
@@ -1099,52 +1097,89 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   return `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${r} ${r} 0 ${large} 0 ${x4} ${y4} Z`;
                 };
 
-                // Legend 2 kolom
-                const legendItems = CLASS_ORDER.map(k => ({
-                  key: k,
-                  label: CLASS_LABELS[k],
-                  count: dist[k] || 0,
-                  color: COLORS[k] || '#6366f1',
-                  active: (dist[k] || 0) > 0,
-                }));
-                const col1 = legendItems.filter((_, i) => i % 2 === 0);
-                const col2 = legendItems.filter((_, i) => i % 2 === 1);
+                // State tooltip — pakai object sederhana di dalam IIFE dengan React.useState tidak bisa,
+                // jadi gunakan SVG <title> native + custom overlay via foreignObject trick.
+                // Cara paling bersih: gunakan <title> di dalam <path> (native SVG tooltip).
+                // Untuk tooltip custom yang lebih bagus, wrap SVG dalam div dengan state.
+                // Kita pakai pendekatan: onMouseEnter/Leave pada path, tooltip div absolut.
 
                 return (
-                  <div className="flex flex-col gap-5">
-                    {/* Donut SVG — lebih besar, tanpa teks tengah */}
-                    <div className="flex justify-center">
-                      <svg viewBox="0 0 200 200" className="w-48 h-48">
-                        {arcs.map(seg => (
-                          <path
-                            key={seg.key}
-                            d={describeArc(seg.startPct, seg.endPct)}
-                            fill={seg.color}
-                          />
-                        ))}
+                  <div className="flex flex-col items-center gap-5">
+                    {/* Donut SVG dengan tooltip hover */}
+                    <div className="relative">
+                      <svg viewBox="0 0 200 200" className="w-44 h-44">
+                        {activeSegments.length === 1 ? (
+                          <>
+                            <circle
+                              cx={cx} cy={cy} r={R}
+                              fill={activeSegments[0].color}
+                              className="cursor-pointer"
+                              style={{ filter: 'brightness(1)' }}
+                              onMouseEnter={e => {
+                                const el = e.currentTarget.closest('.relative')?.querySelector('.donut-tooltip') as HTMLElement;
+                                if (el) {
+                                  el.textContent = `${activeSegments[0].label}: ${activeSegments[0].count}`;
+                                  el.style.display = 'block';
+                                }
+                                (e.currentTarget as SVGElement).style.filter = 'brightness(1.25)';
+                              }}
+                              onMouseLeave={e => {
+                                const el = e.currentTarget.closest('.relative')?.querySelector('.donut-tooltip') as HTMLElement;
+                                if (el) el.style.display = 'none';
+                                (e.currentTarget as SVGElement).style.filter = 'brightness(1)';
+                              }}
+                            />
+                            <circle cx={cx} cy={cy} r={r} fill="#1a2a45" style={{ pointerEvents: 'none' }} />
+                          </>
+                        ) : (
+                          arcs.map(seg => (
+                            <path
+                              key={seg.key}
+                              d={describeArc(seg.startPct, seg.endPct)}
+                              fill={seg.color}
+                              className="cursor-pointer transition-all duration-150"
+                              style={{ filter: 'brightness(1)' }}
+                              onMouseEnter={e => {
+                                const el = e.currentTarget.closest('.relative')?.querySelector('.donut-tooltip') as HTMLElement;
+                                if (el) {
+                                  el.textContent = `${seg.label}: ${seg.count}`;
+                                  el.style.display = 'block';
+                                }
+                                (e.currentTarget as SVGElement).style.filter = 'brightness(1.3)';
+                                (e.currentTarget as SVGElement).style.transform = 'scale(1.03)';
+                                (e.currentTarget as SVGElement).style.transformOrigin = '100px 100px';
+                              }}
+                              onMouseLeave={e => {
+                                const el = e.currentTarget.closest('.relative')?.querySelector('.donut-tooltip') as HTMLElement;
+                                if (el) el.style.display = 'none';
+                                (e.currentTarget as SVGElement).style.filter = 'brightness(1)';
+                                (e.currentTarget as SVGElement).style.transform = 'scale(1)';
+                              }}
+                            />
+                          ))
+                        )}
                       </svg>
+                      {/* Tooltip overlay */}
+                      <div
+                        className="donut-tooltip absolute left-1/2 -translate-x-1/2 -top-8 bg-[#0f1e35] border border-[#2a3d60] text-white text-[10px] font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap pointer-events-none shadow-lg"
+                        style={{ display: 'none' }}
+                      />
                     </div>
 
-                    {/* Legend 2 kolom */}
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                      {[col1, col2].map((col, ci) => (
-                        <div key={ci} className="flex flex-col gap-2">
-                          {col.map(item => (
-                            <div key={item.key} className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span
-                                  className="w-2 h-2 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: item.color, opacity: item.active ? 1 : 0.25 }}
-                                />
-                                <span className={`text-[9px] font-semibold tracking-wide truncate ${item.active ? 'text-slate-300' : 'text-slate-600'}`}>
-                                  {item.label}
-                                </span>
-                              </div>
-                              <span className={`text-[10px] font-bold font-mono flex-shrink-0 ${item.active ? 'text-white' : 'text-slate-600'}`}>
-                                {item.count}
-                              </span>
-                            </div>
-                          ))}
+                    {/* Legend — hanya kelas aktif, 1 kolom */}
+                    <div className="w-full space-y-2 px-1">
+                      {activeSegments.map(seg => (
+                        <div key={seg.key} className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: seg.color }}
+                          />
+                          <span className="text-[10px] font-semibold tracking-wide text-slate-300">
+                            {seg.label}
+                          </span>
+                          <span className="text-[11px] font-bold font-mono text-white ml-1">
+                            {seg.count}
+                          </span>
                         </div>
                       ))}
                     </div>

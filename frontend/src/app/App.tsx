@@ -241,8 +241,8 @@ export default function App() {
             )}
             {/* {activeTab === 'history' && (
               <History refreshTrigger={refreshTrigger} />
-            )}
-            {activeTab === 'admin' && isAdmin && <Adminpage />} */}
+            )} */}
+            {activeTab === 'admin' && isAdmin && <Adminpage />}
           </main>
 
         </div>
