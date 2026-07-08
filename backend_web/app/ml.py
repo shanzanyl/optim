@@ -155,13 +155,17 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         # Prepare features
         row = pd.DataFrame([otdr_values])
         
-        # Ensure all columns exist
+        # Ensure all columns exist.
+        # Kolom yang tidak ada diisi NaN — bukan 0.0.
+        # NaN adalah representasi yang benar untuk Fiber Cut (identik dengan training).
         for col in feature_columns:
             if col not in row.columns:
-                row[col] = 0.0
+                row[col] = np.nan
         
-        # Select and order features
-        X = row[feature_columns].fillna(0.0).astype(np.float32)
+        # Select and order features.
+        # TIDAK menggunakan fillna() — NaN dipertahankan agar identik dengan
+        # representasi Fiber Cut saat training. LightGBM mendukung NaN secara native.
+        X = row[feature_columns].astype(np.float64)
         
         # Scale features
         if robust_scaler is not None:

@@ -300,28 +300,31 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
 
     const payload = {
       prx: parseOrZero(manualForm.prx) || -15.6,
-      avg_total: parseOrNull(manualForm.avg_total) ?? 0.0,
+      // distance_1 & distance_2 selalu ada — fallback 0.0
       distance_1: parseOrNull(manualForm.distance_1) ?? 0.0,
       distance_2: parseOrNull(manualForm.distance_2) ?? 0.0,
-      distance_3: parseOrNull(manualForm.distance_3) ?? 0.0,
-      distance_4: parseOrNull(manualForm.distance_4) ?? 0.0,
-      // 🔥 Loss: null jika kosong atau 0
-      loss_1: parseOrNull(manualForm.loss_1) ?? 0.0,
-      loss_2: parseOrNull(manualForm.loss_2) ?? 0.0,
-      loss_3: parseOrNull(manualForm.loss_3), // ← BISA NULL!
+      // distance_3/4, loss, total_l, avg_l, return: null jika kosong
+      // null → backend gn() mengembalikan None → normalize_for_model isi NaN → model
+      // null → backend _db() menyimpan NULL ke Supabase
+      distance_3: parseOrNull(manualForm.distance_3) ?? null,
+      distance_4: parseOrNull(manualForm.distance_4) ?? null,
+      loss_1: parseOrNull(manualForm.loss_1) ?? null,
+      loss_2: parseOrNull(manualForm.loss_2) ?? null,
+      loss_3: parseOrNull(manualForm.loss_3) ?? null,
       loss_4: null, // selalu null - end of fiber
-      total_l_1: parseOrNull(manualForm.total_l_1) ?? 0.0,
-      total_l_2: parseOrNull(manualForm.total_l_2) ?? 0.0,
-      total_l_3: parseOrNull(manualForm.total_l_3) ?? 0.0,
-      total_l_4: parseOrNull(manualForm.total_l_4) ?? 0.0,
-      avg_l_1: parseOrNull(manualForm.avg_l_1) ?? 0.0,
-      avg_l_2: parseOrNull(manualForm.avg_l_2) ?? 0.0,
-      avg_l_3: parseOrNull(manualForm.avg_l_3) ?? 0.0,
-      avg_l_4: parseOrNull(manualForm.avg_l_4) ?? 0.0,
-      return_1: parseOrNull(manualForm.return_1) ?? 0.0,
-      return_2: parseOrNull(manualForm.return_2) ?? 0.0,
-      return_3: parseOrNull(manualForm.return_3) ?? 0.0,
-      return_4: parseOrNull(manualForm.return_4) ?? 0.0,
+      avg_total: parseOrNull(manualForm.avg_total) ?? null,
+      total_l_1: parseOrNull(manualForm.total_l_1) ?? null,
+      total_l_2: parseOrNull(manualForm.total_l_2) ?? null,
+      total_l_3: parseOrNull(manualForm.total_l_3) ?? null,
+      total_l_4: parseOrNull(manualForm.total_l_4) ?? null,
+      avg_l_1: parseOrNull(manualForm.avg_l_1) ?? null,
+      avg_l_2: parseOrNull(manualForm.avg_l_2) ?? null,
+      avg_l_3: parseOrNull(manualForm.avg_l_3) ?? null,
+      avg_l_4: parseOrNull(manualForm.avg_l_4) ?? null,
+      return_1: parseOrNull(manualForm.return_1) ?? null,
+      return_2: parseOrNull(manualForm.return_2) ?? null,
+      return_3: parseOrNull(manualForm.return_3) ?? null,
+      return_4: parseOrNull(manualForm.return_4) ?? null,
     };
 
     const token = localStorage.getItem('token');

@@ -27,11 +27,8 @@ import tempfile
 from app import ml          # Model OTDR (LightGBM)
 from app import ml_sor      # Model SOR (Random Forest) - BARU
 from app.database import Base, engine, get_db, AsyncSessionLocal
-from app.models import User, OtdrResult, DashboardResult
-from app.schemas import (
-    UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest,
-    DashboardResultResponse, DashboardStatisticsResponse,
-)
+from app.models import User, OtdrResult
+from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest
 from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_optional_user, get_current_admin
@@ -179,53 +176,9 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         except Exception as e:
             logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
 
-
-def send_telegram_dashboard(dominant_class: str, severity: str):
-    """
-    Notifikasi Telegram khusus Dashboard SOR (Random Forest).
-    Format sederhana — hanya classification, severity, dan waktu.
-    Tidak dikirim jika hasil Normal.
-    """
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.info("[TELEGRAM-DASHBOARD] Token/chat_id belum dikonfigurasi, alert dibatalkan.")
-        return
-
-    severity_lower = severity.lower()
-    if severity_lower == "normal":
-        logger.info(f"[TELEGRAM-DASHBOARD] Hasil Normal, alert tidak dikirim.")
-        return
-
-    severity_icon = "🔴" if severity_lower == "critical" else "🟡"
-    local_time = datetime.utcnow() + timedelta(hours=7)
-    time_str = local_time.strftime("%d %b %Y %H:%M:%S")
-
-    message = (
-        f"🚨 <b>OTDR MONITORING ALERT</b> 🚨\n\n"
-        f"Gangguan terdeteksi.\n\n"
-        f"<b>Classification</b>\n"
-        f"{dominant_class}\n\n"
-        f"<b>Severity</b>\n"
-        f"{severity_icon} {severity.capitalize()}\n\n"
-        f"<b>Detection Time</b>\n"
-        f"{time_str}"
-    )
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    chat_ids = [cid.strip() for cid in str(TELEGRAM_CHAT_ID).split(",") if cid.strip()]
-
-    for chat_id in chat_ids:
-        try:
-            response = requests.post(
-                url,
-                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-                timeout=10,
-            )
-            if response.status_code == 200:
-                logger.info(f"[TELEGRAM-DASHBOARD] Alert '{dominant_class}' ({severity}) dikirim ke {chat_id}.")
-            else:
-                logger.error(f"[TELEGRAM-DASHBOARD] Gagal kirim ke {chat_id}: {response.text}")
-        except Exception as e:
-            logger.error(f"[TELEGRAM-DASHBOARD] Error koneksi ke {chat_id}: {e}")
+# ═══════════════════════════════════════════════════════════════════
+# FUNGSI MAPPING KOLOM
+# ═══════════════════════════════════════════════════════════════════
 
 REQUIRED_FEATURES = [
     "Prx (dBm)", "Distance 1", "Distance 2", "Distance 3", "Distance 4",
@@ -410,22 +363,53 @@ def detect_manual_mode(payload: dict) -> tuple:
 def normalize_for_model(mode: str, cut_km: int, parsed_data: dict) -> dict:
     """
     Normalisasi data ke format training model.
-    Gunakan nilai besar finite (999.0) sebagai pengganti inf.
+
+    Representasi Fiber Cut menggunakan NaN untuk semua feature yang tidak
+    tersedia setelah titik putus — identik dengan dataset training.
+
+    Fiber Cut KM2:
+      Loss 2       = NaN  (End of Fiber, tidak terukur)
+      Distance 3/4 = NaN  (tidak ada baris di tabel OTDR)
+      Loss 3/4     = NaN
+      Total-L 3/4  = NaN
+      Avg-L 3/4    = NaN
+      Return 3/4   = NaN
+
+    Fiber Cut KM3:
+      Loss 3       = NaN  (End of Fiber)
+      Distance 4   = NaN
+      Loss 4       = NaN
+      Total-L 4    = NaN
+      Avg-L 4      = NaN
+      Return 4     = NaN
+      (Total-L 3, Avg-L 3, Return 3 tetap dari OCR — masih terukur)
     """
     result = parsed_data.copy() if parsed_data else {}
-    
+    NAN = float('nan')
+
     if mode == 'fiber_cut_km2':
-        # 🔥 Ganti inf dengan 999.0 (nilai besar tapi finite)
-        result['loss_2'] = 999.0
-        result['loss_3'] = 999.0
-        result['loss_4'] = 999.0
-        logger.info(f"[NORMALIZE] Fiber Cut KM2: loss_2, loss_3, loss_4 → 999.0")
-        
+        result['loss_2']     = NAN
+        result['distance_3'] = NAN
+        result['loss_3']     = NAN
+        result['total_l_3']  = NAN
+        result['avg_l_3']    = NAN
+        result['return_3']   = NAN
+        result['distance_4'] = NAN
+        result['loss_4']     = NAN
+        result['total_l_4']  = NAN
+        result['avg_l_4']    = NAN
+        result['return_4']   = NAN
+        logger.info("[NORMALIZE] Fiber Cut KM2: loss_2, semua KM3+KM4 → NaN")
+
     elif mode == 'fiber_cut_km3':
-        result['loss_3'] = 999.0
-        result['loss_4'] = 999.0
-        logger.info(f"[NORMALIZE] Fiber Cut KM3: loss_3, loss_4 → 999.0")
-    
+        result['loss_3']     = NAN
+        result['distance_4'] = NAN
+        result['loss_4']     = NAN
+        result['total_l_4']  = NAN
+        result['avg_l_4']    = NAN
+        result['return_4']   = NAN
+        logger.info("[NORMALIZE] Fiber Cut KM3: loss_3, semua KM4 → NaN")
+
     return result
 
 # ═══════════════════════════════════════════════════════════════════
@@ -478,9 +462,9 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "https://ashy-mushroom-0feb76700.7.azurestaticapps.net",
-        "https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net",
-        # CATATAN: jangan tambahkan "*" di sini.
-        # "*" + allow_credentials=True adalah kombinasi ilegal CORS → browser blok semua request.
+        # BUG FIX: wildcard "*" + allow_credentials=True adalah kombinasi ilegal per spec CORS.
+        # Browser menolak SEMUA preflight OPTIONS request → "Failed to fetch" / "403 Not authenticated".
+        # Solusi: hilangkan "*", daftarkan origin secara eksplisit.
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -497,7 +481,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 from PIL import Image, ImageEnhance
 from typing import List, Dict, Tuple
 
-logger = logging.getLogger(__name__)
+# NOTE: logger sudah didefinisikan di atas (line ~39), tidak perlu deklarasi ulang
 
 def preprocess_image_simple(image_bytes: bytes) -> list:
     """Preprocessing lebih agresif untuk OCR - OPTIMASI"""
@@ -2089,7 +2073,10 @@ async def detect_manual(
     mode, cut_km = detect_manual_mode(payload)
     logger.info(f"[AUTO-DETECT] Manual mode: {mode}, cut_km: {cut_km}")
 
+    NAN = float('nan')
+
     def g(key, default=0.0):
+        """Ambil nilai numerik dengan default — untuk field yang SELALU harus ada (distance, prx)."""
         try:
             val = payload.get(key, default)
             if val is None or val == "":
@@ -2097,8 +2084,9 @@ async def detect_manual(
             return float(val)
         except:
             return default
-    
-    def get_loss(key):
+
+    def gn(key):
+        """Ambil nilai numerik; kembalikan None jika kosong — untuk field yang boleh tidak ada."""
         val = payload.get(key)
         if val is None or val == "":
             return None
@@ -2106,87 +2094,84 @@ async def detect_manual(
             return float(val)
         except:
             return None
-    
-    d1 = g('distance_1', 0.0)
-    d2 = g('distance_2', 0.0)
-    d3 = g('distance_3', 0.0)
-    d4 = g('distance_4', 0.0)
-    
-    l1 = get_loss('loss_1') or 0.0
-    l2 = get_loss('loss_2') or 0.0
-    l3 = get_loss('loss_3') or 0.0
-    l4 = None  # selalu None (End of Fiber)
-    
-    tl1 = g('total_l_1', 0.0)
-    tl2 = g('total_l_2', 0.0)
-    tl3 = g('total_l_3', 0.0)
-    tl4 = g('total_l_4', 0.0)
-    
-    al1 = g('avg_l_1', 0.0)
-    al2 = g('avg_l_2', 0.0)
-    al3 = g('avg_l_3', 0.0)
-    al4 = g('avg_l_4', 0.0)
-    
-    avg_total = g('avg_total', 0.0)
-    
-    r1 = g('return_1', 0.0)
-    r2 = g('return_2', 0.0)
-    r3 = g('return_3', 0.0)
-    r4 = g('return_4', 0.0)
-    
+
+    # Distance & Prx: selalu harus ada, fallback ke 0 / default
+    d1  = g('distance_1', 0.0)
+    d2  = g('distance_2', 0.0)
+    d3  = g('distance_3', 0.0)
+    d4  = g('distance_4', 0.0)
     prx = g('prx', -15.6)
-    
-    # ── DATA UNTUK NORMALISASI ──
-    parsed_data = {
-        'loss_1': l1,
-        'loss_2': l2,
-        'loss_3': l3,
-        'loss_4': l4,
-        'total_l_1': tl1,
-        'total_l_2': tl2,
-        'total_l_3': tl3,
-        'total_l_4': tl4,
-        'avg_l_1': al1,
-        'avg_l_2': al2,
-        'avg_l_3': al3,
-        'avg_l_4': al4,
-        'avg_total': avg_total,
-        'return_1': r1,
-        'return_2': r2,
-        'return_3': r3,
-        'return_4': r4,
-        'distance_1': d1,
-        'distance_2': d2,
-        'distance_3': d3,
-        'distance_4': d4,
-    }
-    
+
+    # Loss, Total-L, Avg-L, Return: None jika tidak diisi
+    # None → disimpan NULL di DB dan diubah NaN ke model oleh normalize_for_model
+    l1  = gn('loss_1')
+    l2  = gn('loss_2')
+    l3  = gn('loss_3')
+    l4  = None   # selalu None — End of Fiber, tidak pernah terukur
+
+    tl1 = gn('total_l_1')
+    tl2 = gn('total_l_2')
+    tl3 = gn('total_l_3')
+    tl4 = gn('total_l_4')
+
+    al1 = gn('avg_l_1')
+    al2 = gn('avg_l_2')
+    al3 = gn('avg_l_3')
+    al4 = gn('avg_l_4')
+
+    avg_total = gn('avg_total')
+
+    r1  = gn('return_1')
+    r2  = gn('return_2')
+    r3  = gn('return_3')
+    r4  = gn('return_4')
+
     # ── NORMALISASI KE FORMAT MODEL ──
+    parsed_data = {
+        'loss_1': l1, 'loss_2': l2, 'loss_3': l3, 'loss_4': l4,
+        'total_l_1': tl1, 'total_l_2': tl2, 'total_l_3': tl3, 'total_l_4': tl4,
+        'avg_l_1': al1, 'avg_l_2': al2, 'avg_l_3': al3, 'avg_l_4': al4,
+        'avg_total': avg_total,
+        'return_1': r1, 'return_2': r2, 'return_3': r3, 'return_4': r4,
+        'distance_1': d1, 'distance_2': d2, 'distance_3': d3, 'distance_4': d4,
+    }
     normalized = normalize_for_model(mode, cut_km, parsed_data)
-    
+
+    def _nan(key, fallback):
+        """
+        Ambil dari normalized. Konversi None → NaN agar model menerima
+        nilai yang identik dengan representasi training Fiber Cut.
+        """
+        val = normalized.get(key, fallback)
+        if val is None:
+            return NAN
+        return val
+
     # ── OTDR VALUES UNTUK ML ──
+    # Semua None dari normalized diubah ke NaN di sini.
+    # NaN adalah representasi yang dipakai model saat training (bukan 0, bukan 999).
     otdr_values = {
-        'Prx (dBm)': prx,
-        'Distance 1': normalized.get('distance_1', d1),
-        'Distance 2': normalized.get('distance_2', d2),
-        'Distance 3': normalized.get('distance_3', d3),
-        'Distance 4': normalized.get('distance_4', d4),
-        'Loss 1': normalized.get('loss_1', l1) or 0.0,
-        'Loss 2': normalized.get('loss_2', l2) or 0.0,
-        'Loss 3': normalized.get('loss_3', l3) or 0.0,
-        'Total-L 1': normalized.get('total_l_1', tl1),
-        'Total-L 2': normalized.get('total_l_2', tl2),
-        'Total-L 3': normalized.get('total_l_3', tl3),
-        'Total-L 4': normalized.get('total_l_4', tl4),
-        'Avg-L 1': normalized.get('avg_l_1', al1),
-        'Avg-L 2': normalized.get('avg_l_2', al2),
-        'Avg-L 3': normalized.get('avg_l_3', al3),
-        'Avg-L 4': normalized.get('avg_l_4', al4),
-        'Avg-Total': normalized.get('avg_total', avg_total),
-        'Return 1': normalized.get('return_1', r1),
-        'Return 2': normalized.get('return_2', r2),
-        'Return 3': normalized.get('return_3', r3),
-        'Return 4': normalized.get('return_4', r4),
+        'Prx (dBm)' : prx,
+        'Distance 1': _nan('distance_1', d1),
+        'Distance 2': _nan('distance_2', d2),
+        'Distance 3': _nan('distance_3', d3),
+        'Distance 4': _nan('distance_4', d4),
+        'Loss 1'    : _nan('loss_1',  l1),
+        'Loss 2'    : _nan('loss_2',  l2),
+        'Loss 3'    : _nan('loss_3',  l3),
+        'Total-L 1' : _nan('total_l_1', tl1),
+        'Total-L 2' : _nan('total_l_2', tl2),
+        'Total-L 3' : _nan('total_l_3', tl3),
+        'Total-L 4' : _nan('total_l_4', tl4),
+        'Avg-L 1'   : _nan('avg_l_1',  al1),
+        'Avg-L 2'   : _nan('avg_l_2',  al2),
+        'Avg-L 3'   : _nan('avg_l_3',  al3),
+        'Avg-L 4'   : _nan('avg_l_4',  al4),
+        'Avg-Total' : _nan('avg_total', avg_total),
+        'Return 1'  : _nan('return_1', r1),
+        'Return 2'  : _nan('return_2', r2),
+        'Return 3'  : _nan('return_3', r3),
+        'Return 4'  : _nan('return_4', r4),
     }
     
     logger.info(f"[MANUAL] mode={mode}, cut_km={cut_km}")
@@ -2201,16 +2186,30 @@ async def detect_manual(
     user_id = current_user.id if current_user else 1
     
     try:
+        def _db(key, fallback):
+            """NaN dari normalize_for_model -> None -> NULL di PostgreSQL."""
+            val = normalized.get(key, fallback)
+            if val is None:
+                return None
+            if isinstance(val, float) and val != val:  # NaN check
+                return None
+            return val
+
         record = OtdrResult(
             user_id=user_id,
             timestamp=datetime.utcnow(),
             prx=prx,
-            distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
-            loss_1=l1, loss_2=l2, loss_3=l3, loss_4=None,
-            total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
-            avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
-            avg_total=avg_total,
-            return_1=r1, return_2=r2, return_3=r3, return_4=r4,
+            distance_1=d1,              distance_2=d2,
+            distance_3=_db('distance_3', d3),  distance_4=_db('distance_4', d4),
+            loss_1=_db('loss_1', l1),   loss_2=_db('loss_2', l2),
+            loss_3=_db('loss_3', l3),   loss_4=None,
+            total_l_1=_db('total_l_1', tl1),   total_l_2=_db('total_l_2', tl2),
+            total_l_3=_db('total_l_3', tl3),   total_l_4=_db('total_l_4', tl4),
+            avg_l_1=_db('avg_l_1', al1),  avg_l_2=_db('avg_l_2', al2),
+            avg_l_3=_db('avg_l_3', al3),  avg_l_4=_db('avg_l_4', al4),
+            avg_total=_db('avg_total', avg_total),
+            return_1=_db('return_1', r1),  return_2=_db('return_2', r2),
+            return_3=_db('return_3', r3),  return_4=_db('return_4', r4),
             klasifikasi=pred.get("prediction"),
             status=pred.get("status"),
             confidence=pred.get("confidence"),
@@ -2224,15 +2223,17 @@ async def detect_manual(
         status_str = pred.get("status", "Normal")
         if status_str.lower() in ["warning", "critical"]:
             try:
-                loss_for_alert = [l1 or 0.0, l2 or 0.0, l3 or 0.0, 0.0]
+                # Telegram tidak bisa menerima None/NaN — konversi ke 0.0 hanya untuk alert
+                def _safe(v): return float(v) if v is not None and v == v else 0.0
+                loss_for_alert = [_safe(l1), _safe(l2), _safe(l3), 0.0]
                 await asyncio.to_thread(
                     send_telegram_alert,
                     classification=pred.get("prediction"),
                     status=status_str,
                     loss=loss_for_alert,
-                    rl=[r1, r2, r3, r4],
+                    rl=[_safe(r1), _safe(r2), _safe(r3), _safe(r4)],
                     prx=prx,
-                    distances=[d1, d2, d3, d4],
+                    distances=[d1, d2, _safe(d3), _safe(d4)],
                     timestamp=record.timestamp
                 )
                 record.telegram_alert_sent = True
@@ -2634,128 +2635,95 @@ async def process_sor_file(
 ):
     """
     Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
-    Hasil otomatis disimpan ke tabel dashboard_results setelah prediksi selesai.
     """
+    # ── LOG: MAIN START ──
     logger.info("=" * 70)
     logger.info("[SOR] ▶ ENTER PROCESS_SOR")
     logger.info(f"[SOR]   user={current_user.email} (id={current_user.id})")
     logger.info(f"[SOR]   filename={file.filename}, content_type={file.content_type}")
+
+    # ── LOG: AUTH SUCCESS ──
     logger.info("[SOR] ✅ AUTH SUCCESS — token valid, user ditemukan")
 
-    # 1. Validasi file
+    # 1. Validasi file (support CSV + Excel)
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
     if not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
+        logger.warning(f"[SOR] ❌ FILE REJECTED: {file.filename}")
         raise HTTPException(
-            status_code=400,
+            status_code=400, 
             detail=f"File harus berformat: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # 2. Baca file
+    # 2. Baca file (CSV atau Excel)
     logger.info("[SOR] ── STEP 1: READ FILE ──")
     try:
         content = await file.read()
         logger.info(f"[SOR]   file size = {len(content)} bytes")
+        
         if file.filename.lower().endswith('.csv'):
-            # Coba baca dulu dengan setting default (titik sebagai desimal)
             df = pd.read_csv(io.BytesIO(content))
-            # Deteksi apakah kolom numerik gagal di-parse (kemungkinan pakai koma desimal)
-            sample_cols = df.select_dtypes(include='object').columns.tolist()
-            has_comma_decimal = False
-            for col in sample_cols:
-                sample = df[col].dropna().head(5).astype(str)
-                if sample.str.contains(r'^\d+,\d+$', regex=True).any():
-                    has_comma_decimal = True
-                    break
-            if has_comma_decimal:
-                logger.info("[SOR]   Detected comma decimal separator — re-reading with decimal=','")
-                df = pd.read_csv(io.BytesIO(content), decimal=',')
         else:
             df = pd.read_excel(io.BytesIO(content))
-        logger.info(f"[SOR] ✅ READ FILE: {len(df)} rows × {len(df.columns)} columns")
+            
+        logger.info(f"[SOR] ✅ READ EXCEL/CSV: {len(df)} rows × {len(df.columns)} columns")
         logger.info(f"[SOR]   columns = {df.columns.tolist()}")
+
     except Exception as e:
         logger.error(f"[SOR] ❌ READ FILE FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Gagal membaca file: {str(e)}")
-
+    
     # 3. Cari kolom Backscatter
     logger.info("[SOR] ── STEP 2: FIND BACKSCATTER COLUMN ──")
     backscatter_col = None
+    possible_cols = ['backscatter (db)', 'backscatter', 'db', 'scatter', 'amplitude']
     for col in df.columns:
         col_lower = col.lower().strip()
-        if any(k in col_lower for k in ['backscatter', 'scatter', ' db', '(db)']):
-            backscatter_col = col
+        for possible in possible_cols:
+            if possible in col_lower:
+                backscatter_col = col
+                break
+        if backscatter_col:
             break
+    
     if backscatter_col is None:
+        logger.error(f"[SOR] ❌ BACKSCATTER COLUMN NOT FOUND. Available: {df.columns.tolist()}")
         raise HTTPException(
-            status_code=400,
+            status_code=400, 
             detail=f"Kolom 'Backscatter (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
         )
+    
     logger.info(f"[SOR] ✅ BACKSCATTER COLUMN FOUND: '{backscatter_col}'")
 
-    # Cari kolom Distance (opsional — untuk sumbu X grafik)
-    distance_col = None
-    for col in df.columns:
-        col_lower = col.lower().strip()
-        if any(k in col_lower for k in ['distance', 'dist', 'jarak']):
-            distance_col = col
-            break
-    if distance_col:
-        logger.info(f"[SOR] ✅ DISTANCE COLUMN FOUND: '{distance_col}'")
-    else:
-        logger.info("[SOR] ℹ️  Distance column not found — frontend akan gunakan index")
-
-    # 4. Ambil data Backscatter (dan Distance jika ada)
-    df_clean = df[[backscatter_col] + ([distance_col] if distance_col else [])].copy()
-
-    # Parse Backscatter — coba koma desimal jika titik gagal
-    df_clean[backscatter_col] = pd.to_numeric(df_clean[backscatter_col], errors='coerce')
-    if df_clean[backscatter_col].isna().sum() > len(df_clean) * 0.5:
-        df_clean[backscatter_col] = pd.to_numeric(
-            df_clean[backscatter_col].astype(str).str.replace(',', '.', regex=False),
-            errors='coerce'
-        )
-
-    # Parse Distance — coba koma desimal jika titik gagal
-    if distance_col:
-        df_clean[distance_col] = pd.to_numeric(df_clean[distance_col], errors='coerce')
-        nan_count = df_clean[distance_col].isna().sum()
-        logger.info(f"[SOR]   Distance NaN setelah parse pertama: {nan_count}/{len(df_clean)}")
-        if nan_count > len(df_clean) * 0.3:
-            # Kolom ini pakai koma sebagai desimal — ganti koma → titik lalu parse ulang
-            logger.info("[SOR]   Distance: detected comma decimal, re-parsing...")
-            df_clean[distance_col] = pd.to_numeric(
-                df[distance_col].astype(str).str.replace(',', '.', regex=False),
-                errors='coerce'
-            )
-            logger.info(f"[SOR]   Distance NaN setelah re-parse: {df_clean[distance_col].isna().sum()}/{len(df_clean)}")
-
-    # Drop baris yang Backscatter atau Distance-nya NaN
-    drop_cols = [backscatter_col] + ([distance_col] if distance_col else [])
-    df_clean = df_clean.dropna(subset=drop_cols)
-
-    backscatter_data = df_clean[backscatter_col].values.tolist()
-    distance_data    = df_clean[distance_col].values.tolist() if distance_col else []
-
+    # 4. Ambil data Backscatter
+    backscatter_data = pd.to_numeric(df[backscatter_col], errors='coerce').dropna().values.tolist()
     logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
-    logger.info(f"[SOR]   distance points   = {len(distance_data)}")
-    if distance_data:
-        logger.info(f"[SOR]   distance range    = {distance_data[0]:.4f} ~ {distance_data[-1]:.4f} m")
+    
     if len(backscatter_data) < 128:
         raise HTTPException(
             status_code=400,
-            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 diperlukan."
+            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 titik diperlukan."
         )
-
-    # 5. Cek model
+    
+    # 5. Cek model SOR sudah loaded
     logger.info("[SOR] ── STEP 3: CHECK MODEL ──")
     if ml_sor.sor_model is None:
-        raise HTTPException(status_code=500, detail="Model Random Forest belum dimuat.")
+        logger.error("[SOR] ❌ SOR MODEL IS NONE — model belum dimuat!")
+        logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
+        raise HTTPException(
+            status_code=500,
+            detail="Model Random Forest belum dimuat. Pastikan file model ada di folder models/sor/"
+        )
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
+    logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
+    logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
 
-    # 6. Batch predict
+    # 6. BATCH PREDICT — semua window sekaligus, jauh lebih cepat dari loop
     window_size = 128
     total_windows = len(backscatter_data) - window_size + 1
-    logger.info(f"[SOR] ── STEP 4: BATCH PREDICT — {total_windows} windows ──")
+
+    logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
+    logger.info(f"[SOR]   window_size={window_size}, total_windows={total_windows}")
+
     try:
         predictions = await asyncio.to_thread(
             ml_sor.predict_sor_batch,
@@ -2765,196 +2733,22 @@ async def process_sor_file(
     except Exception as e:
         logger.error(f"[SOR] ❌ BATCH PREDICT FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Prediksi gagal: {str(e)}")
-    logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows")
 
-    # 7. Hitung statistik & simpan ke DB
-    logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
-    class_counts: dict = {}
-    for p in predictions:
-        cls = p["prediction"]
-        class_counts[cls] = class_counts.get(cls, 0) + 1
-
-    total_pred = len(predictions)
-    dominant_class = max(class_counts, key=class_counts.get) if class_counts else "unknown"
-    dominant_count = class_counts.get(dominant_class, 0)
-    dominant_pct = round((dominant_count / total_pred * 100), 2) if total_pred > 0 else 0.0
-
-    try:
-        db_record = DashboardResult(
-            user_id=current_user.id,
-            filename=file.filename,
-            total_points=len(backscatter_data),
-            total_windows=total_pred,
-            dominant_class=dominant_class,
-            dominant_percentage=dominant_pct,
-            prediction_summary=json.dumps(class_counts),
-        )
-        db.add(db_record)
-        await db.commit()
-        await db.refresh(db_record)
-        logger.info(f"[SOR] ✅ SAVED TO DB: id={db_record.id}, dominant={dominant_class} ({dominant_pct}%)")
-    except Exception as e:
-        logger.error(f"[SOR] ❌ DB SAVE FAILED: {e}", exc_info=True)
-        # Tidak raise — prediksi tetap dikembalikan walau DB gagal
-
-    # 8. Kirim Telegram Dashboard (hanya Warning / Critical)
-    cls_lower = dominant_class.lower()
-    if cls_lower == "normal":
-        severity = "Normal"
-    elif any(k in cls_lower for k in ["cut", "nearly"]):
-        severity = "Critical"
-    else:
-        severity = "Warning"
-
-    logger.info(f"[SOR] ── STEP 6: TELEGRAM — dominant={dominant_class}, severity={severity} ──")
-    try:
-        await asyncio.to_thread(send_telegram_dashboard, dominant_class, severity)
-    except Exception as e:
-        logger.error(f"[SOR] ❌ TELEGRAM FAILED: {e}", exc_info=True)
-        # Tidak raise — response tetap dikembalikan walau Telegram gagal
-
-    logger.info("[SOR] ── RETURN RESPONSE ──")
+    logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
+    logger.info(f"[SOR] ── RETURN RESPONSE ──")
     logger.info("=" * 70)
-
-    # Sanitize NaN/inf → None agar JSON serializable
-    def sanitize(val):
-        if val is None:
-            return None
-        try:
-            f = float(val)
-            if f != f or f == float('inf') or f == float('-inf'):  # NaN / inf
-                return None
-            return f
-        except Exception:
-            return None
-
-    clean_backscatter = [sanitize(v) for v in backscatter_data]
-    clean_distance    = [sanitize(v) for v in distance_data]
-
+    
+    # 7. Return response
     return {
         "success": True,
-        "backscatter": clean_backscatter,
-        "distance": clean_distance,
+        "backscatter": backscatter_data,
         "predictions": predictions,
         "total_windows": len(predictions),
         "window_size": window_size,
         "total_points": len(backscatter_data),
         "filename": file.filename,
-        "summary": {
-            "class_counts": class_counts,
-            "dominant_class": dominant_class,
-            "dominant_percentage": dominant_pct,
-            "severity": severity,
-        },
         "metadata": {
             "columns": df.columns.tolist(),
             "rows": len(df),
         }
     }
-
-
-# ── Dashboard History Endpoints ────────────────────────────────────────────────
-
-@app.get("/api/dashboard/history", response_model=list[DashboardResultResponse])
-async def get_dashboard_history(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Mengembalikan daftar history klasifikasi Dashboard milik user, terbaru di atas."""
-    result = await db.execute(
-        select(DashboardResult)
-        .where(DashboardResult.user_id == current_user.id)
-        .order_by(DashboardResult.created_at.desc())
-    )
-    rows = result.scalars().all()
-
-    out = []
-    for r in rows:
-        summary = None
-        if r.prediction_summary:
-            try:
-                summary = json.loads(r.prediction_summary)
-            except Exception:
-                summary = {}
-        out.append(DashboardResultResponse(
-            id=r.id,
-            filename=r.filename,
-            dominant_class=r.dominant_class,
-            dominant_percentage=r.dominant_percentage,
-            total_points=r.total_points,
-            total_windows=r.total_windows,
-            prediction_summary=summary,
-            created_at=r.created_at,
-        ))
-    return out
-
-
-@app.get("/api/dashboard/statistics", response_model=DashboardStatisticsResponse)
-async def get_dashboard_statistics(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Statistik keseluruhan seluruh history klasifikasi Dashboard milik user."""
-    result = await db.execute(
-        select(DashboardResult)
-        .where(DashboardResult.user_id == current_user.id)
-    )
-    rows = result.scalars().all()
-
-    total_files = len(rows)
-    total_predictions = sum(r.total_windows for r in rows)
-
-    # Fault Distribution: hitung berdasarkan dominant_class
-    # 1 file = 1 hitungan, bukan berdasarkan jumlah window
-    class_distribution: dict = {}
-    for r in rows:
-        cls = r.dominant_class
-        if cls:
-            class_distribution[cls] = class_distribution.get(cls, 0) + 1
-
-    return DashboardStatisticsResponse(
-        total_files=total_files,
-        total_predictions=total_predictions,
-        class_distribution=class_distribution,
-    )
-
-
-@app.delete("/api/dashboard/history/{history_id}")
-async def delete_dashboard_history(
-    history_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Hapus satu history klasifikasi Dashboard milik user."""
-    result = await db.execute(
-        select(DashboardResult).where(
-            DashboardResult.id == history_id,
-            DashboardResult.user_id == current_user.id,
-        )
-    )
-    record = result.scalar_one_or_none()
-    if record is None:
-        raise HTTPException(status_code=404, detail="History tidak ditemukan")
-    await db.delete(record)
-    await db.commit()
-    logger.info(f"[DASHBOARD] Deleted history id={history_id} by user={current_user.email}")
-    return {"success": True, "message": f"History id={history_id} berhasil dihapus"}
-
-@app.post("/api/admin/make-admin/{user_id}")
-async def make_admin(
-    user_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_admin: User = Depends(get_current_admin),
-):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User tidak ditemukan")
-
-    if user.is_admin:
-        return {"message": f"User {user.email} sudah menjadi admin"}
-
-    user.is_admin = True
-    user.is_approved = True   # admin otomatis dianggap disetujui
-    await db.commit()
-    return {"message": f"User {user.email} berhasil dijadikan admin"}
