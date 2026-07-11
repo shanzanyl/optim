@@ -17,6 +17,9 @@ interface HistoryRow {
   loss_2: number | null;
   loss_3: number | null;
   loss_4: number | null;
+  total_l_1: number | null;
+  total_l_2: number | null;
+  total_l_3: number | null;
   total_l_4: number | null;
   return_1: number | null;
   return_2: number | null;
@@ -417,6 +420,9 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
           loss_2: record.loss_2 ?? null,
           loss_3: record.loss_3 ?? null,
           loss_4: record.loss_4 ?? null,
+          total_l_1: record.total_l_1 ?? null,
+          total_l_2: record.total_l_2 ?? null,
+          total_l_3: record.total_l_3 ?? null,
           total_l_4: record.total_l_4 ?? null,
           return_1: record.return_1 ?? null,
           return_2: record.return_2 ?? null,
@@ -974,7 +980,15 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     } else if (row.timestamp) {
                       recordTime = formatDisplayTime(row.timestamp);
                     }
-                    const totalLValue = row.total_l_4;
+                    // Ambil total_l terakhir yang tidak NULL
+                    // Untuk Fiber Cut KM3: total_l_4=NULL → pakai total_l_3
+                    // Untuk Fiber Cut KM2: total_l_3=NULL → pakai total_l_2
+                    const totalLValue =
+                      row.total_l_4 ??
+                      row.total_l_3 ??
+                      row.total_l_2 ??
+                      row.total_l_1 ??
+                      null;
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
                     
                     return (

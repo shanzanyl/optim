@@ -86,44 +86,55 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         logger.info(f"[TELEGRAM] Status '{status}' Normal, alert tidak dikirim.")
         return
 
-    # Format values safely
+    # Format values safely — None tetap None untuk pengecekan '---'
     prx_val = round(float(prx), 2) if prx is not None else 0.0
-    safe_loss = [float(l) if l is not None else 0.0 for l in loss]
-    safe_rl = [float(r) if r is not None else 0.0 for r in rl]
-    
-    while len(safe_loss) < 4:
-        safe_loss.append(0.0)
-    while len(safe_rl) < 4:
-        safe_rl.append(0.0)
+
+    # Konversi loss dan return: None → None (bukan 0.0), agar bisa ditampilkan '---'
+    def to_val(v):
+        if v is None: return None
+        try:
+            f = float(v)
+            return f if f == f else None  # filter NaN
+        except: return None
+
+    raw_loss = [to_val(l) for l in loss]
+    raw_rl   = [to_val(r) for r in rl]
+
+    while len(raw_loss) < 4: raw_loss.append(None)
+    while len(raw_rl)   < 4: raw_rl.append(None)
+
+    # Format untuk tampilan: None atau 0.0 → '---'
+    def fmt_loss(v):
+        return '---' if v is None or v == 0.0 else f'{v:.2f} dB'
+    def fmt_return(v):
+        return '---' if v is None or v == 0.0 else f'{v:.2f} dB'
 
     if not distances:
         distances = [1.004, 2.006, 3.010, 4.014]
-    
+
     safe_dist = []
     for i in range(4):
         if i < len(distances) and distances[i] is not None:
-            safe_dist.append(float(distances[i]))
+            try: safe_dist.append(float(distances[i]))
+            except: safe_dist.append(float(i + 1))
         else:
             safe_dist.append(float(i + 1))
-            
+
     classification_lower = classification.lower() if classification else ""
     is_fiber_cut = "cut" in classification_lower or "putus" in classification_lower
-    
+
     if is_fiber_cut:
-        cut_idx = -1
-        for idx, val in enumerate(safe_loss):
-            if val == 0.0:
-                cut_idx = idx
-                break
-        if cut_idx == -1:
-            cut_idx = 3
-        km_loc = cut_idx + 1
+        # Lokasi putus = KM pertama yang loss-nya None atau 0
+        cut_idx = next((i for i, v in enumerate(raw_loss) if v is None or v == 0.0), 3)
+        km_loc    = cut_idx + 1
         jarak_loc = round(safe_dist[cut_idx], 3)
         redaman_loc = 0.0
     else:
-        max_loss_val = max(safe_loss)
-        max_loss_idx = safe_loss.index(max_loss_val) if safe_loss else 0
-        km_loc = max_loss_idx + 1
+        # Lokasi gangguan = KM dengan loss terbesar
+        loss_floats = [v if v is not None else 0.0 for v in raw_loss]
+        max_loss_val = max(loss_floats)
+        max_loss_idx = loss_floats.index(max_loss_val)
+        km_loc    = max_loss_idx + 1
         jarak_loc = round(safe_dist[max_loss_idx], 3)
         redaman_loc = round(max_loss_val, 2)
     
@@ -143,8 +154,7 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
         
     status_cap = str(status).capitalize()
-    loss_km4_str = "---" if safe_loss[3] == 0.0 else f"{safe_loss[3]:.2f} dB"
-    
+
     message = (
         f"🚨 <b>GANGGUAN TERDETEKSI!</b> 🚨\n\n"
         f"<b>Jenis Gangguan:</b> {classification}\n"
@@ -152,10 +162,10 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         f"<b>Parameter Pengukuran:</b>\n"
         f"• <b>Daya (Prx):</b> {prx_val} dBm\n\n"
         f"<b>Detail Redaman &amp; Pantulan:</b>\n"
-        f"• <b>KM 1:</b> Loss {safe_loss[0]:.2f} dB | Return {safe_rl[0]:.2f} dB\n"
-        f"• <b>KM 2:</b> Loss {safe_loss[1]:.2f} dB | Return {safe_rl[1]:.2f} dB\n"
-        f"• <b>KM 3:</b> Loss {safe_loss[2]:.2f} dB | Return {safe_rl[2]:.2f} dB\n"
-        f"• <b>KM 4:</b> Loss {loss_km4_str} | Return {safe_rl[3]:.2f} dB\n\n"
+        f"• <b>KM 1:</b> Loss {fmt_loss(raw_loss[0])} | Return {fmt_return(raw_rl[0])}\n"
+        f"• <b>KM 2:</b> Loss {fmt_loss(raw_loss[1])} | Return {fmt_return(raw_rl[1])}\n"
+        f"• <b>KM 3:</b> Loss {fmt_loss(raw_loss[2])} | Return {fmt_return(raw_rl[2])}\n"
+        f"• <b>KM 4:</b> Loss {fmt_loss(raw_loss[3])} | Return {fmt_return(raw_rl[3])}\n\n"
         f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {redaman_loc:.2f} dB)\n"
         f"<b>Waktu:</b> {time_str}"
     )
@@ -1132,7 +1142,21 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
 
     elif is_fiber_cut and cut_km == 3:
         if len(rows) >= 3:
-            rows[2]['loss'] = None
+            km3 = rows[2]
+            # Cek apakah kolom KM3 bergeser karena '---' tidak terbaca OCR
+            # Kondisi: loss ada nilai, total_l kecil (<5), avg_l besar (>5 atau <0)
+            lv = km3.get('loss'); tl = km3.get('total_l', 0); al = km3.get('avg_l', 0)
+            if lv is not None and tl < 5.0 and (abs(al) > 5.0 or al < 0):
+                logger.info(f"  KM3 FIX: '---' tidak terbaca OCR, geser kolom balik")
+                logger.info(f"  KM3 before: loss={lv}, total_l={tl}, avg_l={al}")
+                km3['loss']    = None
+                km3['total_l'] = lv        # nilai loss asli → total_l
+                km3['avg_l']   = abs(tl)   # nilai total_l asli → avg_l
+                km3['return']  = -abs(al) if al and al != 0 else None
+                km3['loss_missing'] = True
+                logger.info(f"  KM3 after : loss=None, total_l={km3['total_l']}, avg_l={km3['avg_l']}, return={km3['return']}")
+            else:
+                km3['loss'] = None
         while len(rows) > 3:
             rows.pop()
         if len(rows) < 4:
@@ -2241,17 +2265,27 @@ async def detect_manual(
         status_str = pred.get("status", "Normal")
         if status_str.lower() in ["warning", "critical"]:
             try:
-                # Telegram tidak bisa menerima None/NaN — konversi ke 0.0 hanya untuk alert
-                def _safe(v): return float(v) if v is not None and v == v else 0.0
-                loss_for_alert = [_safe(l1), _safe(l2), _safe(l3), 0.0]
+                # Kirim None untuk field yang tidak ada — send_telegram_alert akan tampilkan '---'
+                loss_for_alert = [
+                    normalized.get('loss_1', l1),
+                    normalized.get('loss_2', l2),
+                    normalized.get('loss_3', l3),
+                    None  # loss_4 selalu None
+                ]
+                rl_for_alert = [
+                    normalized.get('return_1', r1),
+                    normalized.get('return_2', r2),
+                    normalized.get('return_3', r3),
+                    normalized.get('return_4', r4),
+                ]
                 await asyncio.to_thread(
                     send_telegram_alert,
                     classification=pred.get("prediction"),
                     status=status_str,
                     loss=loss_for_alert,
-                    rl=[_safe(r1), _safe(r2), _safe(r3), _safe(r4)],
+                    rl=rl_for_alert,
                     prx=prx,
-                    distances=[d1, d2, _safe(d3), _safe(d4)],
+                    distances=[d1, d2, d3 if d3 else None, d4 if d4 else None],
                     timestamp=record.timestamp
                 )
                 record.telegram_alert_sent = True
