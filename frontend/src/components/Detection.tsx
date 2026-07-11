@@ -980,15 +980,14 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     } else if (row.timestamp) {
                       recordTime = formatDisplayTime(row.timestamp);
                     }
-                    // Ambil total_l terakhir yang tidak NULL
-                    // Untuk Fiber Cut KM3: total_l_4=NULL → pakai total_l_3
-                    // Untuk Fiber Cut KM2: total_l_3=NULL → pakai total_l_2
-                    const totalLValue =
-                      row.total_l_4 ??
-                      row.total_l_3 ??
-                      row.total_l_2 ??
-                      row.total_l_1 ??
-                      null;
+                    // Ambil Total-L yang paling relevan berdasarkan klasifikasi:
+                    // - Fiber Cut: ambil total_l terakhir sebelum titik putus (KM3→KM2→KM1)
+                    // - Normal/gangguan lain: ambil total_l_4 (kumulatif penuh) atau fallback
+                    const cls = (row.klasifikasi || '').toLowerCase();
+                    const isFiberCutRow = cls.includes('fiber cut') || cls.includes('cut');
+                    const totalLValue = isFiberCutRow
+                      ? (row.total_l_3 ?? row.total_l_2 ?? row.total_l_1 ?? null)
+                      : (row.total_l_4 ?? row.total_l_3 ?? row.total_l_2 ?? row.total_l_1 ?? null);
                     const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
                     
                     return (
