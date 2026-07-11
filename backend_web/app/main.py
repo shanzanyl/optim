@@ -27,8 +27,11 @@ import tempfile
 from app import ml          # Model OTDR (LightGBM)
 from app import ml_sor      # Model SOR (Random Forest) - BARU
 from app.database import Base, engine, get_db, AsyncSessionLocal
-from app.models import User, OtdrResult
-from app.schemas import UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest
+from app.models import User, OtdrResult, DashboardResult
+from app.schemas import (
+    UserRegister, UserLogin, TokenResponse, UserOut, ManualClassifyRequest,
+    DashboardResultResponse,
+)
 from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_optional_user, get_current_admin
@@ -2717,38 +2720,137 @@ async def process_sor_file(
     logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
     logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
 
-    # 6. BATCH PREDICT — semua window sekaligus, jauh lebih cepat dari loop
-    window_size = 128
-    total_windows = len(backscatter_data) - window_size + 1
+    # 6. BATCH PREDICT — window_size=34, stride=6 (sesuai parameter training model)
+    window_size  = 34
+    stride       = 6
+    total_windows = max(0, (len(backscatter_data) - window_size) // stride + 1)
 
     logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
-    logger.info(f"[SOR]   window_size={window_size}, total_windows={total_windows}")
+    logger.info(f"[SOR]   window_size={window_size}, stride={stride}, total_windows={total_windows}")
 
     try:
         predictions = await asyncio.to_thread(
             ml_sor.predict_sor_batch,
             backscatter_data,
             window_size,
+            stride,
         )
     except Exception as e:
         logger.error(f"[SOR] ❌ BATCH PREDICT FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Prediksi gagal: {str(e)}")
 
     logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
-    logger.info(f"[SOR] ── RETURN RESPONSE ──")
+
+    # 7. Hitung klasifikasi final dari kelas terbanyak
+    from collections import Counter
+    class_counts: dict = Counter(p["prediction"] for p in predictions)
+    final_class = class_counts.most_common(1)[0][0] if class_counts else "Normal"
+
+    cls_lower = final_class.lower()
+    if cls_lower == "normal":
+        final_status = "Normal"
+    elif any(k in cls_lower for k in ["cut", "nearly"]):
+        final_status = "Critical"
+    else:
+        final_status = "Warning"
+
+    logger.info(f"[SOR]   final_class={final_class}, final_status={final_status}")
+
+    # 8. Simpan ke database
+    logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
+    try:
+        db_record = DashboardResult(
+            user_id       = current_user.id,
+            filename      = file.filename,
+            total_points  = len(backscatter_data),
+            total_windows = len(predictions),
+            classification= final_class,
+            status        = final_status,
+        )
+        db.add(db_record)
+        await db.commit()
+        await db.refresh(db_record)
+        logger.info(f"[SOR] ✅ SAVED TO DB: id={db_record.id}, class={final_class}, status={final_status}")
+    except Exception as e:
+        logger.error(f"[SOR] ❌ DB SAVE FAILED: {e}", exc_info=True)
+
+    # 9. Kirim Telegram jika Warning/Critical
+    logger.info(f"[SOR] ── STEP 6: TELEGRAM — status={final_status} ──")
+    try:
+        if final_status != "Normal":
+            from app.schemas import DashboardResultResponse
+            send_telegram_dashboard(final_class, final_status)
+    except Exception as e:
+        logger.error(f"[SOR] ❌ TELEGRAM FAILED: {e}", exc_info=True)
+
+    logger.info("[SOR] ── RETURN RESPONSE ──")
     logger.info("=" * 70)
-    
-    # 7. Return response
+
+    # Sanitize NaN/inf → None agar JSON serializable
+    def sanitize(val):
+        if val is None:
+            return None
+        try:
+            f = float(val)
+            if f != f or f == float('inf') or f == float('-inf'):
+                return None
+            return f
+        except Exception:
+            return None
+
+    clean_backscatter = [sanitize(v) for v in backscatter_data]
+
     return {
-        "success": True,
-        "backscatter": backscatter_data,
-        "predictions": predictions,
+        "success"      : True,
+        "backscatter"  : clean_backscatter,
+        "distance"     : [],
+        "predictions"  : predictions,
         "total_windows": len(predictions),
-        "window_size": window_size,
-        "total_points": len(backscatter_data),
-        "filename": file.filename,
+        "window_size"  : window_size,
+        "stride"       : stride,
+        "total_points" : len(backscatter_data),
+        "filename"     : file.filename,
+        "classification": final_class,
+        "status"       : final_status,
         "metadata": {
             "columns": df.columns.tolist(),
-            "rows": len(df),
+            "rows"   : len(df),
         }
     }
+
+# ── Dashboard: Classification History ──────────────────────────────────────────
+
+@app.get("/api/dashboard/history", response_model=list[DashboardResultResponse])
+async def get_dashboard_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Kembalikan history klasifikasi SOR milik user, terbaru di atas."""
+    result = await db.execute(
+        select(DashboardResult)
+        .where(DashboardResult.user_id == current_user.id)
+        .order_by(DashboardResult.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@app.delete("/api/dashboard/history/{history_id}")
+async def delete_dashboard_history(
+    history_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Hapus satu history klasifikasi Dashboard milik user."""
+    result = await db.execute(
+        select(DashboardResult).where(
+            DashboardResult.id == history_id,
+            DashboardResult.user_id == current_user.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="History tidak ditemukan")
+    await db.delete(record)
+    await db.commit()
+    logger.info(f"[DASHBOARD] Deleted history id={history_id} by user={current_user.email}")
+    return {"success": True, "message": f"History id={history_id} berhasil dihapus"}

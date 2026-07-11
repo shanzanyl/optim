@@ -85,13 +85,12 @@ const StatusBadge = ({ status }: { status: string | null }) => {
 
 const formatLossValue = (value: number | null | undefined) => {
   if (value === null || value === undefined || value === 0) return '---';
-  // 🔥 Ambil nilai absolut untuk tampilan
-  return Math.abs(value).toFixed(2);
+  return Math.abs(value).toString();
 };
 
 const formatReturnValue = (value: number | null | undefined) => {
   if (value === null || value === undefined) return '---';
-  return value.toFixed(1);
+  return value.toString();
 };
 
 const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
@@ -166,12 +165,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   };
 
 
-// 🔥 PERBAIKI: formatLossValue
-const formatLossValue = (value: number | null | undefined) => {
-  // 🔥 Jika value = null, undefined, atau 0 → tampilkan ---
-  if (value === null || value === undefined || value === 0) return '---';
-  return Math.abs(value).toFixed(2);
-};
+// formatLossValue sudah didefinisikan di luar komponen (tidak perlu duplikat)
 
 // 🔥 PERBAIKI: populateFormFromOcr
 const populateFormFromOcr = (ocrData: OcrParseResult) => {
@@ -909,7 +903,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : Math.abs(lastResult.extracted.avg_total).toFixed(2)} dB/km</span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : Math.abs(lastResult.extracted.avg_total).toString()} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
@@ -976,7 +970,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       recordTime = formatDisplayTime(row.timestamp);
                     }
                     const totalLValue = row.total_l_4;
-                    const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
+                    const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toString();
                     
                     return (
                       <tr key={row.id || idx} className="hover:bg-[#2a3d60]/20 transition-colors">
@@ -993,7 +987,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                           {formatReturnValue(row.return_3)} | {formatReturnValue(row.return_4)}
                         </td>
                         <td className="px-6 py-4 text-center text-blue-400 font-bold text-xs font-mono">
-                          {row.prx != null ? `${row.prx.toFixed(1)} dBm` : '—'}
+                          {row.prx != null ? `${row.prx} dBm` : '—'}
                         </td>
                         <td className="px-6 py-4">
                           <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${

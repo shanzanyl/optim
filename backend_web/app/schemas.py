@@ -110,18 +110,11 @@ class ManualClassifyRequest(BaseModel):
 class DashboardResultResponse(BaseModel):
     id: int
     filename: str
-    dominant_class: str
-    dominant_percentage: float
+    classification: str
+    status: str
     total_points: int
     total_windows: int
-    prediction_summary: Optional[dict] = None
     created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-
-
-class DashboardStatisticsResponse(BaseModel):
-    total_files: int
-    total_predictions: int
-    class_distribution: dict

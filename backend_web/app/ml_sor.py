@@ -87,7 +87,7 @@ def load_sor_models():
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(128)]
+    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(34)]
     logger.info(f"[ML_SOR]   columns sample: {_df_columns[:3]} ... {_df_columns[-3:]}")
 
     if sor_model is None:
@@ -98,17 +98,14 @@ def load_sor_models():
     return sor_model is not None
 
 
-def predict_sor_batch(backscatter_data: list, window_size: int = 128) -> list:
+def predict_sor_batch(backscatter_data: list, window_size: int = 34, stride: int = 6) -> list:
     """
     BATCH PREDICT — semua window diprediksi sekaligus dalam satu .predict() call.
-    
-    Jauh lebih cepat dari loop per-window:
-    - Sebelumnya: 7738 × model.predict() = ~10 menit
-    - Sekarang:   1 × model.predict(7738 rows) = ~5-15 detik
 
     Args:
         backscatter_data: list nilai Backscatter (dB) dari CSV
-        window_size: ukuran sliding window (default 128)
+        window_size: ukuran sliding window (default 34, sesuai parameter training)
+        stride: pergeseran antar window (default 6, sesuai parameter training)
 
     Returns:
         list of dict: [{start, end, prediction, confidence}, ...]
@@ -117,22 +114,21 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 128) -> list:
         raise Exception("[ML_SOR] sor_model is None — model belum dimuat")
 
     n = len(backscatter_data)
-    total_windows = n - window_size + 1
+    total_windows = max(0, (n - window_size) // stride + 1)
 
     if total_windows <= 0:
         raise ValueError(f"[ML_SOR] Data hanya {n} titik, tidak cukup untuk window size {window_size}")
 
-    logger.info(f"[ML_SOR] 🔄 Building matrix {total_windows} × {window_size}...")
+    logger.info(f"[ML_SOR] 🔄 Building matrix {total_windows} × {window_size} (stride={stride})...")
 
-    # Bangun matrix semua window sekaligus — shape: (total_windows, 128)
     arr = np.array(backscatter_data, dtype=np.float64)
-    
-    # Vectorized sliding window menggunakan stride tricks (zero-copy, sangat cepat)
-    shape = (total_windows, window_size)
-    strides = (arr.strides[0], arr.strides[0])
-    X_all = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides).copy()
 
-    # Cek dan bersihkan NaN/Inf
+    # Vectorized sliding window dengan stride — shape: (total_windows, window_size)
+    shape   = (total_windows, window_size)
+    strides = (arr.strides[0] * stride, arr.strides[0])
+    X_all   = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides).copy()
+
+    # Bersihkan NaN/Inf
     if np.any(np.isnan(X_all)) or np.any(np.isinf(X_all)):
         logger.warning("[ML_SOR] ⚠️ Data mengandung NaN/Inf, dibersihkan dengan 0")
         X_all = np.nan_to_num(X_all, nan=0.0, posinf=0.0, neginf=0.0)
@@ -176,13 +172,15 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 128) -> list:
             return sor_label_classes.get(str(pred), str(pred))
         return str(pred)
 
-    # Susun hasil
+    # Susun hasil — start/end mengacu ke index di backscatter_data
     results = []
     for i, pred in enumerate(preds):
-        conf = float(confidences[i]) if confidences is not None else 95.0
+        conf  = float(confidences[i]) if confidences is not None else 95.0
+        start = i * stride
+        end   = start + window_size - 1
         results.append({
-            "start": i,
-            "end": i + window_size - 1,
+            "start"     : start,
+            "end"       : end,
             "prediction": decode(pred),
             "confidence": round(conf, 2),
         })
