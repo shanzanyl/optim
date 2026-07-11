@@ -128,14 +128,20 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         cut_idx = next((i for i, v in enumerate(raw_loss) if v is None or v == 0.0), 3)
         km_loc    = cut_idx + 1
         jarak_loc = round(safe_dist[cut_idx], 3)
-        redaman_loc = 0.0
+        redaman_loc = None  # tidak terdefinisi di titik putus
     else:
-        # Lokasi gangguan = KM dengan loss terbesar
-        loss_floats = [v if v is not None else 0.0 for v in raw_loss]
-        max_loss_val = max(loss_floats)
-        max_loss_idx = loss_floats.index(max_loss_val)
-        km_loc    = max_loss_idx + 1
-        jarak_loc = round(safe_dist[max_loss_idx], 3)
+        # Lokasi gangguan = KM dengan loss REAL terbesar
+        # Skip None dan 0 — hanya pertimbangkan nilai yang benar-benar terukur
+        valid_losses = [
+            (i, v) for i, v in enumerate(raw_loss)
+            if v is not None and v > 0
+        ]
+        if valid_losses:
+            max_loss_idx, max_loss_val = max(valid_losses, key=lambda x: x[1])
+        else:
+            max_loss_idx, max_loss_val = 0, 0.0
+        km_loc      = max_loss_idx + 1
+        jarak_loc   = round(safe_dist[max_loss_idx], 3)
         redaman_loc = round(max_loss_val, 2)
     
     if timestamp:
@@ -166,7 +172,7 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         f"• <b>KM 2:</b> Loss {fmt_loss(raw_loss[1])} | Return {fmt_return(raw_rl[1])}\n"
         f"• <b>KM 3:</b> Loss {fmt_loss(raw_loss[2])} | Return {fmt_return(raw_rl[2])}\n"
         f"• <b>KM 4:</b> Loss {fmt_loss(raw_loss[3])} | Return {fmt_return(raw_rl[3])}\n\n"
-        f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {redaman_loc:.2f} dB)\n"
+        f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {'---' if redaman_loc is None else f'{redaman_loc:.2f} dB'})\n"
         f"<b>Waktu:</b> {time_str}"
     )
     
@@ -802,21 +808,27 @@ def is_valid_parsed_rows(rows: list) -> bool:
     
     valid_count = 0
     for i, row in enumerate(rows):
-        # 🔥 PERBAIKI: handle None values dengan aman
         loss_val = row.get('loss')
         total_val = row.get('total_l', 0)
         
         # KM4: cek total_l saja (loss selalu None)
-        if i == 3:  # KM4 (index 3)
+        if i == 3:
             if total_val > 0:
                 valid_count += 1
         else:
-            # KM1-KM3: cek loss atau total_l
-            # 🔥 PERBAIKIAN: loss bisa None, cek dengan aman
             if (loss_val is not None and loss_val > 0) or total_val > 0:
                 valid_count += 1
-    
-    # Minimal 3 dari 4 valid (termasuk KM4 yang hanya perlu total_l)
+
+    # Minimal 3 dari 4 valid — KECUALI Fiber Cut KM2 yang hanya punya 2 rows real
+    # Deteksi: KM1 valid, KM2 loss=None tapi total_l>0, KM3+KM4 semua 0
+    if valid_count == 2:
+        km1_ok  = (rows[0].get('loss', 0) or 0) > 0 or rows[0].get('total_l', 0) > 0
+        km2_cut = rows[1].get('loss') is None and rows[1].get('total_l', 0) > 0
+        km3_empty = rows[2].get('total_l', 0) == 0
+        km4_empty = rows[3].get('total_l', 0) == 0
+        if km1_ok and km2_cut and km3_empty and km4_empty:
+            return True  # Fiber Cut KM2 — valid dengan 2 rows
+
     return valid_count >= 3
 
 
