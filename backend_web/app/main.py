@@ -1049,6 +1049,31 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
+    # 7b. FIX KM4 (End of Fiber) — OCR sering tidak membaca '---'
+    #     pada baris terakhir. Jika KM4 punya loss bernilai numerik
+    #     tapi total_l tampak sangat kecil (< 2.0), kemungkinan
+    #     kolom bergeser karena '---' hilang dari OCR.
+    # =====================================================
+    if len(rows) >= 4:
+        km4 = rows[3]
+        # Kondisi: loss ada nilai (harusnya None), total_l kecil (< 5), 
+        # dan abs(avg_l) > 5 ATAU avg_l negatif (nilai return masuk ke posisi avg_l)
+        loss_val = km4.get('loss')
+        tl_val   = km4.get('total_l', 0)
+        al_val   = km4.get('avg_l', 0)
+        if (loss_val is not None and
+            tl_val < 5.0 and
+            (abs(al_val) > 5.0 or al_val < 0)):
+            logger.info(f"  KM4 FIX: '---' tidak terbaca OCR, geser kolom balik")
+            logger.info(f"  KM4 before: loss={loss_val}, total_l={tl_val}, avg_l={al_val}, return={km4['return']}")
+            km4['loss']    = None
+            km4['total_l'] = loss_val      # nilai loss asli → total_l
+            km4['avg_l']   = abs(tl_val)   # nilai total_l asli → avg_l
+            km4['return']  = -abs(al_val) if al_val != 0 else -45.0
+            km4['loss_missing'] = True
+            logger.info(f"  KM4 after : loss=None, total_l={km4['total_l']}, avg_l={km4['avg_l']}, return={km4['return']}")
+
+    # =====================================================
     # 8. PASTIKAN NILAI POSITIF (loss, total_l, avg_l)
     #    TIDAK ADA SWAP KOLOM — nilai diambil apa adanya dari OCR
     # =====================================================
