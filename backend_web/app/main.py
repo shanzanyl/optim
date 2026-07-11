@@ -1059,11 +1059,27 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 7b. FIX KM4 (End of Fiber) — OCR sering tidak membaca '---'
-    #     pada baris terakhir. Jika KM4 punya loss bernilai numerik
-    #     tapi total_l tampak sangat kecil (< 2.0), kemungkinan
-    #     kolom bergeser karena '---' hilang dari OCR.
+    # 7b. FIX KOLOM BERGESER — OCR sering tidak membaca '---'
+    #     Berlaku untuk KM3 (fiber cut) dan KM4 (end of fiber).
+    #     Harus dilakukan SEBELUM fiber cut detection (step 9)
+    #     agar loss masih bernilai numerik saat dicek.
     # =====================================================
+
+    # FIX KM3 — untuk kasus Fiber Cut KM3 dimana '---' tidak terbaca
+    if len(rows) >= 3:
+        km3 = rows[2]
+        lv3 = km3.get('loss'); tl3 = km3.get('total_l', 0); al3 = km3.get('avg_l', 0)
+        if (lv3 is not None and tl3 < 5.0 and (abs(al3) > 5.0 or al3 < 0)):
+            logger.info(f"  KM3 FIX: '---' tidak terbaca OCR, geser kolom balik")
+            logger.info(f"  KM3 before: loss={lv3}, total_l={tl3}, avg_l={al3}")
+            km3['loss']    = None
+            km3['total_l'] = lv3
+            km3['avg_l']   = abs(tl3)
+            km3['return']  = -abs(al3) if al3 and al3 != 0 else None
+            km3['loss_missing'] = True
+            logger.info(f"  KM3 after : loss=None, total_l={km3['total_l']}, avg_l={km3['avg_l']}, return={km3['return']}")
+
+    # FIX KM4 — untuk End of Fiber dimana '---' tidak terbaca
     if len(rows) >= 4:
         km4 = rows[3]
         # Kondisi: loss ada nilai (harusnya None), total_l kecil (< 5), 
@@ -1142,21 +1158,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
 
     elif is_fiber_cut and cut_km == 3:
         if len(rows) >= 3:
-            km3 = rows[2]
-            # Cek apakah kolom KM3 bergeser karena '---' tidak terbaca OCR
-            # Kondisi: loss ada nilai, total_l kecil (<5), avg_l besar (>5 atau <0)
-            lv = km3.get('loss'); tl = km3.get('total_l', 0); al = km3.get('avg_l', 0)
-            if lv is not None and tl < 5.0 and (abs(al) > 5.0 or al < 0):
-                logger.info(f"  KM3 FIX: '---' tidak terbaca OCR, geser kolom balik")
-                logger.info(f"  KM3 before: loss={lv}, total_l={tl}, avg_l={al}")
-                km3['loss']    = None
-                km3['total_l'] = lv        # nilai loss asli → total_l
-                km3['avg_l']   = abs(tl)   # nilai total_l asli → avg_l
-                km3['return']  = -abs(al) if al and al != 0 else None
-                km3['loss_missing'] = True
-                logger.info(f"  KM3 after : loss=None, total_l={km3['total_l']}, avg_l={km3['avg_l']}, return={km3['return']}")
-            else:
-                km3['loss'] = None
+            rows[2]['loss'] = None  # sudah difix di step 7b jika kolom bergeser
         while len(rows) > 3:
             rows.pop()
         if len(rows) < 4:
