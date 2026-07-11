@@ -1007,7 +1007,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             loss        = values[2]  # None jika '---' di kolom Loss
             total_l     = values[3] if values[3] is not None else 0.0
             avg_l       = values[4] if values[4] is not None else 0.0
-            return_val  = values[5] if values[5] is not None else 0.0
+            return_val  = values[5]  # None jika tidak ada → tidak di-default
             loss_missing = (values[2] is None)
 
         elif len(values) == 5:
@@ -1018,14 +1018,14 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
                 loss        = None
                 total_l     = values[3] if values[3] is not None else 0.0
                 avg_l       = values[4] if values[4] is not None else 0.0
-                return_val  = 0.0
+                return_val  = None   # return tidak ada
                 loss_missing = True
             else:
                 # '---' bukan di loss → mungkin return tidak ada
                 loss        = values[2]
                 total_l     = values[3] if values[3] is not None else 0.0
                 avg_l       = values[4] if values[4] is not None else 0.0
-                return_val  = 0.0
+                return_val  = None   # return tidak ada
                 loss_missing = False
         else:
             continue
@@ -1039,7 +1039,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             "loss":         loss,
             "total_l":      total_l,
             "avg_l":        avg_l,
-            "return":       -abs(return_val) if return_val != 0 else -45.0,
+            "return":       -abs(return_val) if return_val is not None and return_val != 0 else None,
             "loss_missing": loss_missing,
         })
 
@@ -1069,7 +1069,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             km4['loss']    = None
             km4['total_l'] = loss_val      # nilai loss asli → total_l
             km4['avg_l']   = abs(tl_val)   # nilai total_l asli → avg_l
-            km4['return']  = -abs(al_val) if al_val != 0 else -45.0
+            km4["return"]  = -abs(al_val) if al_val and al_val != 0 else None
             km4['loss_missing'] = True
             logger.info(f"  KM4 after : loss=None, total_l={km4['total_l']}, avg_l={km4['avg_l']}, return={km4['return']}")
 
@@ -1126,9 +1126,9 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             rows.pop()
         last_dist = rows[-1]['distance'] if rows else 2.0
         rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None,
-                     "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
+                     "total_l": 0.0, "avg_l": 0.0, "return": None, "loss_missing": True})
         rows.append({"distance": last_dist + 2.0, "section": 0.0, "loss": None,
-                     "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
+                     "total_l": 0.0, "avg_l": 0.0, "return": None, "loss_missing": True})
 
     elif is_fiber_cut and cut_km == 3:
         if len(rows) >= 3:
@@ -1138,7 +1138,7 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         if len(rows) < 4:
             last_dist = rows[-1]['distance'] if rows else 3.0
             rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None,
-                         "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
+                         "total_l": 0.0, "avg_l": 0.0, "return": None, "loss_missing": True})
 
     # KM4 loss selalu None (End of Fiber)
     if len(rows) >= 4:
@@ -1152,9 +1152,9 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         last_dist = rows[-1]["distance"] if rows else float(km - 1)
         rows.append({
             "distance": last_dist + 1.0, "section": 0.0,
-            "loss": None if km == 4 else 0.0,
-            "total_l": 0.0, "avg_l": 0.0, "return": -45.0,
-            "loss_missing": km == 4,
+            "loss": None,
+            "total_l": 0.0, "avg_l": 0.0, "return": None,
+            "loss_missing": True,
         })
 
     # =====================================================

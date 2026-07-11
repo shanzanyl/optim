@@ -85,12 +85,13 @@ const StatusBadge = ({ status }: { status: string | null }) => {
 
 const formatLossValue = (value: number | null | undefined) => {
   if (value === null || value === undefined || value === 0) return '---';
-  return Math.abs(value).toString();
+  // 🔥 Ambil nilai absolut untuk tampilan
+  return Math.abs(value).toFixed(2);
 };
 
 const formatReturnValue = (value: number | null | undefined) => {
   if (value === null || value === undefined) return '---';
-  return value.toString();
+  return value.toFixed(2);
 };
 
 const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
@@ -165,7 +166,12 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
   };
 
 
-// formatLossValue sudah didefinisikan di luar komponen (tidak perlu duplikat)
+// 🔥 PERBAIKI: formatLossValue
+const formatLossValue = (value: number | null | undefined) => {
+  // 🔥 Jika value = null, undefined, atau 0 → tampilkan ---
+  if (value === null || value === undefined || value === 0) return '---';
+  return Math.abs(value).toFixed(2);
+};
 
 // 🔥 PERBAIKI: populateFormFromOcr
 const populateFormFromOcr = (ocrData: OcrParseResult) => {
@@ -174,29 +180,28 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
   const isFiberCut = detected_mode === 'fiber_cut_km2' || detected_mode === 'fiber_cut_km3';
   const cutKm = detected_mode === 'fiber_cut_km2' ? 2 : (detected_mode === 'fiber_cut_km3' ? 3 : 0);
   
-  // 🔥 Untuk nilai yang harus positif (loss, total_l, avg_l, distance)
+  // Untuk nilai yang harus positif (loss, total_l, avg_l, distance)
   const valToStr = (val: number | null | undefined): string => {
     if (val === null || val === undefined || val === 0) return '';
-    return Math.abs(val).toString();
+    return Math.abs(val).toFixed(2);
   };
   
-  // 🔥 Untuk return: TETAP NEGATIF
+  // Untuk return: TETAP NEGATIF, 2 desimal
   const returnToStr = (val: number | null | undefined): string => {
     if (val === null || val === undefined) return '';
-    return val.toString();
+    return val.toFixed(2);
   };
   
-  // 🔥 Untuk loss: kosong jika Fiber Cut dan km >= cutKm
+  // Untuk loss: kosong jika Fiber Cut dan km >= cutKm
   const lossVal = (val: number | null | undefined, km: number): string => {
-    // 🔥 Jika Fiber Cut dan km >= cutKm → kosong
     if (isFiberCut && km >= cutKm) return '';
     if (val === null || val === undefined || val === 0) return '';
-    return Math.abs(val).toString();
+    return Math.abs(val).toFixed(2);
   };
   
   setManualForm({
-    prx: prx !== undefined && prx !== null ? prx.toString() : '',
-    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? Math.abs(extracted.avg_total).toString() : '',
+    prx: prx !== undefined && prx !== null ? prx.toFixed(2) : '',
+    avg_total: extracted.avg_total !== undefined && extracted.avg_total !== 0 ? Math.abs(extracted.avg_total).toFixed(2) : '',
     distance_1: valToStr(extracted.distances[0]),
     distance_2: valToStr(extracted.distances[1]),
     distance_3: valToStr(extracted.distances[2]),
@@ -867,7 +872,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-white font-black text-sm">{lastResult.prx?.toString()} dBm</span>
+                    <span className="text-white font-black text-sm">{lastResult.prx != null ? lastResult.prx.toFixed(2) : '---'} dBm</span>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -876,7 +881,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Loss Km {i + 1}</span>
-                        <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : Math.abs(l).toString()} dB</span>
+                        <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : Math.abs(l).toFixed(2)} dB</span>
                       </div>
                     ))}
                   </div>
@@ -885,7 +890,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Total-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : Math.abs(tl).toString()} dB</span>
+                          <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : Math.abs(tl).toFixed(2)} dB</span>
                         </div>
                       ))}
                     </div>
@@ -895,7 +900,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                           <span className="text-white">Avg-L Km {i + 1}</span>
-                          <span className="text-white font-mono">{al === 0 ? '---' : Math.abs(al).toString()} dB/km</span>
+                          <span className="text-white font-mono">{al === 0 ? '---' : Math.abs(al).toFixed(2)} dB/km</span>
                         </div>
                       ))}
                     </div>
@@ -903,14 +908,14 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                   {lastResult.extracted.avg_total !== undefined && (
                     <div className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between text-xs mt-2">
                       <span className="text-white">Avg-Total</span>
-                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : Math.abs(lastResult.extracted.avg_total).toString()} dB/km</span>
+                      <span className="text-white font-mono">{lastResult.extracted.avg_total === 0 ? '---' : Math.abs(lastResult.extracted.avg_total).toFixed(2)} dB/km</span>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                    {lastResult.extracted.returns?.map((r: number, i: number) => (
+                    {lastResult.extracted.returns?.map((r: number | null, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
                         <span className="text-white">Return Km {i + 1}</span>
-                        <span className="text-white font-mono">{r.toString()} dB</span>
+                        <span className="text-white font-mono">{r === null || r === undefined ? '---' : r.toFixed(2)} dB</span>
                       </div>
                     ))}
                   </div>
@@ -970,7 +975,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       recordTime = formatDisplayTime(row.timestamp);
                     }
                     const totalLValue = row.total_l_4;
-                    const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toString();
+                    const totalLDisplay = !totalLValue || totalLValue === 0 ? '---' : totalLValue.toFixed(2);
                     
                     return (
                       <tr key={row.id || idx} className="hover:bg-[#2a3d60]/20 transition-colors">
@@ -987,7 +992,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                           {formatReturnValue(row.return_3)} | {formatReturnValue(row.return_4)}
                         </td>
                         <td className="px-6 py-4 text-center text-blue-400 font-bold text-xs font-mono">
-                          {row.prx != null ? `${row.prx} dBm` : '—'}
+                          {row.prx != null ? `${row.prx.toFixed(2)} dBm` : '—'}
                         </td>
                         <td className="px-6 py-4">
                           <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${
