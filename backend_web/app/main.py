@@ -274,41 +274,26 @@ def calculate_missing_values(row, mapping: dict, distance: dict, total_l: dict) 
 
 def detect_measurement_mode_from_rows(rows: list) -> tuple:
     """
-    Deteksi mode dari hasil parsing OCR (rows).
+    Deteksi mode dari hasil parsing OCR.
+    Menggunakan loss_missing (posisi '---' di kolom Loss) sebagai sinyal utama,
+    bukan nilai numerik yang bisa bergeser karena kolom kosong.
     Returns: (mode, cut_km)
-    mode: 'normal', 'fiber_cut_km2', 'fiber_cut_km3'
     """
     if not rows or len(rows) < 2:
         return 'normal', -1
-    
-    # Hitung jumlah baris valid (distance > 0.5 dan total_l > 0)
-    valid_rows = []
-    for r in rows:
-        if r.get('distance', 0) > 0.5 and r.get('total_l', 0) > 0:
-            valid_rows.append(r)
-    
-    valid_count = len(valid_rows)
-    
-    # 🔥 Fiber Cut KM 2: hanya 2 baris valid
-    if valid_count == 2:
-        if len(valid_rows) >= 2:
-            loss_2 = valid_rows[1].get('loss')
-            total_l_2 = valid_rows[1].get('total_l', 0)
-            if (loss_2 is None or loss_2 == 0) and total_l_2 > 0:
-                return 'fiber_cut_km2', 2
-    
-    # 🔥 Fiber Cut KM 3: hanya 3 baris valid
-    if valid_count == 3:
-        if len(valid_rows) >= 3:
-            loss_3 = valid_rows[2].get('loss')
-            total_l_3 = valid_rows[2].get('total_l', 0)
-            if (loss_3 is None or loss_3 == 0) and total_l_3 > 0:
-                return 'fiber_cut_km3', 3
-    
-    # 🔥 Normal: 4 baris valid
-    if valid_count >= 4:
-        return 'normal', -1
-    
+
+    # Cek loss_missing per KM1-KM3
+    for i in range(min(3, len(rows))):
+        if rows[i].get('loss_missing') and rows[i].get('total_l', 0) > 0:
+            cut_km = i + 1
+            return f'fiber_cut_km{cut_km}', cut_km
+
+    # Fallback: cek loss is None dan total_l ada (untuk rows tanpa loss_missing flag)
+    for i in range(min(3, len(rows))):
+        if rows[i].get('loss') is None and rows[i].get('total_l', 0) > 0:
+            cut_km = i + 1
+            return f'fiber_cut_km{cut_km}', cut_km
+
     return 'normal', -1
 
 
@@ -906,7 +891,9 @@ def parse_otdr_hybrid(raw_text: str) -> Tuple[List[Dict], float]:
 
 def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     """
-    Parse teks OCR OTDR - FIBER CUT AWARE
+    Parse teks OCR OTDR.
+    Pendekatan bersih: tidak ada swap kolom, deteksi '---' per posisi kolom
+    agar posisi angka tidak bergeser saat ada nilai yang tidak terbaca.
     """
     text = raw_text.replace(",", ".")
 
@@ -923,12 +910,12 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
             avg_total = float(m2.group(1))
 
     # =====================================================
-    # 2. TOTAL EVENTS - DETEKSI FIBER CUT
+    # 2. TOTAL EVENTS — sinyal paling akurat untuk Fiber Cut
     # =====================================================
     total_events = 4
-    total_events_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
-    if total_events_match:
-        total_events = int(total_events_match.group(1))
+    te_match = re.search(r'Total Events[:=]\s*(\d+)', text, re.IGNORECASE)
+    if te_match:
+        total_events = int(te_match.group(1))
         logger.info(f"[TOTAL EVENTS] = {total_events}")
 
     # =====================================================
@@ -964,75 +951,96 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         i += 1
 
     # =====================================================
-    # 6. PARSE EACH ROW
+    # 6. PARSE EACH ROW — mempertahankan posisi kolom
+    #    '---' diganti __MISSING__ agar angka tidak bergeser
     # =====================================================
     rows = []
     for idx, row in enumerate(merged):
-        nums = [
-            float(x) for x in re.findall(r'-?\d+\.?\d*', row)
-            if abs(float(x)) < 100
-        ]
+        # Ganti '---' dengan sentinel sebelum extract angka
+        row_norm = re.sub(r'---+|—|–', ' __MISSING__ ', row)
 
-        if not nums:
+        # Extract token: angka atau sentinel
+        raw_tokens = re.findall(r'__MISSING__|-?\d+\.?\d*', row_norm)
+
+        # Konversi ke list nilai (None untuk missing, float untuk angka)
+        values = []
+        for t in raw_tokens:
+            if t == '__MISSING__':
+                values.append(None)
+            else:
+                try:
+                    f = float(t)
+                    if abs(f) < 10000:
+                        values.append(f)
+                except:
+                    pass
+
+        if not values:
             continue
 
-        # 🔥 CARI DISTANCE SEJATI (skip nomor event seperti 3.1, 4.1)
+        # Cari distance index (1.xxx - 4.xxx dengan 3+ desimal)
         distance_idx = None
-        for j, val in enumerate(nums):
-            if 0.8 <= val <= 4.5:
+        for j, val in enumerate(values):
+            if val is not None and 0.8 <= val <= 4.5:
                 val_str = str(val)
-                if '.' in val_str:
-                    decimal_part = val_str.split('.')[1]
-                    # 🔥 HANYA AMBIL YANG 3-5 DIGIT DESIMAL (distance sejati)
-                    if len(decimal_part) >= 3:
-                        distance_idx = j
-                        break
-        
-        # 🔥 FALLBACK: ambil angka pertama di range 0.8-4.5 yang BUKAN nomor event
+                if '.' in val_str and len(val_str.split('.')[1]) >= 3:
+                    distance_idx = j
+                    break
+
         if distance_idx is None:
-            for j, val in enumerate(nums):
-                if 0.8 <= val <= 4.5:
-                    val_str = str(val)
-                    if '.' in val_str:
-                        decimal_part = val_str.split('.')[1]
-                        if len(decimal_part) >= 2:
-                            distance_idx = j
-                            break
+            for j, val in enumerate(values):
+                if val is not None and 0.8 <= val <= 4.5:
+                    distance_idx = j
+                    break
 
         if distance_idx is None:
             continue
 
-        nums = nums[distance_idx:]
+        values = values[distance_idx:]
 
-        # 🔥 CEK "---" (loss tidak terbaca)
-        has_missing_loss = re.search(r'---|—|–', row)
+        # Format kolom: [distance, section, loss, total_l, avg_l, return]
+        # None di posisi 2 (loss) → '---' di kolom Loss → Fiber Cut / End of Fiber
+        # None di posisi 5 (return) → '---' di kolom Return → non-reflektif (normal)
+        if len(values) >= 6:
+            distance    = values[0]
+            section     = values[1] if values[1] is not None else 0.0
+            loss        = values[2]  # None jika '---' di kolom Loss
+            total_l     = values[3] if values[3] is not None else 0.0
+            avg_l       = values[4] if values[4] is not None else 0.0
+            return_val  = values[5] if values[5] is not None else 0.0
+            loss_missing = (values[2] is None)
 
-        if len(nums) >= 6:
-            distance = nums[0]
-            section = nums[1]
-            loss = None if has_missing_loss else (nums[2] if nums[2] is not None else 0.0)
-            total_l = nums[3] if nums[3] is not None else 0.0
-            avg_l = nums[4] if nums[4] is not None else 0.0
-            return_val = nums[5] if nums[5] is not None else 0.0
-
-        elif len(nums) == 5:
-            distance = nums[0]
-            section = nums[1]
-            loss = None if has_missing_loss else 0.0
-            total_l = nums[2] if nums[2] is not None else 0.0
-            avg_l = nums[3] if nums[3] is not None else 0.0
-            return_val = nums[4] if nums[4] is not None else 0.0
-
+        elif len(values) == 5:
+            distance = values[0]
+            section  = values[1] if values[1] is not None else 0.0
+            if values[2] is None:
+                # None di posisi loss → '---' adalah loss
+                loss        = None
+                total_l     = values[3] if values[3] is not None else 0.0
+                avg_l       = values[4] if values[4] is not None else 0.0
+                return_val  = 0.0
+                loss_missing = True
+            else:
+                # '---' bukan di loss → mungkin return tidak ada
+                loss        = values[2]
+                total_l     = values[3] if values[3] is not None else 0.0
+                avg_l       = values[4] if values[4] is not None else 0.0
+                return_val  = 0.0
+                loss_missing = False
         else:
             continue
 
+        if distance is None:
+            continue
+
         rows.append({
-            "distance": distance,
-            "section": section,
-            "loss": loss,
-            "total_l": total_l,
-            "avg_l": avg_l,
-            "return": -abs(return_val) if return_val != 0 else -45.0
+            "distance":     distance,
+            "section":      section,
+            "loss":         loss,
+            "total_l":      total_l,
+            "avg_l":        avg_l,
+            "return":       -abs(return_val) if return_val != 0 else -45.0,
+            "loss_missing": loss_missing,
         })
 
     # =====================================================
@@ -1041,89 +1049,75 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     rows = sorted(rows, key=lambda x: x["distance"])
 
     # =====================================================
-    # 8. VALIDASI: Perbaiki nilai yang salah
+    # 8. PASTIKAN NILAI POSITIF (loss, total_l, avg_l)
+    #    TIDAK ADA SWAP KOLOM — nilai diambil apa adanya dari OCR
     # =====================================================
     for i, row in enumerate(rows):
-        # 🔥 Jika loss > 5 dan total_l < 5 → swap
-        if row['loss'] is not None and row['loss'] > 5.0 and row['total_l'] < 5.0:
-            old_loss = row['loss']
-            row['loss'] = row['total_l']
-            row['total_l'] = old_loss
-            logger.info(f"  KM{i+1}: Swapped loss ↔ total_l")
-        
-        # 🔥 Jika avg_l > 2 dan return < 10 → swap
-        if row['avg_l'] > 2.0 and abs(row['return']) < 10.0:
-            old_avg = row['avg_l']
-            row['avg_l'] = abs(row['return'])
-            row['return'] = -old_avg
-            logger.info(f"  KM{i+1}: Swapped avg_l ↔ return")
-        
-        # 🔥 Jika total_l dan avg_l tertukar
-        if row['total_l'] < 5.0 and row['avg_l'] > 10.0:
-            old_total = row['total_l']
-            row['total_l'] = row['avg_l']
-            row['avg_l'] = old_total
-            logger.info(f"  KM{i+1}: Swapped total_l ↔ avg_l")
-        
-        # 🔥 Pastikan semua nilai positif
         if row['loss'] is not None:
             row['loss'] = abs(row['loss'])
         row['total_l'] = abs(row['total_l'])
-        row['avg_l'] = abs(row['avg_l'])
+        row['avg_l']   = abs(row['avg_l'])
 
     # =====================================================
-    # 9. FIBER CUT DETECTION
+    # 9. FIBER CUT DETECTION — dari Total Events (akurat)
+    #    dan loss_missing (posisi '---' di kolom Loss)
     # =====================================================
     is_fiber_cut = False
     cut_km = -1
-    
-    # 🔥 Dari Total Events
+
     if total_events == 2:
         is_fiber_cut = True
         cut_km = 2
-        logger.info(f"🔴 FIBER CUT KM 2 detected (Total Events:2)")
+        logger.info("🔴 FIBER CUT KM2 (Total Events:2)")
     elif total_events == 3:
-        is_fiber_cut = True
-        cut_km = 3
-        logger.info(f"🔴 FIBER CUT KM 3 detected (Total Events:3)")
-    
-    # 🔥 Fallback: cek dari rows
-    if not is_fiber_cut and len(rows) >= 2:
-        for i, row in enumerate(rows):
-            km = i + 1
-            if km >= 2 and (row['loss'] is None or row['loss'] == 0.0) and row['total_l'] > 0:
+        # Verifikasi: KM3 harus punya loss_missing=True
+        if len(rows) >= 3 and rows[2].get('loss_missing') and rows[2].get('total_l', 0) > 0:
+            is_fiber_cut = True
+            cut_km = 3
+            logger.info("🔴 FIBER CUT KM3 (Total Events:3, loss KM3 missing)")
+        elif len(rows) >= 3 and rows[2].get('total_l', 0) > 0:
+            # Total Events:3 tapi loss KM3 ada nilai → tetap fiber cut
+            is_fiber_cut = True
+            cut_km = 3
+            rows[2]['loss'] = None
+            logger.info("🔴 FIBER CUT KM3 (Total Events:3)")
+
+    # Fallback: cek loss_missing per row (tanpa mengandalkan nilai numerik)
+    if not is_fiber_cut:
+        for i, row in enumerate(rows[:3]):
+            if row.get('loss_missing') and row.get('total_l', 0) > 0:
                 is_fiber_cut = True
-                cut_km = km
-                logger.info(f"🔴 FIBER CUT detected at KM {cut_km}")
+                cut_km = i + 1
+                logger.info(f"🔴 FIBER CUT KM{cut_km} (loss_missing detected)")
                 break
 
     # =====================================================
-    # 10. NORMALISASI FIBER CUT
+    # 10. NORMALISASI FIBER CUT — pad/trim rows
     # =====================================================
     if is_fiber_cut and cut_km == 2:
         if len(rows) >= 2:
             rows[1]['loss'] = None
-            logger.info(f"  KM2 loss set to None")
-        
         while len(rows) > 2:
             rows.pop()
-        
         last_dist = rows[-1]['distance'] if rows else 2.0
-        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
-        rows.append({"distance": last_dist + 2.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+        rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None,
+                     "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
+        rows.append({"distance": last_dist + 2.0, "section": 0.0, "loss": None,
+                     "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
 
     elif is_fiber_cut and cut_km == 3:
         if len(rows) >= 3:
             rows[2]['loss'] = None
-            logger.info(f"  KM3 loss set to None")
-        
+        while len(rows) > 3:
+            rows.pop()
         if len(rows) < 4:
             last_dist = rows[-1]['distance'] if rows else 3.0
-            rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None, "total_l": 0.0, "avg_l": 0.0, "return": -45.0})
+            rows.append({"distance": last_dist + 1.0, "section": 0.0, "loss": None,
+                         "total_l": 0.0, "avg_l": 0.0, "return": -45.0, "loss_missing": True})
 
-    # Normal: KM4 loss = None
-    if len(rows) >= 4 and not is_fiber_cut:
-        rows[3]["loss"] = None
+    # KM4 loss selalu None (End of Fiber)
+    if len(rows) >= 4:
+        rows[3]['loss'] = None
 
     # =====================================================
     # 11. PASTIKAN 4 ROWS
@@ -1132,12 +1126,10 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
         km = len(rows) + 1
         last_dist = rows[-1]["distance"] if rows else float(km - 1)
         rows.append({
-            "distance": last_dist + 1.0,
-            "section": 0.0,
+            "distance": last_dist + 1.0, "section": 0.0,
             "loss": None if km == 4 else 0.0,
-            "total_l": 0.0,
-            "avg_l": 0.0,
-            "return": -45.0
+            "total_l": 0.0, "avg_l": 0.0, "return": -45.0,
+            "loss_missing": km == 4,
         })
 
     # =====================================================
@@ -1146,11 +1138,9 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
     logger.info("===== FINAL PARSED ROWS =====")
     for i, r in enumerate(rows, start=1):
         logger.info(
-            f"  KM{i}: dist={r['distance']}, "
-            f"loss={r['loss']}, "
-            f"total_l={r['total_l']}, "
-            f"avg_l={r['avg_l']}, "
-            f"return={r['return']}"
+            f"  KM{i}: dist={r['distance']}, loss={r['loss']}, "
+            f"total_l={r['total_l']}, avg_l={r['avg_l']}, return={r['return']}, "
+            f"loss_missing={r.get('loss_missing', False)}"
         )
     logger.info(f"AVG TOTAL = {avg_total}, FIBER_CUT = {is_fiber_cut}, CUT_KM = {cut_km}")
 

@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Play, Pause, Square, RotateCcw, Upload, AlertCircle,
-  ChevronLeft, ChevronRight, Maximize2, FileSpreadsheet,
+  ChevronLeft, ChevronRight, FileSpreadsheet,
   Activity, Zap, RefreshCw, Clock
 } from 'lucide-react';
 import {
@@ -791,15 +791,15 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 onClick={() => {
                   if (chartRef.current) {
                     try {
-                      chartRef.current.resetZoom?.();
+                      chartRef.current.zoom?.(0.8);
                     } catch {
                       // Ignore
                     }
                   }
                 }}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-[10px] sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
               >
-                <Maximize2 size={12} className="sm:w-3.5 sm:h-3.5" /> Reset
+                Zoom Out <ChevronRight size={12} className="sm:w-3.5 sm:h-3.5" />
               </button>
             </div>
           </div>
