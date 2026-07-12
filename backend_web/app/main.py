@@ -1072,10 +1072,24 @@ def parse_otdr_table_simple(raw_text: str) -> Tuple[List[Dict], float]:
 
     # =====================================================
     # 7b. FIX KOLOM BERGESER — OCR sering tidak membaca '---'
-    #     Berlaku untuk KM3 (fiber cut) dan KM4 (end of fiber).
+    #     Berlaku untuk KM2, KM3 (fiber cut) dan KM4 (end of fiber).
     #     Harus dilakukan SEBELUM fiber cut detection (step 9)
     #     agar loss masih bernilai numerik saat dicek.
     # =====================================================
+
+    # FIX KM2 — untuk kasus Fiber Cut KM2 dimana '---' tidak terbaca
+    if len(rows) >= 2:
+        km2 = rows[1]
+        lv2 = km2.get('loss'); tl2 = km2.get('total_l', 0); al2 = km2.get('avg_l', 0)
+        if (lv2 is not None and tl2 < 5.0 and (abs(al2) > 5.0 or al2 < 0)):
+            logger.info(f"  KM2 FIX: '---' tidak terbaca OCR, geser kolom balik")
+            logger.info(f"  KM2 before: loss={lv2}, total_l={tl2}, avg_l={al2}")
+            km2['loss']    = None
+            km2['total_l'] = lv2
+            km2['avg_l']   = abs(tl2)
+            km2['return']  = -abs(al2) if al2 and al2 != 0 else None
+            km2['loss_missing'] = True
+            logger.info(f"  KM2 after : loss=None, total_l={km2['total_l']}, avg_l={km2['avg_l']}, return={km2['return']}")
 
     # FIX KM3 — untuk kasus Fiber Cut KM3 dimana '---' tidak terbaca
     if len(rows) >= 3:
