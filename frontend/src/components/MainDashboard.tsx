@@ -380,7 +380,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     };
   }, [isPlaying, data]);
 
-  // ── Chart Data — Backscatter trace, sumbu X = Distance (linear scale) ──
+  // ── Chart Data — Loss (dB) trace, sumbu X = Distance (km) ──
   const chartData = useMemo(() => {
     if (!data || currentPointIndex < 0) return null;
 
@@ -392,7 +392,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       distArr.length === data.backscatter.length &&
       distArr.some(v => v !== null && v !== undefined);
 
-    // Format {x, y}: x = Distance (m), y = Backscatter (dB)
+    // Format {x, y}: x = Distance (km), y = Loss (dB)
     const points = displayedData.map((val, i) => {
       const d = distArr[i];
       return {
@@ -404,7 +404,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     return {
       datasets: [
         {
-          label: 'Backscatter (dB)',
+          label: 'Loss (dB)',
           data: points,
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59, 130, 246, 0.08)',
@@ -455,10 +455,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           title: function(items: any[]) {
             if (!items.length) return '';
             const x = Number(items[0].parsed.x);
-            return `Distance: ${x.toFixed(4)} m`;
+            return `Distance: ${x.toFixed(4)} km`;
           },
           label: function(context: any) {
-            return `Backscatter: ${Number(context.parsed.y).toFixed(3)} dB`;
+            return `Loss: ${Number(context.parsed.y).toFixed(3)} dB`;
           },
         },
       },
@@ -484,7 +484,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         max: xMax,   // ← X axis stops at last data point
         title: {
           display: true,
-          text: 'Distance (m)',
+          text: 'Distance (km)',
           color: '#ffffff',
           font: { weight: 'bold' as const, size: 13 },
         },
@@ -495,14 +495,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           font: { size: 12 },
           callback: function(val: any) {
             const n = Number(val);
-            return n < 1 ? n.toFixed(4) : n.toFixed(3);
+            return n.toFixed(3);
           },
         },
       },
       y: {
         title: {
           display: true,
-          text: 'Backscatter (dB)',
+          text: 'Loss (dB)',
           color: '#ffffff',
           font: { weight: 'bold' as const, size: 13 },
         },
