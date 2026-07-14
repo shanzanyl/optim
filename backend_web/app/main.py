@@ -448,12 +448,16 @@ async def lifespan(app: FastAPI):
     
     logger.info("✅ Database tables ready")
     
-    # 🔥 Load SOR LSTM model at startup
-    try:
-        ml_sor.load_sor_models()
-        logger.info("✅ SOR LSTM models loaded at startup")
-    except Exception as e:
-        logger.error(f"❌ Failed to load SOR models at startup: {e}")
+    # 🔥 Load SOR LSTM model in background so startup completes instantly
+    async def load_models_bg():
+        try:
+            logger.info("⏳ Starting SOR LSTM model loading in background...")
+            await asyncio.to_thread(ml_sor.load_sor_models)
+            logger.info("✅ SOR LSTM models loaded in background")
+        except Exception as e:
+            logger.error(f"❌ Failed to load SOR models in background: {e}")
+
+    asyncio.create_task(load_models_bg())
 
     # 🔥 Auto-sync disabled - using manual sync only
     logger.info("⚠️ Auto-sync disabled - using manual sync only")
