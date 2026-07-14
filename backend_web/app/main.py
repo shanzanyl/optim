@@ -2753,38 +2753,53 @@ async def process_sor_file(
         logger.error(f"[SOR] ❌ READ FILE FAILED: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Gagal membaca file: {str(e)}")
     
-    # 3. Cari kolom Backscatter
-    logger.info("[SOR] ── STEP 2: FIND BACKSCATTER COLUMN ──")
-    backscatter_col = None
-    possible_cols = ['backscatter (db)', 'backscatter', 'db', 'scatter', 'amplitude']
-    for col in df.columns:
-        col_lower = col.lower().strip()
-        for possible in possible_cols:
-            if possible in col_lower:
-                backscatter_col = col
-                break
-        if backscatter_col:
-            break
-    
-    if backscatter_col is None:
-        logger.error(f"[SOR] ❌ BACKSCATTER COLUMN NOT FOUND. Available: {df.columns.tolist()}")
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Kolom 'Backscatter (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
-        )
-    
-    logger.info(f"[SOR] ✅ BACKSCATTER COLUMN FOUND: '{backscatter_col}'")
+    # 3. Cari kolom Loss (dB) dan Distance
+    logger.info("[SOR] ── STEP 2: FIND LOSS AND DISTANCE COLUMNS ──")
 
-    # 4. Ambil data Backscatter
-    backscatter_data = pd.to_numeric(df[backscatter_col], errors='coerce').dropna().values.tolist()
-    logger.info(f"[SOR]   total data points = {len(backscatter_data)}")
-    
-    if len(backscatter_data) < 128:
+    # Cari kolom Loss (dB)
+    loss_col = None
+    possible_loss = ['loss (db)', 'loss(db)', 'loss_db', 'loss']
+    for col in df.columns:
+        if col.lower().strip().replace(' ', '') in [p.replace(' ', '') for p in possible_loss]:
+            loss_col = col
+            break
+    if loss_col is None:
+        # Fallback: cari yang mengandung 'loss'
+        for col in df.columns:
+            if 'loss' in col.lower():
+                loss_col = col
+                break
+
+    if loss_col is None:
+        logger.error(f"[SOR] ❌ LOSS COLUMN NOT FOUND. Available: {df.columns.tolist()}")
         raise HTTPException(
             status_code=400,
-            detail=f"Data Backscatter hanya {len(backscatter_data)} titik. Minimal 128 titik diperlukan."
+            detail=f"Kolom 'Loss (dB)' tidak ditemukan. Kolom tersedia: {', '.join(df.columns.tolist())}"
         )
-    
+    logger.info(f"[SOR] ✅ LOSS COLUMN FOUND: '{loss_col}'")
+
+    # Cari kolom Distance (untuk grafik X axis)
+    distance_col = None
+    for col in df.columns:
+        if 'distance' in col.lower() or 'dist' in col.lower():
+            distance_col = col
+            break
+    logger.info(f"[SOR] {'✅' if distance_col else '⚠️'} DISTANCE COLUMN: '{distance_col}'")
+
+    # 4. Ambil data Loss (dB) dan Distance
+    loss_data = pd.to_numeric(df[loss_col], errors='coerce').fillna(0).values.tolist()
+    distance_data = pd.to_numeric(df[distance_col], errors='coerce').fillna(0).values.tolist() if distance_col else []
+    logger.info(f"[SOR]   total data points = {len(loss_data)}")
+
+    # Alias untuk kompatibilitas kode di bawah
+    backscatter_data = loss_data
+
+    if len(backscatter_data) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Data Loss (dB) hanya {len(backscatter_data)} titik. Minimal 50 titik diperlukan."
+        )
+
     # 5. Cek model SOR sudah loaded
     logger.info("[SOR] ── STEP 3: CHECK MODEL ──")
     if ml_sor.sor_model is None:
@@ -2792,16 +2807,15 @@ async def process_sor_file(
         logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
         raise HTTPException(
             status_code=500,
-            detail="Model Random Forest belum dimuat. Pastikan file model ada di folder models/sor/"
+            detail="Model LSTM belum dimuat. Pastikan file model ada di folder models/sor/"
         )
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
     logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
-    logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
+    logger.info(f"[SOR]   label encoder = {ml_sor.sor_le is not None}")
 
-    # 6. BATCH PREDICT — window_size=128, stride=1 (model saat ini)
-    # Catatan: akan diubah ke window_size=34, stride=6 setelah model baru siap
-    window_size  = 128
-    stride       = 1
+    # 6. BATCH PREDICT — window_size=50, stride=25 (LSTM model)
+    window_size  = 50
+    stride       = 25
     total_windows = max(0, (len(backscatter_data) - window_size) // stride + 1)
 
     logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
@@ -2881,8 +2895,8 @@ async def process_sor_file(
 
     return {
         "success"      : True,
-        "backscatter"  : clean_backscatter,
-        "distance"     : [],
+        "backscatter"  : clean_backscatter,   # Loss (dB) — untuk grafik Y
+        "distance"     : distance_data,        # Distance — untuk grafik X
         "predictions"  : predictions,
         "total_windows": len(predictions),
         "window_size"  : window_size,
@@ -2894,6 +2908,8 @@ async def process_sor_file(
         "metadata": {
             "columns": df.columns.tolist(),
             "rows"   : len(df),
+            "loss_col"    : loss_col,
+            "distance_col": distance_col,
         }
     }
 

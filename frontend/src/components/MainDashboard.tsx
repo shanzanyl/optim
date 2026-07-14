@@ -98,7 +98,7 @@ const StatusBadge = ({ status }: { status: string | null | undefined }) => {
   };
   const s = status || 'Warning';
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${cfg[s] || cfg.Warning}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black uppercase border ${cfg[s] || cfg.Warning}`}>
       <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${dot[s] || dot.Warning}`} />
       {s}
     </span>
@@ -189,7 +189,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     setLoading(true);
     setErrorDetail(null);
     setStatus('uploading');
-    setStatusMessage('Mengupload file...');
+    setStatusMessage('Uploading file...');
     setFileName(file.name);
     setUploadProgress(10);
 
@@ -197,7 +197,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       const token = localStorage.getItem('token');
       
       setUploadProgress(30);
-      setStatusMessage('Memproses data...');
+      setStatusMessage('Processing data...');
       setStatus('processing');
       
       const response = await fetch(`${API_URL}/api/dashboard/process-sor`, {
@@ -211,7 +211,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       setUploadProgress(70);
 
       if (!response.ok) {
-        let errorMsg = 'Gagal memproses file';
+        let errorMsg = 'Failed to process file';
         try {
           const error = await response.json();
           errorMsg = error.detail || error.message || errorMsg;
@@ -227,8 +227,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       if (result.success) {
         setData(result);
         setStatus('ready');
-        setStatusMessage(`Siap diputar! ${result.total_points} titik data, ${result.total_windows} window`);
-        // -1 = belum mulai diputar, grafik kosong sampai Play ditekan
+        setStatusMessage(`Ready! ${result.total_points} data points, ${result.total_windows} windows`);
+        // -1 = not started yet, chart empty until Play is pressed
         setCurrentPointIndex(-1);
         setCurrentPredictionIndex(-1);
         setHistory([]);
@@ -261,7 +261,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const startPlayback = useCallback(() => {
     if (!data) return;
 
-    // Reset jika: belum mulai (-1), sudah selesai, atau sudah di titik akhir
+    // Reset if: not started (-1), already complete, or at the last data point
     if (currentPointIndex < 0 || status === 'complete' || currentPointIndex >= data.total_points - 1) {
       setCurrentPointIndex(0);
       setCurrentPredictionIndex(-1);
@@ -271,7 +271,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
     setIsPlaying(true);
     setStatus('playing');
-    setStatusMessage('Memutar trace...');
+    setStatusMessage('Playing trace...');
   }, [data, status, currentPointIndex]);
 
   const pausePlayback = useCallback(() => {
@@ -481,17 +481,18 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       x: {
         type: 'linear' as const,
         min: 0,
-        max: xMax,   // ← sumbu X berhenti tepat di titik terakhir data
+        max: xMax,   // ← X axis stops at last data point
         title: {
           display: true,
           text: 'Distance (m)',
-          color: '#94a3b8',
-          font: { weight: 'bold' as const, size: 12 },
+          color: '#ffffff',
+          font: { weight: 'bold' as const, size: 13 },
         },
-        grid: { color: '#2a3d60' },
+        grid: { color: '#2a3d6080' },
         ticks: {
-          color: '#94a3b8',
+          color: '#ffffff',
           maxTicksLimit: 8,
+          font: { size: 12 },
           callback: function(val: any) {
             const n = Number(val);
             return n < 1 ? n.toFixed(4) : n.toFixed(3);
@@ -502,11 +503,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         title: {
           display: true,
           text: 'Backscatter (dB)',
-          color: '#94a3b8',
-          font: { weight: 'bold' as const, size: 12 },
+          color: '#ffffff',
+          font: { weight: 'bold' as const, size: 13 },
         },
-        grid: { color: '#2a3d60' },
-        ticks: { color: '#94a3b8' },
+        grid: { color: '#2a3d6080' },
+        ticks: {
+          color: '#ffffff',
+          font: { size: 12 },
+        },
         reverse: true,
       },
     },
@@ -532,7 +536,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
   // ── Render ──
   return (
-    <div className="min-h-screen w-full bg-[#14213d] text-slate-300 font-sans">
+    <div className="min-h-screen w-full bg-[#14213d] text-white font-sans">
       <main className="w-full px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-6 space-y-3 sm:space-y-4 md:space-y-6">
 
         {/* Header - Responsive */}
@@ -542,7 +546,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 flex-shrink-0" />
               <span className="truncate">OTDR Monitoring Simulator</span>
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 truncate">
+            <p className="text-xs sm:text-sm text-white/80 truncate">
             </p>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -564,7 +568,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               {loading ? 'Uploading...' : 'Upload File'}
             </label>
             {data && (
-              <span className="text-xs text-slate-400 bg-[#1e2f50] px-2 sm:px-3 py-1 rounded-full border border-[#3b4f6e] truncate max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
+              <span className="text-xs text-white/80 bg-[#1e2f50] px-2 sm:px-3 py-1 rounded-full border border-[#3b4f6e] truncate max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
                 {data.filename}
               </span>
             )}
@@ -583,21 +587,21 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 status === 'idle' ? 'bg-slate-400' :
                 'bg-amber-500 animate-pulse'
               }`} />
-              <span className="text-[10px] sm:text-xs md:text-sm font-medium text-white truncate">
-                {status === 'idle' && '📂 Siap upload file'}
-                {status === 'uploading' && 'Mengupload...'}
-                {status === 'processing' && 'Memproses data...'}
-                {status === 'ready' && 'Siap diputar'}
-                {status === 'playing' && 'Memutar...'}
+              <span className="text-xs sm:text-xs md:text-sm font-medium text-white truncate">
+                {status === 'idle' && '📂 Ready to upload'}
+                {status === 'uploading' && 'Uploading...'}
+                {status === 'processing' && 'Processing data...'}
+                {status === 'ready' && 'Ready to play'}
+                {status === 'playing' && 'Playing...'}
                 {status === 'paused' && 'Dijeda'}
                 {status === 'complete' && 'Playback selesai'}
                 {status === 'error' && 'Error'}
               </span>
             </div>
             {data && (
-              <div className="flex items-center gap-1 sm:gap-3 text-[10px] sm:text-xs text-slate-400 flex-wrap">
-                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Titik: {data.total_points}</span>
-                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Window: {data.total_windows}</span>
+              <div className="flex items-center gap-1 sm:gap-3 text-xs sm:text-xs text-white/80 flex-wrap">
+                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Points: {data.total_points}</span>
+                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Windows: {data.total_windows}</span>
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e] hidden sm:inline">Size: {data.window_size}</span>
               </div>
             )}
@@ -625,12 +629,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
           )}
           {errorDetail && status === 'error' && (
-            <div className="mt-1.5 sm:mt-2 p-1.5 sm:p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-[10px] sm:text-xs text-red-400 break-all">
+            <div className="mt-1.5 sm:mt-2 p-1.5 sm:p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs sm:text-xs text-red-400 break-all">
               <strong>Error:</strong> {errorDetail}
             </div>
           )}
           {statusMessage && status !== 'error' && (
-            <div className="mt-0.5 sm:mt-1 text-[9px] sm:text-xs text-slate-400 truncate">
+            <div className="mt-0.5 sm:mt-1 text-xs sm:text-xs text-white/80 truncate">
               {statusMessage}
             </div>
           )}
@@ -646,13 +650,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 options={chartOptions}
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-slate-500">
+              <div className="h-full flex items-center justify-center text-white/60">
                 <div className="text-center px-4">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 mx-auto mb-2 sm:mb-3 md:mb-4 bg-[#0f1a2e] rounded-full flex items-center justify-center border border-[#3b4f6e]">
-                    <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-slate-500" />
+                    <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-white/60" />
                   </div>
                   <p className="font-medium text-white text-sm sm:text-base">Upload file to view the classification result</p>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx)</p>
+                  <p className="text-xs sm:text-sm text-white/80 mt-1">Format: CSV, Excel (.xlsx)</p>
                 </div>
               </div>
             )}
@@ -667,73 +671,73 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               <button
                 onClick={startPlayback}
                 disabled={!data || isPlaying || status === 'complete'}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
               >
                 <Play size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Play</span>
               </button>
               <button
                 onClick={pausePlayback}
                 disabled={!isPlaying}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
               >
                 <Pause size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Pause</span>
               </button>
               <button
                 onClick={stopPlayback}
                 disabled={!data || currentPointIndex === 0}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
               >
                 <Square size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Stop</span>
               </button>
               <button
                 onClick={resetPlayback}
                 disabled={!data}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-500 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-500 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
               >
                 <RotateCcw size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Reset</span>
               </button>
             </div>
-            <div className="mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-slate-400 text-center truncate">
+            <div className="mt-1.5 sm:mt-2 text-xs sm:text-xs text-white/80 text-center truncate">
               {data ? (
                 <>
-                  Titik {Math.min(currentPointIndex + 1, data.total_points)} / {data.total_points}
+                  Point {Math.min(currentPointIndex + 1, data.total_points)} / {data.total_points}
                   {currentPredictionIndex >= 0 && (
                     <> · Win {currentPredictionIndex + 1} / {data.total_windows}</>
                   )}
                 </>
               ) : (
-                'Belum ada data'
+                'No data available'
               )}
             </div>
           </div>
 
           {/* Current Prediction */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
+            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
             {currentPrediction ? (
               <div>
                 <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                  <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-sm font-bold border ${getPredictionColor(currentPrediction.prediction)}`}>
+                  <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-bold border ${getPredictionColor(currentPrediction.prediction)}`}>
                     {currentPrediction.prediction}
                   </span>
                   <span className="text-base sm:text-lg font-bold text-blue-400">
                     {currentPrediction.confidence}%
                   </span>
                 </div>
-                <div className="text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1 font-mono truncate">
+                <div className="text-xs sm:text-xs text-white/80 mt-0.5 sm:mt-1 font-mono truncate">
                   Window: {currentPrediction.start} - {currentPrediction.end}
                 </div>
               </div>
             ) : (
-              <div className="text-xs sm:text-sm text-slate-400">
-                {currentPointIndex >= (data?.window_size || 128) ? 'Tidak ada prediksi' : 'Menunggu window...'}
+              <div className="text-xs sm:text-sm text-white/80">
+                {currentPointIndex >= (data?.window_size || 128) ? 'No prediction' : 'Waiting for window...'}
               </div>
             )}
           </div>
 
           {/* Status */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
+            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
                 status === 'playing' ? (
@@ -764,14 +768,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                  'Idle'}
               </span>
             </div>
-            <div className="text-[10px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1">
+            <div className="text-xs sm:text-xs text-white/80 mt-0.5 sm:mt-1">
               Total Windows: {data?.total_windows || 0}
             </div>
           </div>
 
           {/* Zoom Controls */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
+            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
             <div className="flex gap-1.5 sm:gap-2">
               <button
                 onClick={() => {
@@ -783,7 +787,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     }
                   }
                 }}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
               >
                 <ChevronLeft size={12} className="sm:w-3.5 sm:h-3.5" /> Zoom In
               </button>
@@ -797,7 +801,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     }
                   }
                 }}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
+                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
               >
                 Zoom Out <ChevronRight size={12} className="sm:w-3.5 sm:h-3.5" />
               </button>
@@ -811,8 +815,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             <span className="w-1 h-4 sm:w-1.5 sm:h-5 bg-blue-500 rounded-full" />
             Prediction History
             {history.length > 0 && (
-              <span className="text-[10px] sm:text-xs font-normal text-slate-400 ml-1 sm:ml-2">
-                ({history.length} prediksi)
+              <span className="text-xs sm:text-xs font-normal text-white/80 ml-1 sm:ml-2">
+                ({history.length} predictions)
               </span>
             )}
           </h3>
@@ -820,7 +824,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             <div className="overflow-x-auto">
               <table className="w-full text-xs sm:text-sm">
                 <thead className="bg-[#0f1a2e] sticky top-0">
-                  <tr className="text-slate-400 font-medium text-[9px] sm:text-xs border-b border-[#3b4f6e]">
+                  <tr className="text-white/80 font-medium text-xs sm:text-xs border-b border-[#3b4f6e]">
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Time</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left hidden xs:table-cell">Window</th>
                     <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Prediction</th>
@@ -830,17 +834,17 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 <tbody>
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-1.5 sm:px-3 py-4 sm:py-6 text-center text-slate-500 text-[10px] sm:text-sm">
-                        Belum ada prediksi. Jalankan trace untuk melihat history.
+                      <td colSpan={4} className="px-1.5 sm:px-3 py-4 sm:py-6 text-center text-white/60 text-xs sm:text-sm">
+                        No predictions yet. Run trace to view history.
                       </td>
                     </tr>
                   ) : (
                     history.slice(-50).reverse().map((entry, i) => (
                       <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 whitespace-nowrap">{entry.time}</td>
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-slate-300 hidden xs:table-cell">{entry.window}</td>
+                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-white whitespace-nowrap">{entry.time}</td>
+                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-white hidden xs:table-cell">{entry.window}</td>
                         <td className="px-1.5 sm:px-3 py-1">
-                          <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[8px] sm:text-xs font-medium whitespace-nowrap ${
+                          <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-xs sm:text-xs font-medium whitespace-nowrap ${
                             entry.prediction.toLowerCase() === 'normal' ? 'bg-emerald-500/20 text-emerald-400' :
                             entry.prediction.toLowerCase().includes('cut') ? 'bg-red-500/20 text-red-400' :
                             entry.prediction.toLowerCase().includes('bend') ? 'bg-amber-500/20 text-amber-400' :
@@ -849,7 +853,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                             {entry.prediction}
                           </span>
                         </td>
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-[9px] sm:text-xs text-blue-400 font-medium">{entry.confidence}%</td>
+                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-blue-400 font-medium">{entry.confidence}%</td>
                       </tr>
                     ))
                   )}
@@ -865,10 +869,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             <div className="flex items-start gap-2 sm:gap-3">
               <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 flex-shrink-0 mt-0.5" />
               <div className="w-full overflow-hidden">
-                <p className="font-medium text-white text-xs sm:text-sm">Informasi Data</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 sm:gap-2 mt-1 text-[9px] sm:text-xs text-slate-300">
-                  <span className="truncate">Titik: <strong className="text-white">{data.total_points}</strong></span>
-                  <span className="truncate">Window: <strong className="text-white">{data.total_windows}</strong></span>
+                <p className="font-medium text-white text-xs sm:text-sm">Data Information</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 sm:gap-2 mt-1 text-xs sm:text-xs text-white">
+                  <span className="truncate">Points: <strong className="text-white">{data.total_points}</strong></span>
+                  <span className="truncate">Windows: <strong className="text-white">{data.total_windows}</strong></span>
                   <span className="truncate hidden xs:inline">Size: <strong className="text-white">{data.window_size}</strong></span>
                   <span className="truncate col-span-2 sm:col-span-1">File: <strong className="text-white truncate">{data.filename}</strong></span>
                 </div>
@@ -883,19 +887,19 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             <div className="flex items-center gap-2">
               <span className="w-1 h-4 bg-blue-400 rounded-full" />
               <span className="text-white text-sm font-semibold">Classification History</span>
-              <span className="text-slate-400 text-xs">({dbHistory.length} entri)</span>
+              <span className="text-white/80 text-xs">({dbHistory.length} entries)</span>
             </div>
             <button
               onClick={fetchDbHistory}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-white/80 hover:text-white transition-colors"
               title="Refresh"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
           <div className="overflow-x-auto max-h-72 overflow-y-auto">
-            <table className="w-full text-[10px] sm:text-xs">
-              <thead className="bg-[#0f1e35] text-slate-400 uppercase tracking-wide sticky top-0">
+            <table className="w-full text-xs sm:text-sm">
+              <thead className="bg-[#0f1e35] text-white/80 uppercase tracking-wide sticky top-0">
                 <tr>
                   <th className="px-3 py-2 text-left w-10">No</th>
                   <th className="px-3 py-2 text-left">Time</th>
@@ -906,12 +910,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               <tbody>
                 {historyLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-slate-500">Memuat...</td>
+                    <td colSpan={4} className="px-3 py-6 text-center text-white/60">Loading...</td>
                   </tr>
                 ) : dbHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-8 text-center text-slate-500">
-                      Belum ada history klasifikasi.
+                    <td colSpan={4} className="px-3 py-8 text-center text-white/60">
+                      No classification history yet.
                     </td>
                   </tr>
                 ) : (
@@ -950,17 +954,17 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
                     return (
                       <tr key={item.id} className="border-t border-[#2a3d60]/50 hover:bg-[#2a3d60]/20">
-                        <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                        <td className="px-3 py-2 text-slate-400 font-mono whitespace-nowrap">
+                        <td className="px-3 py-2 text-white/80 font-mono">{idx + 1}</td>
+                        <td className="px-3 py-2 text-white/80 font-mono whitespace-nowrap">
                           {item.created_at ? formatDate(item.created_at) : '-'}
                         </td>
                         <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold capitalize ${clsBadge}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${clsBadge}`}>
                             {item.classification}
                           </span>
                         </td>
                         <td className="px-3 py-2">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold ${statusBadge[itemStatus] || statusBadge.Warning}`}>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge[itemStatus] || statusBadge.Warning}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${statusDot[itemStatus] || statusDot.Warning}`} />
                             {itemStatus}
                           </span>

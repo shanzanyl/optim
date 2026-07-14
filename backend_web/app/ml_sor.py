@@ -1,10 +1,8 @@
 # backend_web/app/ml_sor.py
-# Model Random Forest untuk Dashboard SOR — BATCH PREDICT
+# Model LSTM untuk Dashboard SOR — window_size=50, stride=25
 
 import joblib
-import json
 import numpy as np
-import pandas as pd
 import warnings
 from pathlib import Path
 import logging
@@ -14,206 +12,154 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# ── Path model LSTM ──────────────────────────────────────────
 SOR_MODEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "random_forest_model.pkl",
-    Path.cwd() / "models" / "sor" / "random_forest_model.pkl",
+    BASE_DIR / "models" / "sor" / "lstm_model_50_25.keras",
+    Path.cwd() / "models" / "sor" / "lstm_model_50_25.keras",
 ]
 SOR_SCALER_PATHS = [
-    BASE_DIR / "models" / "sor" / "scaler.pkl",
-    Path.cwd() / "models" / "sor" / "scaler.pkl",
-]
-SOR_FEATURE_PATHS = [
-    BASE_DIR / "models" / "sor" / "feature_names.json",
-    Path.cwd() / "models" / "sor" / "feature_names.json",
+    BASE_DIR / "models" / "sor" / "standard_scaler_50_25.joblib",
+    Path.cwd() / "models" / "sor" / "standard_scaler_50_25.joblib",
 ]
 SOR_LABEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "label_encoder_classes.json",
-    Path.cwd() / "models" / "sor" / "label_encoder_classes.json",
+    BASE_DIR / "models" / "sor" / "label_encoder_50_25.joblib",
+    Path.cwd() / "models" / "sor" / "label_encoder_50_25.joblib",
 ]
 
-sor_model = None
+sor_model  = None
 sor_scaler = None
-sor_feature_names = None
-sor_label_classes = None
-_df_columns = None
+sor_le     = None
 
 
 def load_sor_models():
-    global sor_model, sor_scaler, sor_feature_names, sor_label_classes, _df_columns
+    global sor_model, sor_scaler, sor_le
 
     logger.info("=" * 50)
-    logger.info("[ML_SOR] 🔄 Loading SOR Random Forest models...")
+    logger.info("[ML_SOR] 🔄 Loading SOR LSTM models (window=50, stride=25)...")
     logger.info(f"[ML_SOR]   BASE_DIR = {BASE_DIR}")
     logger.info(f"[ML_SOR]   CWD      = {Path.cwd()}")
 
-    for p in SOR_MODEL_PATHS:
-        logger.info(f"[ML_SOR]   model path check: {p} → exists={p.exists()}")
-
+    # Load LSTM model
     for path in SOR_MODEL_PATHS:
+        logger.info(f"[ML_SOR]   model path: {path} → exists={path.exists()}")
         if path.exists():
             try:
-                sor_model = joblib.load(path)
-                logger.info(f"[ML_SOR] ✅ SOR model loaded: {path}")
+                import tensorflow as tf
+                sor_model = tf.keras.models.load_model(str(path))
+                logger.info(f"[ML_SOR] ✅ LSTM model loaded: {path}")
+                logger.info(f"[ML_SOR]   input_shape={sor_model.input_shape}, output_shape={sor_model.output_shape}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
+    # Load scaler
     for path in SOR_SCALER_PATHS:
         if path.exists():
             try:
                 sor_scaler = joblib.load(path)
-                logger.info(f"[ML_SOR] ✅ SOR scaler loaded: {path}")
+                logger.info(f"[ML_SOR] ✅ Scaler loaded: {path}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    for path in SOR_FEATURE_PATHS:
-        if path.exists():
-            try:
-                with open(path, 'r') as f:
-                    sor_feature_names = json.load(f)
-                logger.info(f"[ML_SOR] ✅ feature names loaded ({len(sor_feature_names)} features)")
-                break
-            except Exception as e:
-                logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
-
+    # Load label encoder
     for path in SOR_LABEL_PATHS:
         if path.exists():
             try:
-                with open(path, 'r') as f:
-                    sor_label_classes = json.load(f)
-                logger.info(f"[ML_SOR] ✅ label classes: {sor_label_classes}")
+                sor_le = joblib.load(path)
+                logger.info(f"[ML_SOR] ✅ Label encoder loaded: {path}")
+                logger.info(f"[ML_SOR]   classes={sor_le.classes_.tolist()}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(128)]
-    logger.info(f"[ML_SOR]   columns sample: {_df_columns[:3]} ... {_df_columns[-3:]}")
-
     if sor_model is None:
-        logger.warning("[ML_SOR] ⚠️ SOR model NOT FOUND!")
-    else:
-        logger.info(f"[ML_SOR] ✅ All artifacts ready. type={type(sor_model).__name__}")
-    logger.info("=" * 50)
-    return sor_model is not None
+        logger.error("[ML_SOR] ❌ LSTM model NOT loaded")
+    if sor_scaler is None:
+        logger.error("[ML_SOR] ❌ Scaler NOT loaded")
+    if sor_le is None:
+        logger.error("[ML_SOR] ❌ Label encoder NOT loaded")
 
 
-def predict_sor_batch(backscatter_data: list, window_size: int = 128, stride: int = 1) -> list:
+def predict_sor_batch(backscatter_data: list, window_size: int = 50, stride: int = 25) -> list:
     """
-    BATCH PREDICT — semua window diprediksi sekaligus dalam satu .predict() call.
+    BATCH PREDICT dengan LSTM — window_size=50, stride=25.
+
+    Pipeline:
+    1. Sliding window pada data backscatter (kolom Loss dB)
+    2. Setiap window di-scale dengan StandardScaler
+    3. Reshape ke (batch, window_size, 1) untuk LSTM
+    4. Prediksi batch, decode label
 
     Args:
-        backscatter_data: list nilai Backscatter (dB) dari CSV
-        window_size: ukuran sliding window (default 128, sesuai model saat ini)
-        stride: pergeseran antar window (default 6, sesuai parameter training)
+        backscatter_data: list nilai backscatter/loss dari CSV
+        window_size: ukuran sliding window (default 50)
+        stride: pergeseran antar window (default 25)
 
     Returns:
         list of dict: [{start, end, prediction, confidence}, ...]
     """
     if sor_model is None:
-        raise Exception("[ML_SOR] sor_model is None — model belum dimuat")
+        raise Exception("[ML_SOR] LSTM model is None — model belum dimuat")
+    if sor_scaler is None:
+        raise Exception("[ML_SOR] Scaler is None — scaler belum dimuat")
+    if sor_le is None:
+        raise Exception("[ML_SOR] Label encoder is None — label encoder belum dimuat")
 
     n = len(backscatter_data)
     total_windows = max(0, (n - window_size) // stride + 1)
 
     if total_windows <= 0:
-        raise ValueError(f"[ML_SOR] Data hanya {n} titik, tidak cukup untuk window size {window_size}")
+        raise ValueError(
+            f"[ML_SOR] Data hanya {n} titik, tidak cukup untuk window_size={window_size}"
+        )
 
     logger.info(f"[ML_SOR] 🔄 Building matrix {total_windows} × {window_size} (stride={stride})...")
 
     arr = np.array(backscatter_data, dtype=np.float64)
 
-    # Vectorized sliding window dengan stride — shape: (total_windows, window_size)
+    # Bersihkan NaN/Inf
+    if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
+        logger.warning("[ML_SOR] ⚠️ Data mengandung NaN/Inf, dibersihkan dengan 0")
+        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Vectorized sliding window — shape: (total_windows, window_size)
     shape   = (total_windows, window_size)
     strides = (arr.strides[0] * stride, arr.strides[0])
     X_all   = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides).copy()
 
-    # Bersihkan NaN/Inf
-    if np.any(np.isnan(X_all)) or np.any(np.isinf(X_all)):
-        logger.warning("[ML_SOR] ⚠️ Data mengandung NaN/Inf, dibersihkan dengan 0")
-        X_all = np.nan_to_num(X_all, nan=0.0, posinf=0.0, neginf=0.0)
-
     logger.info(f"[ML_SOR] ✅ Matrix built: shape={X_all.shape}")
 
-    # Bungkus sebagai DataFrame agar scaler tidak warning
-    X_df = pd.DataFrame(X_all, columns=_df_columns)
+    # Scale: StandardScaler (fit per window — transform seluruh batch)
+    # StandardScaler dilatih dengan shape (n_samples, window_size)
+    X_scaled = sor_scaler.transform(X_all)  # shape: (total_windows, window_size)
 
-    # Normalisasi batch
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        if sor_scaler is not None:
-            X_scaled = sor_scaler.transform(X_df)
-        else:
-            X_scaled = X_df.values
+    # Reshape untuk LSTM: (batch, timesteps, features) = (total_windows, window_size, 1)
+    X_lstm = X_scaled.reshape(total_windows, window_size, 1)
 
-    logger.info(f"[ML_SOR] 🔄 Running batch predict on {total_windows} windows...")
+    logger.info(f"[ML_SOR] 🔄 Running LSTM batch predict on {total_windows} windows...")
 
-    # Prediksi SEMUA window sekaligus — ini yang menghemat 99% waktu
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        preds = sor_model.predict(X_scaled)
+    # Predict semua window sekaligus
+    proba_all = sor_model.predict(X_lstm, batch_size=256, verbose=0)
+    # proba_all shape: (total_windows, n_classes)
 
-        confidences = None
-        if hasattr(sor_model, 'predict_proba'):
-            probas = sor_model.predict_proba(X_scaled)
-            confidences = np.max(probas, axis=1) * 100
-
-    logger.info(f"[ML_SOR] ✅ Batch predict selesai: {len(preds)} prediksi")
+    preds = np.argmax(proba_all, axis=1)
+    confidences = np.max(proba_all, axis=1)
 
     # Decode label
-    def decode(pred):
-        if sor_label_classes is None:
-            return str(pred)
-        if isinstance(sor_label_classes, list):
-            if isinstance(pred, (int, np.integer)):
-                return sor_label_classes[pred] if pred < len(sor_label_classes) else str(pred)
-            return str(pred)
-        if isinstance(sor_label_classes, dict):
-            return sor_label_classes.get(str(pred), str(pred))
-        return str(pred)
+    labels = sor_le.inverse_transform(preds)
 
-    # Susun hasil — start/end mengacu ke index di backscatter_data
+    # Susun hasil
     results = []
-    for i, pred in enumerate(preds):
-        conf  = float(confidences[i]) if confidences is not None else 95.0
+    for i in range(total_windows):
         start = i * stride
         end   = start + window_size - 1
         results.append({
-            "start"     : start,
-            "end"       : end,
-            "prediction": decode(pred),
-            "confidence": round(conf, 2),
+            "start"     : int(start),
+            "end"       : int(end),
+            "prediction": str(labels[i]),
+            "confidence": round(float(confidences[i]) * 100, 2),
         })
 
+    logger.info(f"[ML_SOR] ✅ Done: {total_windows} windows predicted")
     return results
-
-
-# Fungsi lama dipertahankan untuk kompatibilitas (tidak dipakai di endpoint baru)
-def predict_sor_window(window_data: list) -> dict:
-    if sor_model is None:
-        raise Exception("[ML_SOR] sor_model is None")
-    if len(window_data) != 128:
-        raise ValueError(f"window_data panjangnya {len(window_data)}, harus 128")
-    arr = np.array(window_data, dtype=np.float64)
-    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    X = pd.DataFrame([arr], columns=_df_columns)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        X_scaled = sor_scaler.transform(X) if sor_scaler else X.values
-        pred = sor_model.predict(X_scaled)[0]
-        confidence = 95.0
-        if hasattr(sor_model, 'predict_proba'):
-            proba = sor_model.predict_proba(X_scaled)[0]
-            confidence = float(np.max(proba) * 100)
-
-    def decode(p):
-        if sor_label_classes is None: return str(p)
-        if isinstance(sor_label_classes, list):
-            return sor_label_classes[p] if isinstance(p, (int, np.integer)) and p < len(sor_label_classes) else str(p)
-        if isinstance(sor_label_classes, dict): return sor_label_classes.get(str(p), str(p))
-        return str(p)
-
-    return {"prediction": decode(pred), "confidence": round(confidence, 2)}
-
-
-load_sor_models()
