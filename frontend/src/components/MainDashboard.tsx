@@ -511,7 +511,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           color: '#ffffff',
           font: { size: 12 },
         },
-        reverse: true,
+        reverse: false,
       },
     },
   }), [xMax]);
