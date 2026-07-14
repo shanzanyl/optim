@@ -32,6 +32,9 @@ numpy==2.0.2
 pandas==2.2.2
 scipy==1.16.3
 
+# Deep Learning (Dashboard LSTM model)
+tensorflow==2.19.0
+
 # OCR
 pillow==10.4.0
 pytesseract==0.3.13
@@ -43,7 +46,6 @@ requests==2.32.3
 
 # Async
 anyio==4.6.2
-
 
 # Utilities
 python-dateutil==2.9.0.post0
