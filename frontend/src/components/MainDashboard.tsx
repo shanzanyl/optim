@@ -119,7 +119,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const [data, setData] = useState<ProcessedData | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusType>('idle');
-  const [statusMessage, setStatusMessage] = useState('Upload file SOR untuk memulai monitoring');
+  const [statusMessage, setStatusMessage] = useState('Upload file to start classification');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [fileName, setFileName] = useState('');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -584,14 +584,14 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 'bg-amber-500 animate-pulse'
               }`} />
               <span className="text-[10px] sm:text-xs md:text-sm font-medium text-white truncate">
-                {status === 'idle' && '📂 Siap upload file SOR'}
-                {status === 'uploading' && '📤 Mengupload...'}
-                {status === 'processing' && '⚙️ Memproses data...'}
-                {status === 'ready' && '✅ Siap diputar'}
-                {status === 'playing' && '▶️ Memutar...'}
-                {status === 'paused' && '⏸️ Dijeda'}
-                {status === 'complete' && '✅ Playback selesai'}
-                {status === 'error' && '❌ Error'}
+                {status === 'idle' && '📂 Siap upload file'}
+                {status === 'uploading' && 'Mengupload...'}
+                {status === 'processing' && 'Memproses data...'}
+                {status === 'ready' && 'Siap diputar'}
+                {status === 'playing' && 'Memutar...'}
+                {status === 'paused' && 'Dijeda'}
+                {status === 'complete' && 'Playback selesai'}
+                {status === 'error' && 'Error'}
               </span>
             </div>
             {data && (
@@ -651,8 +651,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 mx-auto mb-2 sm:mb-3 md:mb-4 bg-[#0f1a2e] rounded-full flex items-center justify-center border border-[#3b4f6e]">
                     <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-slate-500" />
                   </div>
-                  <p className="font-medium text-white text-sm sm:text-base">Upload file SOR untuk memulai monitoring</p>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx) dengan kolom Backscatter</p>
+                  <p className="font-medium text-white text-sm sm:text-base">Upload file to view the classification result</p>
+                  <p className="text-xs sm:text-sm text-slate-400 mt-1">Format: CSV, Excel (.xlsx)</p>
                 </div>
               </div>
             )}
@@ -726,7 +726,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               </div>
             ) : (
               <div className="text-xs sm:text-sm text-slate-400">
-                {currentPointIndex >= (data?.window_size || 128) ? 'Tidak ada prediksi' : '⏳ Menunggu window...'}
+                {currentPointIndex >= (data?.window_size || 128) ? 'Tidak ada prediksi' : 'Menunggu window...'}
               </div>
             )}
           </div>

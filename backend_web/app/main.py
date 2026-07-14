@@ -2798,9 +2798,10 @@ async def process_sor_file(
     logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
     logger.info(f"[SOR]   label_classes = {ml_sor.sor_label_classes}")
 
-    # 6. BATCH PREDICT — window_size=34, stride=6 (sesuai parameter training model)
-    window_size  = 34
-    stride       = 6
+    # 6. BATCH PREDICT — window_size=128, stride=1 (model saat ini)
+    # Catatan: akan diubah ke window_size=34, stride=6 setelah model baru siap
+    window_size  = 128
+    stride       = 1
     total_windows = max(0, (len(backscatter_data) - window_size) // stride + 1)
 
     logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")

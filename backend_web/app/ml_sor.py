@@ -87,7 +87,7 @@ def load_sor_models():
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(34)]
+    _df_columns = sor_feature_names if sor_feature_names else [f"t{i:03d}" for i in range(128)]
     logger.info(f"[ML_SOR]   columns sample: {_df_columns[:3]} ... {_df_columns[-3:]}")
 
     if sor_model is None:
@@ -98,13 +98,13 @@ def load_sor_models():
     return sor_model is not None
 
 
-def predict_sor_batch(backscatter_data: list, window_size: int = 34, stride: int = 6) -> list:
+def predict_sor_batch(backscatter_data: list, window_size: int = 128, stride: int = 1) -> list:
     """
     BATCH PREDICT — semua window diprediksi sekaligus dalam satu .predict() call.
 
     Args:
         backscatter_data: list nilai Backscatter (dB) dari CSV
-        window_size: ukuran sliding window (default 34, sesuai parameter training)
+        window_size: ukuran sliding window (default 128, sesuai model saat ini)
         stride: pergeseran antar window (default 6, sesuai parameter training)
 
     Returns:
