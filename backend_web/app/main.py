@@ -448,6 +448,13 @@ async def lifespan(app: FastAPI):
     
     logger.info("✅ Database tables ready")
     
+    # 🔥 Load SOR LSTM model at startup
+    try:
+        ml_sor.load_sor_models()
+        logger.info("✅ SOR LSTM models loaded at startup")
+    except Exception as e:
+        logger.error(f"❌ Failed to load SOR models at startup: {e}")
+
     # 🔥 Auto-sync disabled - using manual sync only
     logger.info("⚠️ Auto-sync disabled - using manual sync only")
     
