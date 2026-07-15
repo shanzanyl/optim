@@ -2845,13 +2845,48 @@ async def process_sor_file(
 
     logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
 
-    # 7. Hitung klasifikasi final dari kelas terbanyak
+    # 7. Klasifikasi final — SATU KELAS PER FILE, MURNI DARI KELUARAN MODEL
+    #
+    # Ground truth: satu file berisi satu gangguan yang diinduksi di satu titik,
+    # jadi verdict-nya tunggal.
+    #
+    # Tidak ada ambang confidence dan tidak ada window yang dibuang. Setiap
+    # window yang oleh model tidak diklasifikasikan sebagai normal dihitung
+    # sebagai gangguan.
+    #
+    #   - Tidak ada window gangguan          -> normal
+    #   - Semua window gangguan satu kelas   -> kelas itu (tanpa aturan apa pun)
+    #   - Window gangguan berbeda kelas      -> model tidak konsisten; dipilih
+    #                                           kelas terbanyak DI ANTARA WINDOW
+    #                                           GANGGUAN saja
+    #
+    # Catatan: ini BUKAN majority vote seperti versi lama. Versi lama mengikutkan
+    # ratusan window normal dalam pemungutan suara, sehingga gangguan yang
+    # bersifat lokal selalu kalah dan verdict hampir selalu "normal". Di sini
+    # window normal tidak punya suara — ia hanya menentukan ada/tidaknya
+    # gangguan, bukan jenisnya.
     from collections import Counter
+
     class_counts: dict = Counter(p["prediction"] for p in predictions)
-    final_class = class_counts.most_common(1)[0][0] if class_counts else "Normal"
+    logger.info(f"[SOR]   class_counts={dict(class_counts)}")
+
+    fault_counts: dict = Counter(
+        p["prediction"] for p in predictions if p["prediction"].lower() != "normal"
+    )
+
+    if not fault_counts:
+        final_class = "normal"
+    else:
+        final_class = fault_counts.most_common(1)[0][0]
+        if len(fault_counts) > 1:
+            logger.warning(
+                f"[SOR]   ⚠️ MODEL TIDAK KONSISTEN — window gangguan berisi "
+                f"{len(fault_counts)} kelas berbeda: {dict(fault_counts)}. "
+                f"Dipilih terbanyak: {final_class}"
+            )
 
     cls_lower = final_class.lower()
-    if cls_lower == "normal":
+    if not fault_counts:
         final_status = "Normal"
     elif any(k in cls_lower for k in ["cut", "nearly"]):
         final_status = "Critical"

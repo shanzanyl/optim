@@ -13,12 +13,13 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  ArcElement,
   Title,
   Tooltip,
   Legend,
   Filler,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Line, Pie } from 'react-chartjs-2';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
 // Register ChartJS plugins
@@ -27,6 +28,7 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  ArcElement,
   Title,
   Tooltip,
   Legend,
@@ -48,23 +50,22 @@ type PredictionResult = {
 type ProcessedData = {
   success: boolean;
   backscatter: number[];
-  distance: number[];        // kolom Distance (m) dari CSV — [] jika tidak ada
+  distance: number[];        // kolom Distance dari CSV — [] jika tidak ada
   predictions: PredictionResult[];
   total_windows: number;
   window_size: number;
+  stride?: number;
   total_points: number;
   filename: string;
+  // Verdict final dari backend (majority vote seluruh window, dihitung sekali
+  // saat file diproses). Ini sumber kebenaran tunggal — sama dengan yang
+  // disimpan ke DB dan yang memicu notifikasi Telegram.
+  classification: string;
+  status: string;
   metadata: {
     columns: string[];
     rows: number;
   };
-};
-
-type HistoryEntry = {
-  time: string;
-  window: string;
-  prediction: string;
-  confidence: number;
 };
 
 type StatusType = 'idle' | 'uploading' | 'processing' | 'ready' | 'playing' | 'paused' | 'complete' | 'error';
@@ -127,8 +128,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentPointIndex, setCurrentPointIndex] = useState(0);
-  const [currentPredictionIndex, setCurrentPredictionIndex] = useState(-1);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   // Chart refs
   const chartRef = useRef<any>(null);
@@ -139,17 +138,21 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // ── Playback speed ──
-  const PLAYBACK_INTERVAL_MS = 30;
+  // Animasi trace dipercepat: interval lebih pendek + beberapa titik per tick,
+  // sehingga visualisasi selesai jauh lebih cepat namun tetap terlihat halus.
+  const PLAYBACK_INTERVAL_MS = 16;
+  const POINTS_PER_TICK = 5;
 
-  // ── Format waktu ──
-  const formatTime = (index: number) => {
-    const totalMs = index * PLAYBACK_INTERVAL_MS;
-    const totalSec = Math.floor(totalMs / 1000);
-    const hours = String(Math.floor(totalSec / 3600)).padStart(2, '0');
-    const minutes = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
-    const seconds = String(totalSec % 60).padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  };
+  // ── Normalisasi nama kelas untuk tampilan ──
+  // Label encoder mengeluarkan casing campur ('normal' huruf kecil, sisanya
+  // 'Air Gap' / 'Bad Splice' / 'Bending' / 'Dirty Connector'). DB juga masih
+  // menyimpan record lama dengan casing berbeda. Semua dinormalkan di sini agar
+  // tampil seragam dan agar pengelompokan tidak terpecah.
+  const classKey = (s: string | null | undefined) =>
+    (s || 'Unknown').trim().toLowerCase();
+
+  const formatClassName = (s: string | null | undefined) =>
+    classKey(s).replace(/\b\w/g, (c) => c.toUpperCase());
 
   // ── API Base URL ──
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
@@ -227,11 +230,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       if (result.success) {
         setData(result);
         setStatus('ready');
-        setStatusMessage(`Ready! ${result.total_points} data points, ${result.total_windows} windows`);
+        setStatusMessage(`Ready! ${result.total_points} data points`);
         // -1 = not started yet, chart empty until Play is pressed
         setCurrentPointIndex(-1);
-        setCurrentPredictionIndex(-1);
-        setHistory([]);
         setIsPlaying(false);
         
         if (chartRef.current) {
@@ -244,12 +245,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         // Refresh history setelah upload berhasil
         fetchDbHistory();
       } else {
-        throw new Error(result.message || 'Proses gagal');
+        throw new Error(result.message || 'Processing failed');
       }
 
     } catch (err: any) {
       setStatus('error');
-      setStatusMessage(err.message || 'Terjadi kesalahan');
+      setStatusMessage(err.message || 'An error occurred');
       setErrorDetail(err.message || 'Unknown error');
       console.error('Upload error:', err);
     } finally {
@@ -264,8 +265,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     // Reset if: not started (-1), already complete, or at the last data point
     if (currentPointIndex < 0 || status === 'complete' || currentPointIndex >= data.total_points - 1) {
       setCurrentPointIndex(0);
-      setCurrentPredictionIndex(-1);
-      setHistory([]);
       setStatus('ready');
     }
 
@@ -277,7 +276,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const pausePlayback = useCallback(() => {
     setIsPlaying(false);
     setStatus('paused');
-    setStatusMessage('Dijeda');
+    setStatusMessage('Paused');
   }, []);
 
   const stopPlayback = useCallback(() => {
@@ -287,10 +286,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       playbackIntervalRef.current = null;
     }
     setCurrentPointIndex(0);
-    setCurrentPredictionIndex(-1);
-    setHistory([]);
     setStatus('ready');
-    setStatusMessage('Direset');
+    setStatusMessage('Reset');
     if (chartRef.current) {
       try {
         chartRef.current.resetZoom?.();
@@ -307,10 +304,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       playbackIntervalRef.current = null;
     }
     setCurrentPointIndex(0);
-    setCurrentPredictionIndex(-1);
-    setHistory([]);
     setStatus('ready');
-    setStatusMessage('Direset');
+    setStatusMessage('Reset');
     if (chartRef.current) {
       try {
         chartRef.current.resetZoom?.();
@@ -336,12 +331,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
     playbackIntervalRef.current = setInterval(() => {
       setCurrentPointIndex(prev => {
-        const next = prev + 1;
-        
-        if (next >= data.total_points) {
+        // Maju beberapa titik sekaligus agar animasi lebih cepat
+        const next = Math.min(prev + POINTS_PER_TICK, data.total_points - 1);
+
+        if (next >= data.total_points - 1 && prev >= data.total_points - 1) {
           setIsPlaying(false);
           setStatus('complete');
-          setStatusMessage('Playback selesai! ✅');
+          setStatusMessage('Playback complete! ✅');
           if (playbackIntervalRef.current) {
             clearInterval(playbackIntervalRef.current);
             playbackIntervalRef.current = null;
@@ -349,23 +345,18 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           return prev;
         }
 
-        const predIndex = next - data.window_size;
-        if (predIndex >= 0 && predIndex < data.predictions.length) {
-          setCurrentPredictionIndex(predIndex);
-          
-          const pred = data.predictions[predIndex];
-          setHistory(h => {
-            const newEntry: HistoryEntry = {
-              time: formatTime(next),
-              window: `${pred.start}-${pred.end}`,
-              prediction: pred.prediction,
-              confidence: pred.confidence,
-            };
-            if (h.length > 0 && h[h.length - 1].time === newEntry.time) {
-              return h;
-            }
-            return [...h, newEntry];
-          });
+        // Playback murni animasi visual — tidak lagi mengubah hasil klasifikasi.
+        // Verdict sudah ditetapkan backend saat file diproses.
+
+        // Tandai selesai bila sudah mencapai titik terakhir
+        if (next >= data.total_points - 1) {
+          setIsPlaying(false);
+          setStatus('complete');
+          setStatusMessage('Playback complete! ✅');
+          if (playbackIntervalRef.current) {
+            clearInterval(playbackIntervalRef.current);
+            playbackIntervalRef.current = null;
+          }
         }
 
         return next;
@@ -516,12 +507,24 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     },
   }), [xMax]);
 
-  // ── Current Prediction Info ──
-  const currentPrediction = useMemo(() => {
-    if (currentPredictionIndex < 0 || !data) return null;
-    if (currentPredictionIndex >= data.predictions.length) return null;
-    return data.predictions[currentPredictionIndex];
-  }, [currentPredictionIndex, data]);
+  // ── Verdict final (tetap, tidak berubah selama animasi) ──
+  // Diambil langsung dari respons backend — hasil majority vote seluruh window
+  // yang dihitung sekali saat file diproses. Konsisten dengan Classification
+  // History, isi DB, dan notifikasi Telegram karena sumbernya satu.
+  const verdictClass = data ? formatClassName(data.classification) : null;
+  const verdictStatus = data?.status || null;
+
+  // ── Posisi Distance yang sedang diproses (mengikuti sumbu X chart) ──
+  const currentDistance = useMemo(() => {
+    if (!data || currentPointIndex < 0) return null;
+    const distArr = data.distance ?? [];
+    const hasDistance =
+      distArr.length === data.backscatter.length &&
+      distArr.some(v => v !== null && v !== undefined);
+    if (!hasDistance) return null;
+    const d = distArr[currentPointIndex];
+    return d !== null && d !== undefined ? Number(d) : null;
+  }, [data, currentPointIndex]);
 
   const progress = data ? ((currentPointIndex + 1) / data.total_points * 100) : 0;
 
@@ -533,6 +536,80 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     if (p.includes('splice')) return 'text-orange-400 bg-orange-500/20 border-orange-500/30';
     return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
   };
+
+  // ── Fault Distribution (agregasi dari Classification History) ──
+  const CLASS_COLORS: Record<string, string> = {
+    normal: '#34d399',
+    'fiber cut': '#f87171',
+    'nearly cut': '#fb7185',
+    bending: '#fbbf24',
+    'bad splice': '#fb923c',
+    'dirty connector': '#22d3ee',
+    'air gap': '#a78bfa',
+  };
+
+  const faultDistribution = useMemo(() => {
+    // Dikelompokkan pakai key ternormalisasi, supaya record lama di DB dengan
+    // casing berbeda (mis. 'bending') tidak terpisah dari 'Bending'.
+    const counts = new Map<string, number>();
+    dbHistory.forEach(item => {
+      const key = classKey(item.classification);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const keys = Array.from(counts.keys());
+    const labels = keys.map(k => formatClassName(k));
+    const values = keys.map(k => counts.get(k) || 0);
+    const colors = keys.map(k => CLASS_COLORS[k] || '#60a5fa');
+    const total = values.reduce((a, b) => a + b, 0);
+    return { labels, values, colors, total };
+  }, [dbHistory]);
+
+  const pieData = useMemo(() => ({
+    labels: faultDistribution.labels,
+    datasets: [
+      {
+        data: faultDistribution.values,
+        backgroundColor: faultDistribution.colors,
+        borderColor: '#14213d',
+        borderWidth: 2,
+        hoverOffset: 6,
+      },
+    ],
+  }), [faultDistribution]);
+
+  const pieOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+        labels: {
+          color: '#e2e8f0',
+          font: { size: 12 },
+          padding: 12,
+          usePointStyle: true,
+          pointStyle: 'circle' as const,
+        },
+      },
+      tooltip: {
+        backgroundColor: '#1e2f50',
+        titleColor: '#ffffff',
+        bodyColor: '#e2e8f0',
+        borderColor: '#3b4f6e',
+        borderWidth: 1,
+        cornerRadius: 8,
+        padding: 10,
+        callbacks: {
+          label: function(context: any) {
+            const value = Number(context.parsed) || 0;
+            const total = faultDistribution.total || 1;
+            const pct = ((value / total) * 100).toFixed(1);
+            return `${context.label}: ${value} (${pct}%)`;
+          },
+        },
+      },
+    },
+  }), [faultDistribution]);
 
   // ── Render ──
   return (
@@ -593,16 +670,19 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 {status === 'processing' && 'Processing data...'}
                 {status === 'ready' && 'Ready to play'}
                 {status === 'playing' && 'Playing...'}
-                {status === 'paused' && 'Dijeda'}
-                {status === 'complete' && 'Playback selesai'}
+                {status === 'paused' && 'Paused'}
+                {status === 'complete' && 'Playback complete'}
                 {status === 'error' && 'Error'}
               </span>
             </div>
             {data && (
               <div className="flex items-center gap-1 sm:gap-3 text-xs sm:text-xs text-white/80 flex-wrap">
                 <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Points: {data.total_points}</span>
-                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Windows: {data.total_windows}</span>
-                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e] hidden sm:inline">Size: {data.window_size}</span>
+                {currentDistance !== null && (
+                  <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">
+                    Distance: {currentDistance.toFixed(4)} km
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -701,8 +781,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               {data ? (
                 <>
                   Point {Math.min(currentPointIndex + 1, data.total_points)} / {data.total_points}
-                  {currentPredictionIndex >= 0 && (
-                    <> · Win {currentPredictionIndex + 1} / {data.total_windows}</>
+                  {currentDistance !== null && (
+                    <> · Distance {currentDistance.toFixed(4)} km</>
                   )}
                 </>
               ) : (
@@ -711,65 +791,39 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
           </div>
 
-          {/* Current Prediction */}
+          {/* Classification Result — verdict tetap dari backend */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Current Prediction</h3>
-            {currentPrediction ? (
-              <div>
-                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                  <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-bold border ${getPredictionColor(currentPrediction.prediction)}`}>
-                    {currentPrediction.prediction}
-                  </span>
-                  <span className="text-base sm:text-lg font-bold text-blue-400">
-                    {currentPrediction.confidence}%
-                  </span>
-                </div>
-                <div className="text-xs sm:text-xs text-white/80 mt-0.5 sm:mt-1 font-mono truncate">
-                  Window: {currentPrediction.start} - {currentPrediction.end}
-                </div>
+            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Classification Result</h3>
+            {verdictClass ? (
+              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <span className={`px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-sm sm:text-base font-bold border ${getPredictionColor(verdictClass)}`}>
+                  {verdictClass}
+                </span>
               </div>
             ) : (
               <div className="text-xs sm:text-sm text-white/80">
-                {currentPointIndex >= (data?.window_size || 128) ? 'No prediction' : 'Waiting for window...'}
+                Upload a file to see the result
               </div>
             )}
           </div>
 
-          {/* Status */}
+          {/* Status — mengikuti verdict backend */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
             <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
-                status === 'playing' ? (
-                  currentPrediction
-                    ? currentPrediction.prediction === 'Normal' ? 'bg-emerald-500 animate-pulse'
-                      : ['Fiber Cut', 'Nearly Cut'].includes(currentPrediction.prediction) ? 'bg-red-500 animate-pulse'
-                      : 'bg-amber-500 animate-pulse'
-                    : 'bg-green-500 animate-pulse'
-                ) :
-                status === 'complete' ? 'bg-blue-500' :
-                status === 'ready' ? 'bg-green-500' :
-                status === 'paused' ? 'bg-amber-500' :
-                status === 'error' ? 'bg-red-500' :
-                'bg-slate-400'
-              }`} />
-              <span className="font-medium text-xs sm:text-sm text-white">
-                {status === 'playing' ? (
-                  currentPrediction
-                    ? currentPrediction.prediction === 'Normal' ? 'Normal'
-                      : ['Fiber Cut', 'Nearly Cut'].includes(currentPrediction.prediction) ? 'Critical'
-                      : 'Warning'
-                    : 'Playing...'
-                ) :
-                 status === 'complete' ? 'Complete ✅' :
-                 status === 'ready' ? 'Ready' :
-                 status === 'paused' ? 'Paused' :
-                 status === 'error' ? 'Error' :
-                 'Idle'}
-              </span>
-            </div>
-            <div className="text-xs sm:text-xs text-white/80 mt-0.5 sm:mt-1">
-              Total Windows: {data?.total_windows || 0}
+            {verdictStatus ? (
+              <StatusBadge status={verdictStatus} />
+            ) : (
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
+                  status === 'error' ? 'bg-red-500' : 'bg-slate-400'
+                }`} />
+                <span className="font-medium text-xs sm:text-sm text-white">
+                  {status === 'error' ? 'Error' : 'Idle'}
+                </span>
+              </div>
+            )}
+            <div className="text-xs sm:text-xs text-white/80 mt-1.5">
+              {currentDistance !== null ? `Distance: ${currentDistance.toFixed(4)} km` : 'Distance: -'}
             </div>
           </div>
 
@@ -809,60 +863,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           </div>
         </div>
 
-        {/* Prediction History - Responsive Table */}
-        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm w-full overflow-hidden">
-          <h3 className="text-xs sm:text-sm font-bold text-white mb-2 sm:mb-3 flex items-center gap-2">
-            <span className="w-1 h-4 sm:w-1.5 sm:h-5 bg-blue-500 rounded-full" />
-            Prediction History
-            {history.length > 0 && (
-              <span className="text-xs sm:text-xs font-normal text-white/80 ml-1 sm:ml-2">
-                ({history.length} predictions)
-              </span>
-            )}
-          </h3>
-          <div className="max-h-[150px] sm:max-h-[200px] overflow-y-auto">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
-                <thead className="bg-[#0f1a2e] sticky top-0">
-                  <tr className="text-white/80 font-medium text-xs sm:text-xs border-b border-[#3b4f6e]">
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Time</th>
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left hidden xs:table-cell">Window</th>
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Prediction</th>
-                    <th className="px-1.5 sm:px-3 py-1.5 sm:py-2 text-left">Conf.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-1.5 sm:px-3 py-4 sm:py-6 text-center text-white/60 text-xs sm:text-sm">
-                        No predictions yet. Run trace to view history.
-                      </td>
-                    </tr>
-                  ) : (
-                    history.slice(-50).reverse().map((entry, i) => (
-                      <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-white whitespace-nowrap">{entry.time}</td>
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-white hidden xs:table-cell">{entry.window}</td>
-                        <td className="px-1.5 sm:px-3 py-1">
-                          <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-xs sm:text-xs font-medium whitespace-nowrap ${
-                            entry.prediction.toLowerCase() === 'normal' ? 'bg-emerald-500/20 text-emerald-400' :
-                            entry.prediction.toLowerCase().includes('cut') ? 'bg-red-500/20 text-red-400' :
-                            entry.prediction.toLowerCase().includes('bend') ? 'bg-amber-500/20 text-amber-400' :
-                            'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {entry.prediction}
-                          </span>
-                        </td>
-                        <td className="px-1.5 sm:px-3 py-1 font-mono text-xs sm:text-xs text-blue-400 font-medium">{entry.confidence}%</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
         {/* Info Panel */}
         {data && (
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 sm:p-4 text-xs sm:text-sm text-blue-400">
@@ -870,19 +870,20 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 flex-shrink-0 mt-0.5" />
               <div className="w-full overflow-hidden">
                 <p className="font-medium text-white text-xs sm:text-sm">Data Information</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 sm:gap-2 mt-1 text-xs sm:text-xs text-white">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 mt-1 text-xs sm:text-xs text-white">
                   <span className="truncate">Points: <strong className="text-white">{data.total_points}</strong></span>
-                  <span className="truncate">Windows: <strong className="text-white">{data.total_windows}</strong></span>
-                  <span className="truncate hidden xs:inline">Size: <strong className="text-white">{data.window_size}</strong></span>
-                  <span className="truncate col-span-2 sm:col-span-1">File: <strong className="text-white truncate">{data.filename}</strong></span>
+                  <span className="truncate">File: <strong className="text-white truncate">{data.filename}</strong></span>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Classification History ── */}
-        <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden">
+        {/* ── Classification History + Fault Distribution (2 kolom) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6 items-stretch">
+
+        {/* Kiri: Classification History */}
+        <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a3d60]">
             <div className="flex items-center gap-2">
               <span className="w-1 h-4 bg-blue-400 rounded-full" />
@@ -897,7 +898,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="overflow-x-auto max-h-72 overflow-y-auto">
+          <div className="flex-1 overflow-x-auto max-h-96 overflow-y-auto">
             <table className="w-full text-xs sm:text-sm">
               <thead className="bg-[#0f1e35] text-white/80 uppercase tracking-wide sticky top-0">
                 <tr>
@@ -920,7 +921,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   </tr>
                 ) : (
                   dbHistory.map((item, idx) => {
-                    const cls = item.classification.toLowerCase();
+                    const cls = classKey(item.classification);
 
                     const clsBadge =
                       cls === 'normal' ? 'bg-emerald-500/20 text-emerald-400' :
@@ -959,8 +960,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                           {item.created_at ? formatDate(item.created_at) : '-'}
                         </td>
                         <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${clsBadge}`}>
-                            {item.classification}
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${clsBadge}`}>
+                            {formatClassName(item.classification)}
                           </span>
                         </td>
                         <td className="px-3 py-2">
@@ -976,6 +977,28 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Kanan: Fault Distribution */}
+        <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden flex flex-col">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
+            <span className="w-1 h-4 bg-blue-400 rounded-full" />
+            <span className="text-white text-sm font-semibold">Fault Distribution</span>
+            <span className="text-white/80 text-xs">({faultDistribution.total} entries)</span>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4 min-h-[300px]">
+            {faultDistribution.total > 0 ? (
+              <div className="w-full h-full max-w-[420px] mx-auto">
+                <Pie data={pieData} options={pieOptions} />
+              </div>
+            ) : (
+              <div className="text-center text-white/60 text-sm py-8">
+                No classification data yet.
+              </div>
+            )}
+          </div>
+        </div>
+
         </div>
 
       </main>
