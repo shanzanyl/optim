@@ -611,6 +611,50 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     },
   }), [faultDistribution]);
 
+  // ── Trace Segments — seluruh window, digabung per kelas ──
+  // Window berurutan yang kelasnya sama digabung jadi satu segmen. Tidak ada
+  // window yang disaring atau disembunyikan: penggabungan hanya menyatukan label
+  // yang identik, jadi seluruh 313 window tetap terwakili. Jarak diambil dari
+  // kolom Distance file, memakai indeks start/end tiap window.
+  const segments = useMemo(() => {
+    if (!data || !data.predictions?.length) return [];
+
+    const distArr = data.distance ?? [];
+    const hasDistance =
+      distArr.length === data.backscatter.length &&
+      distArr.some(v => v !== null && v !== undefined);
+
+    const raw: { cls: string; startIdx: number; endIdx: number }[] = [];
+    data.predictions.forEach(p => {
+      const cls = formatClassName(p.prediction);
+      const last = raw[raw.length - 1];
+      if (last && last.cls === cls) {
+        last.endIdx = p.end;
+      } else {
+        raw.push({ cls, startIdx: p.start, endIdx: p.end });
+      }
+    });
+
+    const at = (i: number) => {
+      const idx = Math.min(Math.max(i, 0), distArr.length - 1);
+      const v = distArr[idx];
+      return v !== null && v !== undefined ? Number(v) : null;
+    };
+
+    // Window saling menimpa (stride < window_size), jadi batas segmen diambil
+    // dari titik awal tiap window agar rentangnya bersambung rapi tanpa
+    // tumpang tindih dan tetap menutup seluruh panjang fiber.
+    return raw.map((s, i) => {
+      const endIdx =
+        i + 1 < raw.length ? raw[i + 1].startIdx - 1 : data.total_points - 1;
+      return {
+        cls: s.cls,
+        start: hasDistance ? at(s.startIdx) : null,
+        end: hasDistance ? at(endIdx) : null,
+      };
+    });
+  }, [data]);
+
   // ── Render ──
   return (
     <div className="min-h-screen w-full bg-[#14213d] text-white font-sans">
@@ -875,6 +919,45 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   <span className="truncate">File: <strong className="text-white truncate">{data.filename}</strong></span>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Trace Segments ── */}
+        {segments.length > 0 && (
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm w-full overflow-hidden">
+            <h3 className="text-xs sm:text-sm font-bold text-white mb-2 sm:mb-3 flex items-center gap-2">
+              <span className="w-1 h-4 sm:w-1.5 sm:h-5 bg-blue-500 rounded-full" />
+              Trace Segments
+              <span className="text-xs font-normal text-white/80 ml-1">
+                ({segments.length} segments · {data?.total_windows || 0} windows)
+              </span>
+            </h3>
+            <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm">
+                <thead className="bg-[#0f1a2e] sticky top-0">
+                  <tr className="text-white/80 font-medium text-xs border-b border-[#3b4f6e]">
+                    <th className="px-2 sm:px-3 py-1.5 sm:py-2 text-left">Distance</th>
+                    <th className="px-2 sm:px-3 py-1.5 sm:py-2 text-left">Classification</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {segments.map((s, i) => (
+                    <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
+                      <td className="px-2 sm:px-3 py-1 font-mono text-xs text-white whitespace-nowrap">
+                        {s.start !== null && s.end !== null
+                          ? `${s.start.toFixed(3)} – ${s.end.toFixed(3)} km`
+                          : '-'}
+                      </td>
+                      <td className="px-2 sm:px-3 py-1">
+                        <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap border ${getPredictionColor(s.cls)}`}>
+                          {s.cls}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

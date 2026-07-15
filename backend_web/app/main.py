@@ -2348,37 +2348,11 @@ async def detect_manual(
         db.add(record)
         await db.commit()
         await db.refresh(record)
-        
-        status_str = pred.get("status", "Normal")
-        if status_str.lower() in ["warning", "critical"]:
-            try:
-                # Kirim None untuk field yang tidak ada — send_telegram_alert akan tampilkan '---'
-                loss_for_alert = [
-                    normalized.get('loss_1', l1),
-                    normalized.get('loss_2', l2),
-                    normalized.get('loss_3', l3),
-                    None  # loss_4 selalu None
-                ]
-                rl_for_alert = [
-                    normalized.get('return_1', r1),
-                    normalized.get('return_2', r2),
-                    normalized.get('return_3', r3),
-                    normalized.get('return_4', r4),
-                ]
-                await asyncio.to_thread(
-                    send_telegram_alert,
-                    classification=pred.get("prediction"),
-                    status=status_str,
-                    loss=loss_for_alert,
-                    rl=rl_for_alert,
-                    prx=prx,
-                    distances=[d1, d2, d3 if d3 else None, d4 if d4 else None],
-                    timestamp=record.timestamp
-                )
-                record.telegram_alert_sent = True
-                await db.commit()
-            except Exception as tg_err:
-                logger.error(f"[TELEGRAM] Error: {tg_err}")
+
+        # Notifikasi Telegram sengaja TIDAK dikirim dari halaman Detection.
+        # Detection dipakai teknisi yang sudah berada di lokasi gangguan, jadi
+        # notifikasi tidak ada gunanya di sini. Notifikasi hanya dikirim dari
+        # Dashboard, yang sifatnya monitoring (lihat send_telegram_dashboard).
 
     except Exception as e:
         logger.error(f"❌ DATABASE ERROR (manual): {e}")
