@@ -195,6 +195,53 @@ def send_telegram_alert(classification: str, status: str, loss: list, rl: list, 
         except Exception as e:
             logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
 
+def send_telegram_dashboard(classification: str, status: str, filename: str = None):
+    """
+    Notifikasi Telegram untuk hasil klasifikasi Dashboard (file SOR/trace).
+
+    Dipisahkan dari send_telegram_alert() karena sumber datanya berbeda:
+    Detection memakai tabel event OTDR (loss/return/Prx per KM), sedangkan
+    Dashboard memakai trace Loss (dB) sehingga parameter tersebut tidak ada.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.info("[TELEGRAM] Notifikasi dibatalkan karena token/chat_id belum dikonfigurasi di .env")
+        return
+
+    if str(status).lower() not in ["warning", "critical"]:
+        logger.info(f"[TELEGRAM] Status '{status}' Normal, alert tidak dikirim.")
+        return
+
+    local_time = datetime.utcnow() + timedelta(hours=7)
+    time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    message = (
+        f"🚨 <b>GANGGUAN TERDETEKSI!</b> 🚨\n\n"
+        f"<b>Sumber:</b> Dashboard (analisis trace SOR)\n"
+        f"<b>Jenis Gangguan:</b> {classification}\n"
+        f"<b>Tingkat Bahaya:</b> {str(status).capitalize()}\n"
+    )
+    if filename:
+        message += f"<b>File:</b> {filename}\n"
+    message += f"\n<b>Waktu:</b> {time_str}"
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    chat_ids = [cid.strip() for cid in str(TELEGRAM_CHAT_ID).split(",") if cid.strip()]
+
+    for chat_id in chat_ids:
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                logger.info(f"[TELEGRAM] Dashboard alert '{status}' berhasil dikirim ke ID: {chat_id}.")
+            else:
+                logger.error(f"[TELEGRAM] Gagal mengirim dashboard alert ke ID {chat_id}: {response.text}")
+        except Exception as e:
+            logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
+
 # ═══════════════════════════════════════════════════════════════════
 # FUNGSI MAPPING KOLOM
 # ═══════════════════════════════════════════════════════════════════
@@ -2917,8 +2964,7 @@ async def process_sor_file(
     logger.info(f"[SOR] ── STEP 6: TELEGRAM — status={final_status} ──")
     try:
         if final_status != "Normal":
-            from app.schemas import DashboardResultResponse
-            send_telegram_dashboard(final_class, final_status)
+            send_telegram_dashboard(final_class, final_status, file.filename)
     except Exception as e:
         logger.error(f"[SOR] ❌ TELEGRAM FAILED: {e}", exc_info=True)
 
