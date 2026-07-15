@@ -122,12 +122,12 @@ const Overview = ({ onLogin }: OverviewProps) => {
     <h2 className="text-lg md:text-3xl font-light leading-tight mb-2 md:mb-4 text-white text-center md:text-left">
       Sistem Monitoring & Klasifikasi
       <br />
-      Gangguan <span className="font-semibold text-blue-400">Serat Optik</span>
+      Gangguan <span className="font-semibold text-blue-400">Fiber Optic</span>
     </h2>
     
     <p className="text-slate-100 text-sm md:text-base leading-relaxed max-w-md text-center md:text-left mx-auto md:mx-0">
       Platform berbasis Machine Learning untuk mengklasifikasikan 
-      gangguan pada jaringan fiber optik secara akurat.
+      gangguan pada jaringan fiber optic secara akurat.
     </p>
   </div>
 </div>
