@@ -1,8 +1,8 @@
 # backend_web/app/ml.py
-# Model LightGBM untuk Detection - Update path ke models/otdr/
+# Model LightGBM untuk Detection — artefak model baru (.pkl, MinMaxScaler, 6 kelas)
 
 import joblib
-import json
+import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -12,93 +12,119 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
-# PATH - Model LightGBM untuk OTDR (folder models/otdr/)
+# PATH — Model LightGBM untuk OTDR (folder models/otdr/)
 # ══════════════════════════════════════════════════════════════════
+# Hanya artefak model final (.pkl) yang dimuat. Nama berkas lama sengaja
+# TIDAK dijadikan cadangan: bila berkas baru tidak ditemukan, sistem harus
+# gagal secara terang-terangan. Memuat model lama diam-diam jauh lebih
+# berbahaya, karena artefak lama saling cocok satu sama lain sehingga
+# validasi di bawah tidak akan berbunyi dan salah model tidak akan ketahuan.
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Cari model di folder models/otdr/
-OTDR_MODEL_PATHS = [
-    BASE_DIR / "models" / "otdr" / "lgbm_model.joblib",
-    Path.cwd() / "models" / "otdr" / "lgbm_model.joblib",
-]
 
-OTDR_ENCODER_PATHS = [
-    BASE_DIR / "models" / "otdr" / "label_encoder.joblib",
-    Path.cwd() / "models" / "otdr" / "label_encoder.joblib",
-]
+def _candidates(name):
+    """Susun daftar lokasi yang mungkin untuk satu berkas artefak."""
+    return [
+        BASE_DIR / "models" / "otdr" / name,
+        Path.cwd() / "models" / "otdr" / name,
+    ]
 
-OTDR_FEATURE_PATHS = [
-    BASE_DIR / "models" / "otdr" / "feature_order.json",
-    Path.cwd() / "models" / "otdr" / "feature_order.json",
-]
 
-OTDR_SCALER_PATHS = [
-    BASE_DIR / "models" / "otdr" / "robust_scaler.joblib",
-    Path.cwd() / "models" / "otdr" / "robust_scaler.joblib",
-]
+OTDR_MODEL_PATHS   = _candidates("lightgbm_model.pkl")
+OTDR_ENCODER_PATHS = _candidates("label_encoder.pkl")
+OTDR_FEATURE_PATHS = _candidates("feature_order.pkl")
+OTDR_SCALER_PATHS  = _candidates("scaler.pkl")
+
+
+def _load_any(path: Path):
+    """Muat artefak .pkl, baik yang disimpan via joblib maupun pickle."""
+    try:
+        return joblib.load(path)
+    except Exception:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+
+
+def _load_first(paths, label):
+    for path in paths:
+        if path.exists():
+            try:
+                obj = _load_any(path)
+                logger.info(f"✅ {label} loaded: {path.name}")
+                return obj
+            except Exception as e:
+                logger.warning(f"Failed to load {path}: {e}")
+    logger.error(f"❌ {label} NOT loaded — tidak ada berkas yang cocok")
+    return None
+
 
 # ══════════════════════════════════════════════════════════════════
 # LOAD MODEL
 # ══════════════════════════════════════════════════════════════════
 
-lgbm_model = None
-label_encoder = None
-robust_scaler = None
-feature_columns = None
+lgbm_model      = _load_first(OTDR_MODEL_PATHS,   "LightGBM model")
+label_encoder   = _load_first(OTDR_ENCODER_PATHS, "Label encoder")
+feature_columns = _load_first(OTDR_FEATURE_PATHS, "Feature order")
+scaler          = _load_first(OTDR_SCALER_PATHS,  "Scaler")
 
-# Load model
-for path in OTDR_MODEL_PATHS:
-    if path.exists():
-        try:
-            lgbm_model = joblib.load(path)
-            logger.info(f"✅ LightGBM model loaded: {path}")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to load {path}: {e}")
+if feature_columns is not None:
+    feature_columns = [str(col).strip() for col in feature_columns]
+else:
+    # Tidak ada daftar fitur cadangan. Menebak urutan fitur berarti menghasilkan
+    # prediksi yang salah tanpa ketahuan, sehingga lebih baik gagal di sini.
+    logger.error("❌ feature_order.pkl tidak ditemukan — prediksi model dinonaktifkan")
 
-# Load encoder
-for path in OTDR_ENCODER_PATHS:
-    if path.exists():
-        try:
-            label_encoder = joblib.load(path)
-            logger.info(f"✅ Label encoder loaded: {path}")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to load {path}: {e}")
 
-# Load feature order
-for path in OTDR_FEATURE_PATHS:
-    if path.exists():
-        try:
-            with open(path, 'r') as f:
-                feature_columns = json.load(f)
-                feature_columns = [col.strip() for col in feature_columns]
-            logger.info(f"✅ Feature order loaded: {path} ({len(feature_columns)} features)")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to load {path}: {e}")
+# ══════════════════════════════════════════════════════════════════
+# VALIDASI KECOCOKAN ARTEFAK
+# ══════════════════════════════════════════════════════════════════
+# Model, scaler, dan feature_order harus berasal dari proses pelatihan yang
+# sama. Bila tidak cocok, prediksi tetap berjalan tetapi hasilnya salah secara
+# diam-diam — jauh lebih berbahaya daripada gagal terang-terangan. Pemeriksaan
+# ini mencetak peringatan saat startup agar ketidakcocokan langsung terlihat.
 
-# Load robust scaler
-for path in OTDR_SCALER_PATHS:
-    if path.exists():
-        try:
-            robust_scaler = joblib.load(path)
-            logger.info(f"✅ Robust scaler loaded: {path}")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to load {path}: {e}")
+def _validate_artifacts():
+    if feature_columns is None:
+        logger.error('[ML] ⚠️ feature_order tidak termuat — lewati validasi')
+        return
+    n_feat = len(feature_columns)
+    logger.info("─" * 55)
+    logger.info(f"[ML] Feature order : {n_feat} fitur")
 
-# If model not found, create dummy feature columns
-if feature_columns is None:
-    feature_columns = [
-        'Distance 1', 'Distance 2', 'Distance 3', 'Distance 4',
-        'Loss 1', 'Loss 2', 'Loss 3',
-        'Total-L 1', 'Total-L 2', 'Total-L 3', 'Total-L 4',
-        'Avg-L 1', 'Avg-L 2', 'Avg-L 3', 'Avg-L 4',
-        'Avg-Total', 'Return 1', 'Return 2', 'Return 3', 'Return 4'
-    ]
-    logger.warning("Using default feature columns")
+    if lgbm_model is not None and hasattr(lgbm_model, "n_features_in_"):
+        if lgbm_model.n_features_in_ != n_feat:
+            logger.error(
+                f"[ML] ⚠️ TIDAK COCOK: model mengharapkan {lgbm_model.n_features_in_} "
+                f"fitur, feature_order berisi {n_feat}"
+            )
+        else:
+            logger.info(f"[ML] Model         : {lgbm_model.n_features_in_} fitur ✅")
+
+    if scaler is not None and hasattr(scaler, "n_features_in_"):
+        if scaler.n_features_in_ != n_feat:
+            logger.error(
+                f"[ML] ⚠️ TIDAK COCOK: scaler mengharapkan {scaler.n_features_in_} "
+                f"fitur, feature_order berisi {n_feat}"
+            )
+        else:
+            logger.info(f"[ML] Scaler        : {type(scaler).__name__}, "
+                        f"{scaler.n_features_in_} fitur ✅")
+
+    if label_encoder is not None and hasattr(label_encoder, "classes_"):
+        classes = list(label_encoder.classes_)
+        logger.info(f"[ML] Kelas         : {len(classes)} → {classes}")
+        if lgbm_model is not None and hasattr(lgbm_model, "n_classes_"):
+            if lgbm_model.n_classes_ != len(classes):
+                logger.error(
+                    f"[ML] ⚠️ TIDAK COCOK: model punya {lgbm_model.n_classes_} kelas, "
+                    f"encoder punya {len(classes)}"
+                )
+        unknown = [c for c in classes if c not in STATUS_MAP]
+        if unknown:
+            logger.warning(f"[ML] Kelas tanpa STATUS_MAP (default Warning): {unknown}")
+    logger.info("─" * 55)
+
 
 # ══════════════════════════════════════════════════════════════════
 # STATUS MAP
@@ -110,113 +136,101 @@ STATUS_MAP = {
     "Bad Splice": "Warning",
     "Air Gap": "Warning",
     "Dirty Connector": "Warning",
-    "Nearly Cut": "Critical",
     "Fiber Cut": "Critical",
 }
+
 
 def get_status(label: str) -> str:
     return STATUS_MAP.get(label, "Warning")
 
+
+_validate_artifacts()
+
+
 # ══════════════════════════════════════════════════════════════════
-# PREDICT FUNCTION (SAMA SEPERTI SEBELUMNYA)
+# RULE-BASED FALLBACK
+# ══════════════════════════════════════════════════════════════════
+
+def _rule_based(otdr_values: dict, confidence: float) -> dict:
+    """Cadangan sederhana bila model tidak tersedia atau prediksi gagal."""
+    losses = [
+        otdr_values.get('Loss 1', 0) or 0,
+        otdr_values.get('Loss 2', 0) or 0,
+        otdr_values.get('Loss 3', 0) or 0,
+    ]
+    max_loss = max(losses) if losses else 0
+
+    if max_loss > 3.0:
+        prediction = "Fiber Cut"
+    elif max_loss > 1.2:
+        prediction = "Bending"
+    elif max_loss > 0.5:
+        prediction = "Bad Splice"
+    else:
+        prediction = "Normal"
+
+    return {
+        "prediction": prediction,
+        "confidence": confidence,
+        "status": get_status(prediction),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# PREDICT FUNCTION
 # ══════════════════════════════════════════════════════════════════
 
 def predict_from_otdr(otdr_values: dict) -> dict:
-    """Prediksi menggunakan LightGBM model"""
-    
-    if lgbm_model is None:
-        logger.warning("⚠️ Model not available, using rule-based prediction")
-        
-        # Rule-based prediction
-        losses = [otdr_values.get('Loss 1', 0), otdr_values.get('Loss 2', 0), 
-                  otdr_values.get('Loss 3', 0)]
-        max_loss = max(losses) if losses else 0
-        
-        if max_loss > 3.0:
-            prediction = "Nearly Cut"
-            confidence = 85.0
-        elif max_loss > 1.2:
-            prediction = "Bending"
-            confidence = 75.0
-        elif max_loss > 0.5:
-            prediction = "Bad Splice"
-            confidence = 65.0
-        else:
-            prediction = "Normal"
-            confidence = 90.0
-        
-        return {
-            "prediction": prediction,
-            "confidence": confidence,
-            "status": get_status(prediction),
-        }
-    
+    """Prediksi jenis gangguan dari parameter tabel event OTDR."""
+
+    if lgbm_model is None or feature_columns is None:
+        logger.warning("⚠️ Model/feature order not available, using rule-based prediction")
+        return _rule_based(otdr_values, 85.0)
+
     try:
-        # Prepare features
         row = pd.DataFrame([otdr_values])
-        
-        # Ensure all columns exist.
+
         # Kolom yang tidak ada diisi NaN — bukan 0.0.
-        # NaN adalah representasi yang benar untuk Fiber Cut (identik dengan training).
+        # NaN adalah representasi yang benar untuk Fiber Cut (identik dengan
+        # training), dan MinMaxScaler meneruskan NaN apa adanya.
         for col in feature_columns:
             if col not in row.columns:
                 row[col] = np.nan
-        
-        # Select and order features.
-        # TIDAK menggunakan fillna() — NaN dipertahankan agar identik dengan
-        # representasi Fiber Cut saat training. LightGBM mendukung NaN secara native.
+
+        # TIDAK menggunakan fillna(). NaN dipertahankan sampai ke LightGBM,
+        # yang mendukung NaN secara native.
         X = row[feature_columns].astype(np.float64)
-        
-        # Scale features
-        if robust_scaler is not None:
-            X = robust_scaler.transform(X)
-        
-        # Predict
-        pred_encoded = lgbm_model.predict(X)[0]
-        pred_int = int(round(pred_encoded)) if isinstance(pred_encoded, float) else int(pred_encoded)
-        
-        # Decode if encoder available
-        if label_encoder is not None:
-            label = label_encoder.inverse_transform([pred_int])[0]
-        else:
-            labels = ["Normal", "Bending", "Bad Splice", "Air Gap", "Dirty Connector", "Nearly Cut", "Fiber Cut"]
-            label = labels[pred_int % len(labels)]
-        
-        # Get confidence
-        confidence = 0.0
-        if hasattr(lgbm_model, 'predict_proba'):
+
+        if scaler is not None:
+            X = scaler.transform(X)
+
+        # Ambil label dan confidence dari sumber yang sama (predict_proba)
+        # agar keduanya tidak mungkin berbeda.
+        if hasattr(lgbm_model, "predict_proba"):
             proba = lgbm_model.predict_proba(X)[0]
-            confidence = float(max(proba)) * 100
-        
+            pred_int = int(np.argmax(proba))
+            confidence = float(proba[pred_int]) * 100
+        else:
+            pred_int = int(round(float(lgbm_model.predict(X)[0])))
+            confidence = 0.0
+
+        if label_encoder is not None:
+            label = str(label_encoder.inverse_transform([pred_int])[0])
+        else:
+            labels = ["Air Gap", "Bad Splice", "Bending",
+                      "Dirty Connector", "Fiber Cut", "Normal"]
+            label = labels[pred_int % len(labels)]
+
         logger.info(f"🤖 LightGBM → {label} (confidence: {confidence:.1f}%)")
-        
+
         return {
-            "prediction": str(label),
+            "prediction": label,
             "confidence": round(confidence, 2),
-            "status": get_status(str(label)),
+            "status": get_status(label),
         }
-        
+
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         import traceback
         traceback.print_exc()
-        
-        # Return rule-based fallback
-        losses = [otdr_values.get('Loss 1', 0), otdr_values.get('Loss 2', 0), 
-                  otdr_values.get('Loss 3', 0)]
-        max_loss = max(losses) if losses else 0
-        
-        if max_loss > 3.0:
-            prediction = "Nearly Cut"
-        elif max_loss > 1.2:
-            prediction = "Bending"
-        elif max_loss > 0.5:
-            prediction = "Bad Splice"
-        else:
-            prediction = "Normal"
-        
-        return {
-            "prediction": prediction,
-            "confidence": 70.0,
-            "status": get_status(prediction),
-        }
+        return _rule_based(otdr_values, 70.0)
