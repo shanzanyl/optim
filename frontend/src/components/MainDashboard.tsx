@@ -541,7 +541,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const CLASS_COLORS: Record<string, string> = {
     normal: '#34d399',
     'fiber cut': '#f87171',
-    'nearly cut': '#fb7185',
     bending: '#fbbf24',
     'bad splice': '#fb923c',
     'dirty connector': '#22d3ee',
@@ -1008,7 +1007,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
                     const clsBadge =
                       cls === 'normal' ? 'bg-emerald-500/20 text-emerald-400' :
-                      cls.includes('cut') || cls.includes('nearly') ? 'bg-red-500/20 text-red-400' :
+                      cls.includes('cut') ? 'bg-red-500/20 text-red-400' :
                       cls.includes('bend') ? 'bg-amber-500/20 text-amber-400' :
                       cls.includes('air') || cls.includes('gap') ? 'bg-purple-500/20 text-purple-400' :
                       cls.includes('splice') ? 'bg-orange-500/20 text-orange-400' :

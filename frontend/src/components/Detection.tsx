@@ -1,7 +1,6 @@
 // frontend/src/components/Detection.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, AlertTriangle, Info, Edit3, CheckCircle, Send } from 'lucide-react';
-import { useSlide } from '../Context/SlideContext';
 // import { triggerSlideAlert } from '../services/api';
 
 interface DetectionProps {
@@ -359,48 +358,6 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     }
   };
 
-  const { currentIndex, setCurrentIndex, totalData, autoPlay } = useSlide();
-  const [prevTotalData, setPrevTotalData] = useState(0);
-
-  // useEffect(() => {
-  //   if (isLoadingHistory || allHistory.length === 0 || currentIndex < 0 || currentIndex >= allHistory.length) return;
-  //   const currentRecord = allHistory[currentIndex];
-  //   if (!currentRecord) return;
-
-  //   const status = currentRecord.status || '';
-    
-  //   if (status.toLowerCase() === 'warning' || status.toLowerCase() === 'critical') {
-  //     if (sentAlerts.has(currentRecord.id)) return;
-      
-  //     triggerSlideAlert(currentRecord.id)
-  //       .then((res: { status: string }) => {
-  //         if (res.status === 'sent') {
-  //           setSentAlerts(prev => new Set(prev).add(currentRecord.id));
-  //         }
-  //       })
-  //       .catch((err: any) => console.error('Error triggering slide alert:', err));
-  //   }
-  // }, [currentIndex, allHistory, isLoadingHistory, sentAlerts]);
-
-  // useEffect(() => {
-  //   if (!autoPlay || allHistory.length === 0) return;
-
-  //   const interval = setInterval(() => {
-  //     setCurrentIndex((prev: number) => {
-  //       const newTotal = allHistory.length;
-  //       if (newTotal > prevTotalData) {
-  //         setPrevTotalData(newTotal);
-  //         return newTotal - 1;
-  //       }
-  //       if (prev === newTotal - 1) {
-  //         return 0;
-  //       }
-  //       return prev + 1;
-  //     });
-  //   }, 30000);
-
-  //   return () => clearInterval(interval);
-  // }, [autoPlay, allHistory.length, prevTotalData, setCurrentIndex]);
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
@@ -469,7 +426,6 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
   };
 
   const displayedHistory = [...allHistory].reverse();
-  const progressPercent = totalData > 0 ? ((currentIndex + 1) / totalData) * 100 : 0;
 
   return (
     <div className="p-6 sm:p-8 bg-[#1e2f50] rounded-2xl border border-[#3b4f6e]"> 
@@ -982,7 +938,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     }
                     // Ambil Total-L yang paling relevan berdasarkan klasifikasi:
                     // - Fiber Cut saja: ambil total_l terakhir sebelum titik putus (KM3→KM2→KM1)
-                    // - Nearly Cut dan gangguan lain: ambil total_l_4 (kumulatif penuh)
+                    // - Gangguan lain: ambil total_l_4 (kumulatif penuh)
                     const cls = (row.klasifikasi || '').toLowerCase();
                     const isFiberCutRow = cls === 'fiber cut';
                     const totalLValue = isFiberCutRow
@@ -1014,7 +970,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                             row.klasifikasi === 'Fiber Cut' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
                             'bg-amber-500/20 text-amber-400 border-amber-500/30'
                           }`}>
-                            {row.klasifikasi === 'hampir putus' ? 'Nearly Cut' : (row.klasifikasi || 'Unknown')}
+                            {row.klasifikasi || 'Unknown'}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-center"><StatusBadge status={row.status} /></td>

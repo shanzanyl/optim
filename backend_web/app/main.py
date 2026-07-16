@@ -68,140 +68,14 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-last_dashboard_slide_index = 0
-last_dashboard_slide_data = None
 
-# ── Shared slide state: satu posisi untuk semua user/device ──
-shared_slide_index = 0
-slide_alert_sent_ids: set = set()  # Track ID yang sudah dikirim alert, cegah duplikat
-
-def send_telegram_alert(classification: str, status: str, loss: list, rl: list, prx, distances: list = None, timestamp = None):
-    """Mengirim pesan notifikasi gangguan ke Telegram Teknisi dengan format detail baru"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.info("[TELEGRAM] Notifikasi dibatalkan karena token/chat_id belum dikonfigurasi di .env")
-        return
-
-    status_lower = status.lower()
-    if status_lower not in ["warning", "critical"]:
-        logger.info(f"[TELEGRAM] Status '{status}' Normal, alert tidak dikirim.")
-        return
-
-    # Format values safely — None tetap None untuk pengecekan '---'
-    prx_val = round(float(prx), 2) if prx is not None else 0.0
-
-    # Konversi loss dan return: None → None (bukan 0.0), agar bisa ditampilkan '---'
-    def to_val(v):
-        if v is None: return None
-        try:
-            f = float(v)
-            return f if f == f else None  # filter NaN
-        except: return None
-
-    raw_loss = [to_val(l) for l in loss]
-    raw_rl   = [to_val(r) for r in rl]
-
-    while len(raw_loss) < 4: raw_loss.append(None)
-    while len(raw_rl)   < 4: raw_rl.append(None)
-
-    # Format untuk tampilan: None atau 0.0 → '---'
-    def fmt_loss(v):
-        return '---' if v is None or v == 0.0 else f'{v:.2f} dB'
-    def fmt_return(v):
-        return '---' if v is None or v == 0.0 else f'{v:.2f} dB'
-
-    if not distances:
-        distances = [1.004, 2.006, 3.010, 4.014]
-
-    safe_dist = []
-    for i in range(4):
-        if i < len(distances) and distances[i] is not None:
-            try: safe_dist.append(float(distances[i]))
-            except: safe_dist.append(float(i + 1))
-        else:
-            safe_dist.append(float(i + 1))
-
-    classification_lower = classification.lower() if classification else ""
-    is_fiber_cut = "cut" in classification_lower or "putus" in classification_lower
-
-    if is_fiber_cut:
-        # Lokasi putus = KM pertama yang loss-nya None atau 0
-        cut_idx = next((i for i, v in enumerate(raw_loss) if v is None or v == 0.0), 3)
-        km_loc    = cut_idx + 1
-        jarak_loc = round(safe_dist[cut_idx], 3)
-        redaman_loc = None  # tidak terdefinisi di titik putus
-    else:
-        # Lokasi gangguan = KM dengan loss REAL terbesar
-        # Skip None dan 0 — hanya pertimbangkan nilai yang benar-benar terukur
-        valid_losses = [
-            (i, v) for i, v in enumerate(raw_loss)
-            if v is not None and v > 0
-        ]
-        if valid_losses:
-            max_loss_idx, max_loss_val = max(valid_losses, key=lambda x: x[1])
-        else:
-            max_loss_idx, max_loss_val = 0, 0.0
-        km_loc      = max_loss_idx + 1
-        jarak_loc   = round(safe_dist[max_loss_idx], 3)
-        redaman_loc = round(max_loss_val, 2)
-    
-    if timestamp:
-        if isinstance(timestamp, str):
-            try:
-                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                local_time = dt + timedelta(hours=7)
-                time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                time_str = timestamp.replace("T", " ")[:19]
-        else:
-            local_time = timestamp + timedelta(hours=7)
-            time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        local_time = datetime.utcnow() + timedelta(hours=7)
-        time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-    status_cap = str(status).capitalize()
-
-    message = (
-        f"🚨 <b>GANGGUAN TERDETEKSI!</b> 🚨\n\n"
-        f"<b>Jenis Gangguan:</b> {classification}\n"
-        f"<b>Tingkat Bahaya:</b> {status_cap}\n\n"
-        f"<b>Parameter Pengukuran:</b>\n"
-        f"• <b>Daya (Prx):</b> {prx_val} dBm\n\n"
-        f"<b>Detail Redaman &amp; Pantulan:</b>\n"
-        f"• <b>KM 1:</b> Loss {fmt_loss(raw_loss[0])} | Return {fmt_return(raw_rl[0])}\n"
-        f"• <b>KM 2:</b> Loss {fmt_loss(raw_loss[1])} | Return {fmt_return(raw_rl[1])}\n"
-        f"• <b>KM 3:</b> Loss {fmt_loss(raw_loss[2])} | Return {fmt_return(raw_rl[2])}\n"
-        f"• <b>KM 4:</b> Loss {fmt_loss(raw_loss[3])} | Return {fmt_return(raw_rl[3])}\n\n"
-        f"<b>Lokasi Gangguan:</b> KM {km_loc} (Jarak: {jarak_loc:.3f} km, Redaman: {'---' if redaman_loc is None else f'{redaman_loc:.2f} dB'})\n"
-        f"<b>Waktu:</b> {time_str}"
-    )
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    chat_ids = [cid.strip() for cid in str(TELEGRAM_CHAT_ID).split(",") if cid.strip()]
-    
-    for chat_id in chat_ids:
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                logger.info(f"[TELEGRAM] Alert '{status}' berhasil dikirim ke ID: {chat_id}.")
-            else:
-                logger.error(f"[TELEGRAM] Gagal mengirim alert ke ID {chat_id}: {response.text}")
-        except Exception as e:
-            logger.error(f"[TELEGRAM] Error koneksi ke ID {chat_id}: {e}")
 
 def send_telegram_dashboard(classification: str, status: str, filename: str = None):
     """
     Notifikasi Telegram untuk hasil klasifikasi Dashboard (file SOR/trace).
 
-    Dipisahkan dari send_telegram_alert() karena sumber datanya berbeda:
-    Detection memakai tabel event OTDR (loss/return/Prx per KM), sedangkan
-    Dashboard memakai trace Loss (dB) sehingga parameter tersebut tidak ada.
+    Hanya Dashboard yang mengirim notifikasi. Halaman Detection tidak, karena
+    dipakai teknisi yang sudah berada di lokasi gangguan.
     """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.info("[TELEGRAM] Notifikasi dibatalkan karena token/chat_id belum dikonfigurasi di .env")
@@ -1930,110 +1804,8 @@ async def get_progress(
         "is_complete": total_processed >= 2572,
     }
 
-@app.get("/api/slide/{index}")
-async def get_slide_data(
-    index: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(
-        select(OtdrResult)
-        .where(
-            (OtdrResult.source == "sheets") |
-            (OtdrResult.user_id == current_user.id)
-        )
-        .order_by(OtdrResult.timestamp.asc())
-        .offset(index)
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
-    if not record:
-        return await get_slide_data(0, db, current_user)
-    
-    total_result = await db.execute(
-        select(func.count(OtdrResult.id)).where((OtdrResult.user_id == current_user.id) | (OtdrResult.source == "sheets"))
-    )
-    total = total_result.scalar() or 0
-    
-    return {
-        "id": record.id,
-        "current_index": index + 1,
-        "total_data": total,
-        "loss_1": record.loss_1, "loss_2": record.loss_2,
-        "loss_3": record.loss_3, "loss_4": record.loss_4,
-        "return_1": record.return_1, "return_2": record.return_2,
-        "return_3": record.return_3, "return_4": record.return_4,
-        "prx": record.prx,
-        "klasifikasi": record.klasifikasi,
-        "status": record.status,
-        "timestamp": record.timestamp.isoformat() if record.timestamp else None,
-    }
 
-@app.post("/api/alert")
-async def trigger_alert(payload: dict):
-    try:
-        classification = payload.get('classification', 'unknown')
-        status = payload.get('status', 'warning')
-        loss = payload.get('loss', [0.2, 0.2, 0.2, 0.2])
-        rl = payload.get('return_loss', [-45.0, -45.0, -45.0, -45.0])
-        prx = payload.get('prx', 'N/A')
-        
-        await asyncio.to_thread(
-            send_telegram_alert,
-            classification=classification,
-            status=status,
-            loss=loss,
-            rl=rl,
-            prx=prx
-        )
-        return {"status": "sent"}
-    except Exception as e:
-        logger.error(f"[ALERT] Gagal mengirim alert manual: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/slide-alert")
-async def slide_alert(
-    payload: dict,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        record_id = payload.get("id")
-        if not record_id:
-            raise HTTPException(status_code=400, detail="Missing record id")
-        
-        result = await db.execute(select(OtdrResult).where(OtdrResult.id == record_id))
-        record = result.scalar_one_or_none()
-        if not record:
-            raise HTTPException(status_code=404, detail="Record not found")
-        
-        status_str = record.status or ""
-        if status_str.lower() not in ["warning", "critical"]:
-            return {"status": "skipped", "reason": f"status is {status_str}"}
-        
-        loss_list = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
-        rl_list = [record.return_1, record.return_2, record.return_3, record.return_4]
-        
-        logger.info(f"[TELEGRAM] Mengirim slide alert untuk: {record.klasifikasi} ({status_str}) ID={record_id}")
-        await asyncio.to_thread(
-            send_telegram_alert,
-            classification=record.klasifikasi,
-            status=status_str,
-            loss=loss_list,
-            rl=rl_list,
-            prx=record.prx,
-            distances=[record.distance_1, record.distance_2, record.distance_3, record.distance_4],
-            timestamp=record.timestamp
-        )
-        
-        record.telegram_alert_sent = True
-        await db.commit()
-        return {"status": "sent", "id": record_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[SLIDE-ALERT] Gagal mengirim slide alert: {e}")
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sync")
 async def sync_from_sheets(
@@ -2383,91 +2155,12 @@ async def detect_manual(
 # TELEGRAM DASHBOARD SLIDE UPDATE
 # ============================================================
 
-@app.post("/api/telegram-update-dashboard-slide")
-async def update_dashboard_slide_data(payload: dict):
-    """Update data slide dashboard terakhir"""
-    global last_dashboard_slide_index, last_dashboard_slide_data
-    
-    try:
-        record_id = payload.get('id')
-        index = payload.get('index', 0)
-        
-        if not record_id:
-            return {"error": "Missing record id"}
-        
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(OtdrResult).where(OtdrResult.id == record_id)
-            )
-            record = result.scalar_one_or_none()
-            
-            if not record:
-                return {"error": "Record not found"}
-            
-            last_dashboard_slide_index = index
-            last_dashboard_slide_data = record
-            
-            logger.info(f"[TELEGRAM] Dashboard slide updated: index={index}, id={record_id}, klasifikasi={record.klasifikasi}")
-            return {"status": "updated", "index": index, "id": record_id}
-            
-    except Exception as e:
-        logger.error(f"[TELEGRAM] Error update dashboard slide: {e}")
-        return {"error": str(e)}
 
 # ============================================================
 # SHARED SLIDE STATE — satu posisi untuk semua user/device
 # ============================================================
 
-@app.get("/api/shared-slide")
-async def get_shared_slide():
-    """Kembalikan posisi slide yang berlaku untuk semua user."""
-    global shared_slide_index
-    return {"current_index": shared_slide_index}
 
-@app.post("/api/shared-slide")
-async def set_shared_slide(
-    payload: dict,
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Update posisi slide bersama.
-    Hanya dikirim oleh satu instance (master auto-play).
-    Semua client lain hanya membaca lewat GET.
-    """
-    global shared_slide_index, slide_alert_sent_ids
-    try:
-        index = int(payload.get("index", 0))
-        record_id = payload.get("record_id")
-        shared_slide_index = index
-
-        # Kirim alert Telegram hanya jika belum pernah dikirim untuk record ini
-        if record_id and record_id not in slide_alert_sent_ids:
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(select(OtdrResult).where(OtdrResult.id == record_id))
-                record = result.scalar_one_or_none()
-                if record:
-                    status_str = (record.status or "").lower()
-                    if status_str in ("warning", "critical"):
-                        slide_alert_sent_ids.add(record_id)
-                        loss_list = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
-                        rl_list   = [record.return_1, record.return_2, record.return_3, record.return_4]
-                        await asyncio.to_thread(
-                            send_telegram_alert,
-                            classification=record.klasifikasi,
-                            status=record.status,
-                            loss=loss_list,
-                            rl=rl_list,
-                            prx=record.prx,
-                            distances=[record.distance_1, record.distance_2, record.distance_3, record.distance_4],
-                            timestamp=record.timestamp,
-                        )
-                        logger.info(f"[SHARED-SLIDE] Alert sent for record {record_id} ({record.status})")
-
-        logger.info(f"[SHARED-SLIDE] index={index}, record_id={record_id}, by user={current_user.email}")
-        return {"status": "ok", "current_index": shared_slide_index}
-    except Exception as e:
-        logger.error(f"[SHARED-SLIDE] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================
 # TELEGRAM BOT COMMAND HANDLER (CEK STATUS VIA TELEGRAM)
@@ -2488,21 +2181,13 @@ async def handle_telegram_command(update: dict) -> str | None:
             
         command = text.lower().split()[0] if text else ''
         
-        # /status - cek status terakhir
-        if command == '/status':
-            return await get_telegram_status()
-        
         # /rekap - rekap hari ini
-        elif command == '/rekap':
+        if command == '/rekap':
             return await get_telegram_rekap()
         
         # /help atau /start - bantuan
         elif command in ['/help', '/start']:
             return get_telegram_help()
-        
-        # Keyword natural: "status", "cek", "kondisi", "latest"
-        elif any(kw in text.lower() for kw in ['status', 'cek', 'kondisi', 'bagaimana', 'latest', 'terakhir']):
-            return await get_telegram_status()
         
         return None
         
@@ -2510,85 +2195,6 @@ async def handle_telegram_command(update: dict) -> str | None:
         logger.error(f"[TELEGRAM] Error handling command: {e}")
         return None
 
-async def get_telegram_status() -> str:
-    """Ambil status dari DASHBOARD slide"""
-    global last_dashboard_slide_index, last_dashboard_slide_data
-    
-    try:
-        # 🔥 CEK APAKAH ADA DATA SLIDE
-        if last_dashboard_slide_data is None:
-            return "📡 Belum ada data slide. Buka Dashboard dulu ya!"
-        
-        # 🔥 LANGSUNG PAKAI DATA DARI SLIDE
-        record = last_dashboard_slide_data
-        slide_info = f" (Dashboard Slide #{last_dashboard_slide_index + 1})"
-        source_label = {
-            'ocr': '📷 OCR',
-            'manual': '✏️ Manual',
-            'sheets': '📊 Sheets'
-        }.get(record.source, '📡 Unknown')
-        
-        # Ambil rekap hari ini (tetap dari database)
-        async with AsyncSessionLocal() as db:
-            result_today = await db.execute(
-                select(OtdrResult)
-                .where(OtdrResult.timestamp >= datetime.utcnow() - timedelta(days=1))
-            )
-            today_records = result_today.scalars().all()
-            
-            today_total = len(today_records)
-            today_faults = sum(1 for r in today_records if r.klasifikasi != "Normal")
-            
-            # Status emoji
-            status_emoji = "🟢" if record.status == "Normal" else "🟡" if record.status == "Warning" else "🔴"
-            
-            # Loss values
-            loss_values = [record.loss_1, record.loss_2, record.loss_3, record.loss_4]
-            loss_str = " | ".join([f"{v:.2f} dB" if v else "---" for v in loss_values])
-            
-            # Return loss
-            return_values = [record.return_1, record.return_2, record.return_3, record.return_4]
-            return_str = " | ".join([f"{v:.1f} dB" if v else "---" for v in return_values])
-            
-            # Waktu
-            local_time = record.timestamp + timedelta(hours=7) if record.timestamp else datetime.utcnow() + timedelta(hours=7)
-            time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Status hari ini
-            today_status = "🟢 Normal" if today_faults == 0 else "🟡 Ada gangguan" if today_faults < 3 else "🔴 Banyak gangguan"
-            
-            message = f"""
-{status_emoji} <b>STATUS DARI DASHBOARD</b> {status_emoji}{slide_info}
-<i>Sumber: {source_label}</i>
-
-<b>📊 Pengukuran:</b>
-• <b>Waktu:</b> {time_str}
-• <b>Klasifikasi:</b> {record.klasifikasi}
-• <b>Status:</b> {record.status}
-• <b>PRX:</b> {record.prx:.2f} dBm
-• <b>Confidence:</b> {record.confidence:.1f}%
-
-<b>📈 Loss per KM:</b>
-{loss_str}
-
-<b>🔄 Return Loss per KM:</b>
-{return_str}
-
-<b>📋 Rekap Hari Ini:</b>
-• Total Pengukuran: <b>{today_total}</b>
-• Gangguan: <b>{today_faults}</b>
-• Status: {today_status}
-
-<b>💡 Perintah:</b>
-/status - Cek status dari Dashboard
-/rekap - Rekap hari ini
-/help - Bantuan
-"""
-            return message
-            
-    except Exception as e:
-        logger.error(f"[TELEGRAM] Error get status from dashboard: {e}")
-        return f"❌ Gagal mengambil data dashboard. Error: {str(e)}"
 
 async def get_telegram_rekap() -> str:
     """Rekap gangguan hari ini"""
@@ -2618,7 +2224,6 @@ async def get_telegram_rekap() -> str:
             for klasifikasi, count in classification_counts.most_common():
                 emoji = {
                     "Fiber Cut": "🔴",
-                    "Nearly Cut": "🟠",
                     "Bending": "🟡",
                     "Dirty Connector": "🟡",
                     "Bad Splice": "🟡",
@@ -2644,7 +2249,7 @@ async def get_telegram_rekap() -> str:
 • Rasio Gangguan: {(faults/total*100):.1f}%
 • Status Jaringan: {status_jaringan}
 
-💡 Ketik <b>/status</b> untuk cek data terakhir
+💡 Ketik <b>/help</b> untuk melihat daftar perintah
 """
             return message
             
@@ -2659,15 +2264,8 @@ def get_telegram_help() -> str:
 
 <b>📋 Perintah yang tersedia:</b>
 
-• <b>/status</b> - Cek status dari Dashboard (slide yang sedang ditampilkan)
 • <b>/rekap</b> - Lihat rekap gangguan hari ini
 • <b>/help</b> - Tampilkan bantuan ini
-
-<b>💬 Chat Natural:</b>
-Anda juga bisa bertanya langsung:
-• "status terakhir" 
-• "cek status"
-• "kondisi hari ini"
 
 <b>🔔 Alert Otomatis:</b>
 Bot akan mengirim notifikasi saat terdeteksi:
@@ -2909,7 +2507,7 @@ async def process_sor_file(
     cls_lower = final_class.lower()
     if not fault_counts:
         final_status = "Normal"
-    elif any(k in cls_lower for k in ["cut", "nearly"]):
+    elif "cut" in cls_lower:
         final_status = "Critical"
     else:
         final_status = "Warning"
