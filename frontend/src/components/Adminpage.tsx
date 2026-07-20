@@ -1,6 +1,6 @@
 // frontend/src/components/Adminpage.tsx
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Shield, Users, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 
 interface User {
   id: number;
@@ -11,6 +11,8 @@ interface User {
   created_at: string;
 }
 
+const API_BASE = 'https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net';
+
 const Adminpage: React.FC = () => {
   const [pendingUsers, setPendingUsers] = useState<User[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -20,19 +22,19 @@ const Adminpage: React.FC = () => {
   const fetchUsers = async () => {
     try {
       const token = localStorage.getItem('token');
-      
-      const pendingRes = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/users`, {
-  headers: { 'Authorization': `Bearer ${token}` }
-});
+
+      const pendingRes = await fetch(`${API_BASE}/api/admin/users`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const pendingData = await pendingRes.json();
       setPendingUsers(pendingData.users || []);
-      
-      const allRes = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/users/all`, {
+
+      const allRes = await fetch(`${API_BASE}/api/admin/users/all`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const allData = await allRes.json();
       setAllUsers(allData.users || []);
-      
+
     } catch (error) {
       console.error('Error fetching users:', error);
     } finally {
@@ -51,7 +53,7 @@ const Adminpage: React.FC = () => {
   const handleApprove = async (userId: number, email: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/approve/${userId}`, {
+      const response = await fetch(`${API_BASE}/api/admin/approve/${userId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -72,7 +74,7 @@ const Adminpage: React.FC = () => {
     if (confirm(`Hapus user ${email}?`)) {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/reject/${userId}`, {
+        const response = await fetch(`${API_BASE}/api/admin/reject/${userId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -85,28 +87,6 @@ const Adminpage: React.FC = () => {
         }
       } catch (error) {
         console.error('Error rejecting user:', error);
-        alert('Gagal menghubungi server');
-      }
-    }
-  };
-
-  const handleMakeAdmin = async (userId: number, email: string) => {
-    if (confirm(`Jadikan ${email} sebagai admin?`)) {
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`https://optim-api-ckfhb5heg3f3btgz.southeastasia-01.azurewebsites.net/api/admin/make-admin/${userId}`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-          alert(`👑 ${email} sekarang menjadi admin`);
-          await fetchUsers();
-        } else {
-          const error = await response.json();
-          alert(`Gagal: ${error.detail || 'Unknown error'}`);
-        }
-      } catch (error) {
-        console.error('Error making admin:', error);
         alert('Gagal menghubungi server');
       }
     }
@@ -128,8 +108,8 @@ const Adminpage: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-lg md:text-xl font-bold text-white">Admin Dashboard</h1>
           </div>
-          <button 
-            onClick={fetchUsers} 
+          <button
+            onClick={fetchUsers}
             className="p-1.5 sm:p-2 bg-[#1e2f50] border border-[#3b4f6e] rounded-lg hover:bg-[#2a3d60] transition"
             title="Refresh"
           >
@@ -154,8 +134,8 @@ const Adminpage: React.FC = () => {
           <button
             onClick={() => setActiveTab('pending')}
             className={`px-3 sm:px-4 py-1.5 sm:py-2 text-sm sm:text-sm font-medium transition ${
-              activeTab === 'pending' 
-                ? 'text-blue-500 border-b-2 border-blue-500' 
+              activeTab === 'pending'
+                ? 'text-blue-500 border-b-2 border-blue-500'
                 : 'text-white hover:text-blue-400'
             }`}
           >
@@ -164,8 +144,8 @@ const Adminpage: React.FC = () => {
           <button
             onClick={() => setActiveTab('all')}
             className={`px-3 sm:px-4 py-1.5 sm:py-2 text-sm sm:text-sm font-medium transition ${
-              activeTab === 'all' 
-                ? 'text-blue-500 border-b-2 border-blue-500' 
+              activeTab === 'all'
+                ? 'text-blue-500 border-b-2 border-blue-500'
                 : 'text-white hover:text-blue-400'
             }`}
           >
@@ -260,8 +240,8 @@ const Adminpage: React.FC = () => {
                         </td>
                         <td className="px-3 md:px-6 py-2 md:py-4">
                           <span className={`px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[9px] md:text-xs ${
-                            user.is_approved 
-                              ? 'bg-emerald-500/20 text-emerald-400' 
+                            user.is_approved
+                              ? 'bg-emerald-500/20 text-emerald-400'
                               : 'bg-amber-500/20 text-amber-400'
                           }`}>
                             {user.is_approved ? 'Approved' : 'Pending'}
@@ -269,8 +249,8 @@ const Adminpage: React.FC = () => {
                         </td>
                         <td className="px-3 md:px-6 py-2 md:py-4">
                           <span className={`px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[9px] md:text-xs ${
-                            user.is_admin 
-                              ? 'bg-purple-500/20 text-purple-400' 
+                            user.is_admin
+                              ? 'bg-purple-500/20 text-purple-400'
                               : 'bg-slate-500/20 text-slate-400'
                           }`}>
                             {user.is_admin ? 'Admin' : 'User'}
@@ -279,31 +259,25 @@ const Adminpage: React.FC = () => {
                         <td className="px-3 md:px-6 py-2 md:py-4">
                           <div className="flex items-center justify-center gap-2 md:gap-3">
                             {!user.is_approved && (
-                              <>
-                                <button
-                                  onClick={() => handleApprove(user.id, user.email)}
-                                  className="p-1.5 md:p-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition"
-                                  title="Setujui"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleReject(user.id, user.email)}
-                                  className="p-1.5 md:p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition"
-                                  title="Tolak"
-                                >
-                                  <XCircle className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                                </button>
-                              </>
-                            )}
-                            {!user.is_admin && user.is_approved && (
                               <button
-                                onClick={() => handleMakeAdmin(user.id, user.email)}
-                                className="p-1.5 md:p-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition"
-                                title="Jadikan Admin"
+                                onClick={() => handleApprove(user.id, user.email)}
+                                className="p-1.5 md:p-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition"
+                                title="Setujui"
                               >
-                                <Shield className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                                <CheckCircle className="w-3.5 h-3.5 md:w-4 md:h-4" />
                               </button>
+                            )}
+                            {!user.is_admin && (
+                              <button
+                                onClick={() => handleReject(user.id, user.email)}
+                                className="p-1.5 md:p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition"
+                                title="Hapus User"
+                              >
+                                <XCircle className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                              </button>
+                            )}
+                            {user.is_admin && (
+                              <span className="text-slate-500 text-xs">—</span>
                             )}
                           </div>
                         </td>

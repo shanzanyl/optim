@@ -78,7 +78,7 @@ class OtdrResult(Base):
 
 
 class DashboardResult(Base):
-    """Menyimpan hasil klasifikasi Dashboard SOR (Random Forest)."""
+    """Menyimpan hasil klasifikasi Dashboard SOR (LSTM)."""
     __tablename__ = "dashboard_results"
 
     id             = Column(Integer, primary_key=True, index=True)

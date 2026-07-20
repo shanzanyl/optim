@@ -1703,47 +1703,6 @@ async def reject_user(
 # DASHBOARD & HISTORY
 # ═══════════════════════════════════════════════════════════════════
 
-@app.get("/api/dashboard")
-async def get_dashboard(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    limit: int = 100,
-):
-    result = await db.execute(
-        select(OtdrResult)
-        .where(
-            (OtdrResult.source == "sheets") |
-            (OtdrResult.user_id == current_user.id)
-        )
-        .order_by(OtdrResult.timestamp.desc())
-        .limit(limit)
-    )
-    records = result.scalars().all()
-    total = len(records)
-    normal = sum(1 for r in records if r.klasifikasi == "Normal")
-    
-    return {
-        "data": [{
-            "id": r.id,
-            "prx": r.prx,
-            "loss_1": r.loss_1, "loss_2": r.loss_2,
-            "loss_3": r.loss_3, "loss_4": r.loss_4,
-            "total_l_4": r.total_l_4, 
-            "return_1": r.return_1, "return_2": r.return_2,
-            "return_3": r.return_3, "return_4": r.return_4,
-            "distance_1": r.distance_1, "distance_2": r.distance_2,
-            "distance_3": r.distance_3, "distance_4": r.distance_4,
-            "klasifikasi": r.klasifikasi,
-            "status": r.status,
-            "confidence": r.confidence,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-            "source": r.source,
-        } for r in records],
-        "total": total,
-        "normal": normal,
-        "gangguan": total - normal,
-    }
-
 @app.get("/api/history")
 async def get_history(
     db: AsyncSession = Depends(get_db),
@@ -1787,172 +1746,6 @@ async def get_history(
             "source": r.source,
         } for r in records],
         "total": len(records),
-    }
-
-@app.get("/api/progress")
-async def get_progress(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result_total = await db.execute(
-        select(func.count(OtdrResult.id)).where(OtdrResult.user_id == current_user.id)
-    )
-    total_processed = result_total.scalar() or 0
-    return {
-        "total_processed": total_processed,
-        "target_total": 2572,
-        "is_complete": total_processed >= 2572,
-    }
-
-
-
-
-@app.post("/api/sync")
-async def sync_from_sheets(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(SHEET_URL, timeout=30, follow_redirects=True)
-            resp.raise_for_status()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal fetch Google Sheets: {str(e)}")
-    
-    try:
-        df = pd.read_csv(io.StringIO(resp.text))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal parse CSV: {str(e)}")
-    
-    df.columns = [c.strip() for c in df.columns]
-
-    print("========== KOLOM GOOGLE SHEETS ==========")
-    print(df.columns.tolist())
-
-    print("========== CEK AVG-TOTAL BARIS PERTAMA ==========")
-    if 'Avg-Total' in df.columns:
-        print(f"Nilai: {df.iloc[0]['Avg-Total']}")
-    else:
-        print("⚠️ Kolom 'Avg-Total' TIDAK DITEMUKAN!")
-    
-    existing = await db.execute(
-        select(OtdrResult).where(
-            OtdrResult.user_id == current_user.id,
-            OtdrResult.source == "sheets",
-        )
-    )
-    for rec in existing.scalars().all():
-        await db.delete(rec)
-    await db.flush()
-    
-    saved = 0
-    errors = 0
-    
-    for idx, row in df.iterrows():
-        try:
-            def g(col, default=0.0):
-                try:
-                    val = row.get(col, default)
-                    if pd.notna(val) and val != '' and val != '-':
-                        return float(val)
-                    return default
-                except Exception:
-                    return default
-            
-            # 🔥 FUNGSI UNTUK AMBIL TIMESTAMP DARI KOLOM 'Time'
-            def get_timestamp_from_row(row):
-                """Ambil timestamp dari kolom 'Time' di sheets"""
-                if 'Time' in row.index:
-                    val = row.get('Time')
-                    if pd.notna(val) and val != '':
-                        try:
-                            if isinstance(val, str):
-                                # Format: 2026-06-22 08:00:00
-                                if ' ' in val and '-' in val:
-                                    return pd.to_datetime(val).to_pydatetime()
-                                # Format: 22/06/2026 08:00
-                                elif '/' in val:
-                                    return pd.to_datetime(val, dayfirst=True).to_pydatetime()
-                            return pd.to_datetime(val).to_pydatetime()
-                        except Exception as e:
-                            print(f"⚠️ ROW {idx}: Gagal parse Time '{val}': {e}")
-                            return None
-                return None
-            
-            # 🔥 AMBIL TIMESTAMP DARI KOLOM 'Time'
-            timestamp = get_timestamp_from_row(row)
-            if timestamp is None:
-                # Fallback: pakai waktu sekarang + offset indeks (15 menit per row)
-                base_time = datetime.now()
-                timestamp = base_time + timedelta(minutes=idx * 15)
-                print(f"⚠️ ROW {idx}: Time tidak ditemukan, pakai fallback: {timestamp}")
-            
-            # 🔥 AMBIL SEMUA NILAI
-            prx = g('Prx (dBm)')
-            d1, d2, d3, d4 = g('Distance 1'), g('Distance 2'), g('Distance 3'), g('Distance 4')
-            l1, l2, l3 = g('Loss 1'), g('Loss 2'), g('Loss 3')
-            l4 = None if g('Loss 4') == 0 else g('Loss 4')
-            tl1, tl2, tl3, tl4 = g('Total-L 1'), g('Total-L 2'), g('Total-L 3'), g('Total-L 4')
-            al1, al2, al3, al4 = g('Avg-L 1'), g('Avg-L 2'), g('Avg-L 3'), g('Avg-L 4')
-            r1, r2, r3, r4 = g('Return 1'), g('Return 2'), g('Return 3'), g('Return 4')
-            
-            # 🔥 AMBIL AVG-TOTAL: UTAMAKAN DARI KOLOM
-            avg_total = g('Avg-Total', 0.0)
-            
-            # 🔥 KALAU KOSONG, HITUNG MANUAL DARI Total-L4 / Distance4
-            if avg_total == 0.0:
-                if tl4 > 0 and d4 > 0:
-                    avg_total = tl4 / d4
-                    print(f"📊 ROW {idx}: Avg-Total dari kolom kosong, dihitung manual = {tl4} / {d4} = {avg_total:.3f}")
-                else:
-                    print(f"⚠️ ROW {idx}: Avg-Total kosong dan tidak bisa dihitung (tl4={tl4}, d4={d4})")
-            else:
-                print(f"✅ ROW {idx}: Avg-Total dari kolom = {avg_total:.3f}")
-            
-            otdr_values = {
-                'Prx (dBm)': prx,
-                'Distance 1': d1, 'Distance 2': d2, 'Distance 3': d3, 'Distance 4': d4,
-                'Loss 1': l1, 'Loss 2': l2, 'Loss 3': l3,
-                'Total-L 1': tl1, 'Total-L 2': tl2, 'Total-L 3': tl3, 'Total-L 4': tl4,
-                'Avg-L 1': al1, 'Avg-L 2': al2, 'Avg-L 3': al3, 'Avg-L 4': al4,
-                'Avg-Total': avg_total,
-                'Return 1': r1, 'Return 2': r2, 'Return 3': r3, 'Return 4': r4,
-            }
-            
-            pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-
-            print(f"🔍 ROW {idx}: Avg-Total FINAL = {avg_total:.3f}")
-            
-            record = OtdrResult(
-                user_id=current_user.id,
-                timestamp=timestamp,  # ✅ PAKAI TIMESTAMP DARI SHEETS
-                prx=prx,
-                temperature=g('Temperature (C)'),
-                wavelength=g('Wavelength'),
-                pulse_width=g('Pulse Width (ns)'),
-                distance_1=d1, distance_2=d2, distance_3=d3, distance_4=d4,
-                loss_1=l1, loss_2=l2, loss_3=l3, loss_4=l4,
-                total_l_1=tl1, total_l_2=tl2, total_l_3=tl3, total_l_4=tl4,
-                avg_l_1=al1, avg_l_2=al2, avg_l_3=al3, avg_l_4=al4,
-                avg_total=avg_total,
-                return_1=r1, return_2=r2, return_3=r3, return_4=r4,
-                klasifikasi=pred.get("prediction"),
-                status=pred.get("status"),
-                confidence=pred.get("confidence"),
-                source="sheets",
-            )
-            db.add(record)
-            saved += 1
-        except Exception as e:
-            logger.error(f"Sync row error: {e}")
-            errors += 1
-    
-    await db.commit()
-    return {
-        "message": f"Sync selesai: {saved} baris berhasil, {errors} error",
-        "saved": saved,
-        "errors": errors,
-        "total": len(df),
     }
 
 @app.get("/")
@@ -2048,9 +1841,8 @@ async def detect_manual(
             return NAN
         return val
 
-    # ── OTDR VALUES UNTUK ML ──
-    # Semua None dari normalized diubah ke NaN di sini.
-    # NaN adalah representasi yang dipakai model saat training (bukan 0, bukan 999).
+    # ── OTDR VALUES PAKET PARAMETER LENGKAP UNTUK ML ──
+    # Semua None diubah ke NaN di sini.
     otdr_values = {
         'Prx (dBm)' : prx,
         'Distance 1': _nan('distance_1', d1),
@@ -2078,11 +1870,14 @@ async def detect_manual(
     logger.info(f"[MANUAL] mode={mode}, cut_km={cut_km}")
     
     try:
-        pred = ml.predict_from_otdr(otdr_values)
+        pred = ml.predict_from_otdr(otdr_values) # kirim otdr_values ke model ML
         logger.info(f"🤖 ML prediction SUCCESS (manual): {pred.get('prediction')}")
     except Exception as e:
         logger.error(f"❌ ML prediction FAILED (manual): {e}")
-        pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
+        raise HTTPException(
+            status_code=500,
+            detail="Klasifikasi gagal diproses. Silakan periksa kembali parameter dan coba lagi."
+        )
         
     user_id = current_user.id if current_user else 1
     
@@ -2092,7 +1887,7 @@ async def detect_manual(
             val = normalized.get(key, fallback)
             if val is None:
                 return None
-            if isinstance(val, float) and val != val:  # NaN check
+            if isinstance(val, float) and val != val:  # untuk deteksi NaN check
                 return None
             return val
 
@@ -2340,9 +2135,9 @@ async def setup_telegram_webhook():
 
 @app.post("/api/dashboard/process-sor")
 async def process_sor_file(
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    file: UploadFile = File(...), # nerima file CSV atau Excel
+    db: AsyncSession = Depends(get_db), # koneksi database
+    current_user: User = Depends(get_current_user), # user yang sedang login
 ):
     """
     Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
@@ -2358,7 +2153,7 @@ async def process_sor_file(
 
     # 1. Validasi file (support CSV + Excel)
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
-    if not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
+    if not file.filename.lower().endswith(ALLOWED_EXTENSIONS): # .lower() biar CSV atau csv dua-duanya kebaca
         logger.warning(f"[SOR] ❌ FILE REJECTED: {file.filename}")
         raise HTTPException(
             status_code=400, 
@@ -2368,13 +2163,13 @@ async def process_sor_file(
     # 2. Baca file (CSV atau Excel)
     logger.info("[SOR] ── STEP 1: READ FILE ──")
     try:
-        content = await file.read()
+        content = await file.read() # buka dan baca file
         logger.info(f"[SOR]   file size = {len(content)} bytes")
         
-        if file.filename.lower().endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(content))
+        if file.filename.lower().endswith('.csv'): # cek ini file CSV atau Excel
+            df = pd.read_csv(io.BytesIO(content)) # jika CSV, baca dengan pd.read_csv, hasil masuk ke DataFrame
         else:
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content)) # jika Excel, baca dengan pd.read_excel, hasil masuk ke DataFrame
             
         logger.info(f"[SOR] ✅ READ EXCEL/CSV: {len(df)} rows × {len(df.columns)} columns")
         logger.info(f"[SOR]   columns = {df.columns.tolist()}")
@@ -2389,7 +2184,7 @@ async def process_sor_file(
     # Cari kolom Loss (dB)
     loss_col = None
     possible_loss = ['loss (db)', 'loss(db)', 'loss_db', 'loss']
-    for col in df.columns:
+    for col in df.columns: # lihat semua kolom di DataFrame
         if col.lower().strip().replace(' ', '') in [p.replace(' ', '') for p in possible_loss]:
             loss_col = col
             break
@@ -2398,7 +2193,7 @@ async def process_sor_file(
         for col in df.columns:
             if 'loss' in col.lower():
                 loss_col = col
-                break
+                break # kalau ketemu, langsung break
 
     if loss_col is None:
         logger.error(f"[SOR] ❌ LOSS COLUMN NOT FOUND. Available: {df.columns.tolist()}")
@@ -2422,9 +2217,9 @@ async def process_sor_file(
     logger.info(f"[SOR]   total data points = {len(loss_data)}")
 
     # Alias untuk kompatibilitas kode di bawah
-    backscatter_data = loss_data
+    backscatter_data = loss_data # alias: data ini adalah Loss (dB), nama historis "backscatter"
 
-    if len(backscatter_data) < 50:
+    if len(backscatter_data) < 50: # minimal 50 titik diperlukan untuk sliding window
         raise HTTPException(
             status_code=400,
             detail=f"Data Loss (dB) hanya {len(backscatter_data)} titik. Minimal 50 titik diperlukan."
@@ -2452,7 +2247,7 @@ async def process_sor_file(
     logger.info(f"[SOR]   window_size={window_size}, stride={stride}, total_windows={total_windows}")
 
     try:
-        predictions = await asyncio.to_thread(
+        predictions = await asyncio.to_thread( # klasifikasi semua window sekaligus dalam satu panggilan ke model (lebih cepat daripada memanggil model per window)
             ml_sor.predict_sor_batch,
             backscatter_data,
             window_size,
@@ -2465,25 +2260,8 @@ async def process_sor_file(
     logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
 
     # 7. Klasifikasi final — SATU KELAS PER FILE, MURNI DARI KELUARAN MODEL
-    #
-    # Ground truth: satu file berisi satu gangguan yang diinduksi di satu titik,
-    # jadi verdict-nya tunggal.
-    #
-    # Tidak ada ambang confidence dan tidak ada window yang dibuang. Setiap
-    # window yang oleh model tidak diklasifikasikan sebagai normal dihitung
-    # sebagai gangguan.
-    #
-    #   - Tidak ada window gangguan          -> normal
-    #   - Semua window gangguan satu kelas   -> kelas itu (tanpa aturan apa pun)
-    #   - Window gangguan berbeda kelas      -> model tidak konsisten; dipilih
-    #                                           kelas terbanyak DI ANTARA WINDOW
-    #                                           GANGGUAN saja
-    #
-    # Catatan: ini BUKAN majority vote seperti versi lama. Versi lama mengikutkan
-    # ratusan window normal dalam pemungutan suara, sehingga gangguan yang
-    # bersifat lokal selalu kalah dan verdict hampir selalu "normal". Di sini
-    # window normal tidak punya suara — ia hanya menentukan ada/tidaknya
-    # gangguan, bukan jenisnya.
+         # Kumpulin prediksi semua window → buang yang Normal → kalau nggak ada gangguan tersisa = Normal,
+         # kalau ada = ambil gangguan terbanyak → tentukan status (Cut=Critical, lain=Warning).
     from collections import Counter
 
     class_counts: dict = Counter(p["prediction"] for p in predictions)
