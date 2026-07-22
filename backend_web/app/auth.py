@@ -26,15 +26,15 @@ security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(password) # register
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(plain_password, hashed_password) # login
 
 def create_access_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {"sub": str(user_id), "exp": expire}
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM) 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),

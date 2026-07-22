@@ -24,8 +24,8 @@ import cv2
 import requests
 import tempfile
 
-from app import ml          # Model OTDR (LightGBM)
-from app import ml_sor      # Model SOR (Random Forest) - BARU
+from app import ml          # Model OTDR 
+from app import ml_sor      # Model SOR 
 from app.database import Base, engine, get_db, AsyncSessionLocal
 from app.models import User, OtdrResult, DashboardResult
 from app.schemas import (
@@ -57,11 +57,7 @@ else:  # Mac/Linux
     for path in possible_paths:
         if os.path.exists(path):
             pytesseract.pytesseract.tesseract_cmd = path
-            break
-
-# Google Sheets CSV export URL
-SHEET_ID = "1dN2Q7zrp_M2RZ8o0-GPjYyL4yfZPo0KHjAKhEx8Qudo"
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
+            breaksudah
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@optim.com")
 
@@ -427,40 +423,40 @@ def preprocess_image_simple(image_bytes: bytes) -> list:
     
     results = []
     
-    # 🔥 Potong lebih presisi (15% atas, 5% bawah)
+    # Potong lebih presisi (15% atas, 5% bawah)
     y_start = int(h * 0.15)
     y_end = int(h * 0.95)
     cropped = img[y_start:y_end, 0:w]
     
-    # 🔥 PERBAIKI: resize 2x saja (bukan 4x) - lebih cepat
+    # PERBAIKI: resize 2x saja (bukan 4x) - lebih cepat
     resized = cv2.resize(cropped, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     
-    # 🔥 Grayscale
+    # Grayscale
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     
-    # 🔥 CLAHE lebih agresif
+    # CLAHE lebih agresif
     clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
     enhanced = clahe.apply(gray)
     
-    # 🔥 Sharpening
+    # Sharpening
     kernel = np.array([[-1,-1,-1],
                        [-1, 9,-1],
                        [-1,-1,-1]])
     sharpened = cv2.filter2D(enhanced, -1, kernel)
     
-    # 🔥 Denoising
+    # Denoising
     denoised = cv2.fastNlMeansDenoising(sharpened, h=30)
     
-    # 🔥 Adaptive threshold
+    # Adaptive threshold
     binary = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                     cv2.THRESH_BINARY, 15, 8)
     
-    # 🔥 Morphology
+    # Morphology
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
     cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
     
-    # 🔥 KURANGI VARIASI - hanya 2 jenis untuk kecepatan
+    # KURANGI VARIASI - hanya 2 jenis untuk kecepatan
     results.append(Image.fromarray(cleaned))
     results.append(Image.fromarray(enhanced))
     
@@ -479,7 +475,7 @@ def tesseract_extract(image_bytes: bytes) -> str:
     try:
         images = preprocess_image_simple(image_bytes)
 
-        # 🔥 KURANGI KONFIGURASI - hanya 3 yang paling penting
+        # KURANGI KONFIGURASI - hanya 3 yang paling penting
         configs = [
             "--oem 3 --psm 6",   # default, block text - PALING PENTING
             "--oem 3 --psm 4",   # assume single column
@@ -490,7 +486,7 @@ def tesseract_extract(image_bytes: bytes) -> str:
             for config in configs:
                 try:
                     text = pytesseract.image_to_string(img, config=config)
-                    # 🔥 CEK ADA TIDAK ANGKA 1.xxx atau 2.xxx (distance)
+                    #  CEK ADA TIDAK ANGKA 1.xxx atau 2.xxx (distance)
                     has_distance = len(re.findall(r'[1-4]\.\d{3,5}', text))
                     decimal_score = len(re.findall(r'\d+\.\d{4,}', text))
                     total_score = decimal_score + has_distance * 5  # distance lebih penting
@@ -522,7 +518,7 @@ def tesseract_extract(image_bytes: bytes) -> str:
 
 def ocr_space_extract(image_bytes: bytes) -> str:
     """Ekstrak teks menggunakan OCR.space API"""
-    # 🔥 GANTI DENGAN API KEY ANDA (gunakan environment variable)
+    # GANTI DENGAN API KEY ANDA (gunakan environment variable)
     OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY", "65299172ed88957")
     
     try:
@@ -536,11 +532,11 @@ def ocr_space_extract(image_bytes: bytes) -> str:
                 'scale': True,
                 'OCREngine': 2,
             },
-            timeout=60,  # 🔥 DINAIIKKAN dari 30 ke 60
+            timeout=60,  # DINAIIKKAN dari 30 ke 60
         )
         result = response.json()
         
-        # 🔥 CEK ERROR
+        # CEK ERROR
         if result.get('ErrorMessage'):
             logger.error(f"OCR.space Error: {result.get('ErrorMessage')}")
             return ""
@@ -1213,7 +1209,7 @@ async def parse_ocr_only(
     try:
         results = {}
         
-        # 🔥 TIMEOUT TESSERACT
+        #  TIMEOUT TESSERACT
         try:
             results['tesseract'] = await asyncio.wait_for(
                 asyncio.to_thread(tesseract_extract, content), timeout=60.0)
@@ -1221,7 +1217,7 @@ async def parse_ocr_only(
             logger.warning("Tesseract timed out")
             results['tesseract'] = ""
 
-        # 🔥 TIMEOUT OCR.SPACE - dinaikkan
+        #  TIMEOUT OCR.SPACE - dinaikkan
         try:
             results['ocr.space'] = await asyncio.wait_for(
                 asyncio.to_thread(ocr_space_extract, content), timeout=120.0)
@@ -1243,7 +1239,7 @@ async def parse_ocr_only(
     except Exception as e:
         logger.error(f"OCR error: {e}")
     
-    # 🔥 RETURN DENGAN STRUKTUR YANG KONSISTEN
+    #  RETURN DENGAN STRUKTUR YANG KONSISTEN
     if not raw_text or len(raw_text.strip()) < 20:
         return {
             "success": False,
@@ -1271,11 +1267,11 @@ async def parse_ocr_only(
     
     rows, avg_total = parse_otdr_hybrid(raw_text)
     
-    # 🔥 AUTO-DETECT FIBER CUT
+    #  AUTO-DETECT FIBER CUT
     mode, cut_km = detect_measurement_mode_from_rows(rows)
     logger.info(f"[AUTO-DETECT] OCR mode: {mode}, cut_km: {cut_km}")
     
-    # 🔥 Jika Fiber Cut, set loss di rows sesuai mode
+    #  Jika Fiber Cut, set loss di rows sesuai mode
     if mode == 'fiber_cut_km2':
         if len(rows) >= 2:
             rows[1]['loss'] = None  # KM2 loss = None
@@ -1289,7 +1285,7 @@ async def parse_ocr_only(
         if len(rows) >= 4:
             rows[3]['loss'] = None  # KM4 loss = None
     
-    # 🔥 PASTIKAN KM4 loss = None (End of Fiber)
+    #  PASTIKAN KM4 loss = None (End of Fiber)
     if len(rows) >= 4:
         rows[3]['loss'] = None
     
@@ -1300,14 +1296,14 @@ async def parse_ocr_only(
     for i, row in enumerate(rows):
         logger.info(f"   KM{i+1}: dist={row['distance']}, loss={row['loss']}, total_l={row['total_l']}")
     
-    # 🔥 DEBUG: Pastikan loss KM3 = None untuk Fiber Cut
+    #  DEBUG: Pastikan loss KM3 = None untuk Fiber Cut
     if mode == 'fiber_cut_km3' and len(rows) >= 3:
         logger.info(f"🔍 DEBUG: KM3 loss = {rows[2].get('loss')} (type: {type(rows[2].get('loss'))})")
     
-    # 🔥 VALIDASI DENGAN AMAN
+    #  VALIDASI DENGAN AMAN
     valid = [r for r in rows if r['distance'] > 0.5]
     if len(valid) < 2:
-        # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
+        #  PASTIKAN 4 ROWS UNTUK RESPONSE
         while len(rows) < 4:
             km = len(rows) + 1
             rows.append({
@@ -1341,7 +1337,7 @@ async def parse_ocr_only(
             }
         }
     
-    # 🔥 PASTIKAN 4 ROWS UNTUK RESPONSE
+    #  PASTIKAN 4 ROWS UNTUK RESPONSE
     while len(rows) < 4:
         km = len(rows) + 1
         rows.append({
@@ -1353,12 +1349,12 @@ async def parse_ocr_only(
             "return": -45.0
         })
     
-    # 🔥 Pastikan loss untuk Fiber Cut tetap None di response
+    #  Pastikan loss untuk Fiber Cut tetap None di response
     # (mencegah perubahan None menjadi 0 di proses mapping)
     loss_values = []
     for i, row in enumerate(rows):
         loss_val = row.get('loss')
-        # 🔥 Jika loss adalah 0 dan ini adalah Fiber Cut di KM3, tetap None
+        #  Jika loss adalah 0 dan ini adalah Fiber Cut di KM3, tetap None
         if mode == 'fiber_cut_km3' and i == 2 and (loss_val == 0 or loss_val is None):
             loss_values.append(None)
         elif mode == 'fiber_cut_km2' and i >= 1 and (loss_val == 0 or loss_val is None):
@@ -1515,189 +1511,6 @@ async def reject_user(
     await db.delete(user)
     await db.commit()
     return {"message": f"User {user.email} berhasil dihapus"}
-
-# ═══════════════════════════════════════════════════════════════════
-# DETECTION OCR - MAIN ENDPOINT
-# ═══════════════════════════════════════════════════════════════════
-
-# @app.post("/api/detect")
-# async def detect_ocr(
-#     file: UploadFile = File(...),
-#     prx_manual: float = Form(None),
-#     db: AsyncSession = Depends(get_db),
-#     current_user: User = Depends(get_optional_user),
-# ):
-#     allowed = {"image/jpeg", "image/png", "image/jpg", "image/bmp", "image/tiff"}
-#     if file.content_type not in allowed:
-#         raise HTTPException(status_code=400, detail="Format gambar tidak didukung.")
-    
-#     content = await file.read()
-#     raw_text = ""
-#     logger.info(f"📝 RAW TEXT FULL:\n{raw_text}")
-#     ocr_method = "none"
-    
-#     logger.info("=" * 70)
-#     logger.info("🔄 Starting OCR process...")
-    
-#     try:
-#         results = {}
-        
-#         try:
-#             results['tesseract'] = await asyncio.wait_for(
-#                 asyncio.to_thread(tesseract_extract, content), timeout=25.0)
-#         except asyncio.TimeoutError:
-#             logger.warning("Tesseract timed out")
-#             results['tesseract'] = ""
-
-#         try:
-#             results['ocr.space'] = await asyncio.wait_for(
-#                 asyncio.to_thread(ocr_space_extract, content), timeout=15.0)
-#         except asyncio.TimeoutError:
-#             logger.warning("OCR.space timed out")
-#             results['ocr.space'] = ""
-
-#         best_score = 0
-#         for method, text in results.items():
-#             if text:
-#                 score = len(re.findall(r'\d+\.\d{3,}', text))
-#                 if score > best_score:
-#                     best_score = score
-#                     raw_text = text
-#                     ocr_method = method
-
-#         logger.info(f"✅ Best OCR: {ocr_method} with {best_score} decimal numbers")
-
-#     except Exception as e:
-#         logger.error(f"OCR error: {e}")
-    
-#     if not raw_text or len(raw_text.strip()) < 20:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Gambar tidak dapat dibaca. Pastikan foto jelas dan tabel OTDR terlihat."
-#         )
-    
-#     logger.info(f"📝 RAW TEXT ({ocr_method}):\n{raw_text[:500]}")
-    
-#     rows, avg_total = parse_otdr_table_simple(raw_text)
-#     avg_total = round(avg_total, 2)
-    
-#     prx_from_ocr = extract_prx(raw_text)
-#     final_prx = prx_manual if prx_manual is not None else (prx_from_ocr if prx_from_ocr else -25.0)
-    
-#     logger.info(f"📊 Parsed rows: {len(rows)}")
-#     for i, row in enumerate(rows):
-#         logger.info(f"   KM{i+1}: dist={row['distance']} loss={row['loss']} total_l={row['total_l']}")
-    
-#     valid = [r for r in rows if r['distance'] > 0.5]
-#     if len(valid) < 2:
-#         raise HTTPException(
-#             status_code=400,
-#             detail=f"Hanya {len(valid)} baris valid terdeteksi (butuh minimal 2)."
-#         )
-    
-#     logger.info("=" * 50)
-#     logger.info("Starting ML Prediction...")
-    
-#     otdr_values = {
-#         'Prx (dBm)': final_prx,
-#         'Distance 1': rows[0]['distance'], 'Distance 2': rows[1]['distance'],
-#         'Distance 3': rows[2]['distance'], 'Distance 4': rows[3]['distance'],
-#         'Loss 1': rows[0]['loss'], 'Loss 2': rows[1]['loss'], 'Loss 3': rows[2]['loss'],
-#         'Total-L 1': rows[0]['total_l'], 'Total-L 2': rows[1]['total_l'],
-#         'Total-L 3': rows[2]['total_l'], 'Total-L 4': rows[3]['total_l'],
-#         'Avg-L 1': rows[0]['avg_l'], 'Avg-L 2': rows[1]['avg_l'],
-#         'Avg-L 3': rows[2]['avg_l'], 'Avg-L 4': rows[3]['avg_l'],
-#         'Avg-Total': avg_total,
-#         'Return 1': rows[0]['return'], 'Return 2': rows[1]['return'],
-#         'Return 3': rows[2]['return'], 'Return 4': rows[3]['return'],
-#     }
-    
-#     try:
-#         pred = await asyncio.to_thread(ml.predict_from_otdr, otdr_values)
-#         logger.info(f"🤖 ML prediction SUCCESS: {pred.get('prediction')}")
-#     except Exception as e:
-#         logger.error(f"❌ ML prediction FAILED: {e}")
-#         pred = {"prediction": "Normal", "confidence": 70.0, "status": "Normal"}
-    
-#     logger.info("=" * 50)
-#     logger.info("💾 Saving to Database...")
-#     user_id = current_user.id if current_user else 1
-    
-#     try:
-#         record = OtdrResult(
-#             user_id=user_id,
-#             timestamp=datetime.now(),
-#             prx=final_prx,
-#             loss_1=rows[0]['loss'], loss_2=rows[1]['loss'],
-#             loss_3=rows[2]['loss'], loss_4=None,
-#             return_1=rows[0]['return'], return_2=rows[1]['return'],
-#             return_3=rows[2]['return'], return_4=rows[3]['return'],
-#             distance_1=rows[0]['distance'], distance_2=rows[1]['distance'],
-#             distance_3=rows[2]['distance'], distance_4=rows[3]['distance'],
-#             total_l_1=rows[0]['total_l'], total_l_2=rows[1]['total_l'],
-#             total_l_3=rows[2]['total_l'], total_l_4=rows[3]['total_l'],
-#             avg_l_1=rows[0]['avg_l'], avg_l_2=rows[1]['avg_l'],
-#             avg_l_3=rows[2]['avg_l'], avg_l_4=rows[3]['avg_l'],
-#             avg_total=avg_total,
-#             klasifikasi=pred.get("prediction"),
-#             status=pred.get("status"),
-#             confidence=pred.get("confidence"),
-#             source="ocr",
-#             raw_text=raw_text[:1000],
-#         )
-        
-#         db.add(record)
-#         await db.commit()
-#         await db.refresh(record)
-#         logger.info(f"✅ Saved to DB: ID={record.id}")
-    
-#         status_str = pred.get("status", "Normal")
-#         if status_str.lower() in ["warning", "critical"]:
-#             logger.info(f"[TELEGRAM] Mengirim alert untuk: {pred.get('prediction')}")
-#             try:
-#                 await asyncio.to_thread(
-#                     send_telegram_alert,
-#                     classification=pred.get("prediction"),
-#                     status=status_str,
-#                     loss=[rows[0]['loss'], rows[1]['loss'], rows[2]['loss'], rows[3]['loss']],
-#                     rl=[rows[0]['return'], rows[1]['return'], rows[2]['return'], rows[3]['return']],
-#                     prx=final_prx,
-#                     distances=[rows[0]['distance'], rows[1]['distance'], rows[2]['distance'], rows[3]['distance']],
-#                     timestamp=record.timestamp
-#                 )
-#                 record.telegram_alert_sent = True
-#                 await db.commit()
-#             except Exception as tg_err:
-#                 logger.error(f"[TELEGRAM] Error: {tg_err}")
-        
-
-#     except Exception as e:
-#         logger.error(f"❌ DATABASE ERROR: {e}")
-#         await db.rollback()
-#         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-#     logger.info("=" * 70)
-    
-#     return {
-#         "message": "Gambar berhasil diproses",
-#         "raw_text": raw_text[:500],
-#         "extracted": {
-#             "distances": [rows[i]['distance'] for i in range(4)],
-#             "losses": [rows[i]['loss'] for i in range(4)],
-#             "total_ls": [rows[i]['total_l'] for i in range(4)],
-#             "avg_ls": [rows[i]['avg_l'] for i in range(4)],
-#             "returns": [rows[i]['return'] for i in range(4)],
-#             "avg_total": round(avg_total, 2),
-#         },
-#         "per_km": {"km1": rows[0], "km2": rows[1], "km3": rows[2], "km4": rows[3]},
-#         "prx": final_prx,
-#         "avg_total": round(avg_total, 2),
-#         "prediction": pred.get("prediction"),
-#         "confidence": pred.get("confidence"),
-#         "status": pred.get("status"),
-#         "id": record.id,
-#         "ocr_method": ocr_method,
-#     }
 
 # ═══════════════════════════════════════════════════════════════════
 # DASHBOARD & HISTORY
@@ -2130,7 +1943,7 @@ async def setup_telegram_webhook():
         return {"error": str(e)}
 
 # ============================================================
-# DASHBOARD - PROCESS SOR EXCEL FILE (RANDOM FOREST)
+# DASHBOARD - PROCESS SOR EXCEL FILE (LSTM)
 # ============================================================
 
 @app.post("/api/dashboard/process-sor")
@@ -2140,7 +1953,7 @@ async def process_sor_file(
     current_user: User = Depends(get_current_user), # user yang sedang login
 ):
     """
-    Proses file SOR (CSV atau Excel) dengan sliding window dan Random Forest.
+    Proses file SOR (CSV atau Excel) dengan sliding window dan klasifikasi LSTM.
     """
     # ── LOG: MAIN START ──
     logger.info("=" * 70)

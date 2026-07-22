@@ -146,36 +146,6 @@ def get_status(label: str) -> str:
 
 _validate_artifacts()
 
-
-# ══════════════════════════════════════════════════════════════════
-# RULE-BASED FALLBACK
-# ══════════════════════════════════════════════════════════════════
-
-def _rule_based(otdr_values: dict, confidence: float) -> dict:
-    """Cadangan sederhana bila model tidak tersedia atau prediksi gagal."""
-    losses = [
-        otdr_values.get('Loss 1', 0) or 0,
-        otdr_values.get('Loss 2', 0) or 0,
-        otdr_values.get('Loss 3', 0) or 0,
-    ]
-    max_loss = max(losses) if losses else 0
-
-    if max_loss > 3.0:
-        prediction = "Fiber Cut"
-    elif max_loss > 1.2:
-        prediction = "Bending"
-    elif max_loss > 0.5:
-        prediction = "Bad Splice"
-    else:
-        prediction = "Normal"
-
-    return {
-        "prediction": prediction,
-        "confidence": confidence,
-        "status": get_status(prediction),
-    }
-
-
 # ══════════════════════════════════════════════════════════════════
 # PREDICT FUNCTION
 # ══════════════════════════════════════════════════════════════════
@@ -184,21 +154,18 @@ def predict_from_otdr(otdr_values: dict) -> dict:
     """Prediksi jenis gangguan dari parameter tabel event OTDR."""
 
     if lgbm_model is None or feature_columns is None:
-        logger.warning("⚠️ Model/feature order not available, using rule-based prediction")
-        return _rule_based(otdr_values, 85.0)
+        raise RuntimeError("Model klasifikasi tidak tersedia.")
 
     try:
         row = pd.DataFrame([otdr_values])
 
-        # Kolom yang tidak ada diisi NaN — bukan 0.0.
         # NaN adalah representasi yang benar untuk Fiber Cut (identik dengan
         # training), dan MinMaxScaler meneruskan NaN apa adanya.
         for col in feature_columns:
             if col not in row.columns:
-                row[col] = np.nan
+                row[col] = np.nan # Kolom yang tidak ada diisi NaN — bukan 0.0.
 
         # TIDAK menggunakan fillna(). NaN dipertahankan sampai ke LightGBM,
-        # yang mendukung NaN secara native.
         X = row[feature_columns].astype(np.float64)
 
         if scaler is not None:
@@ -207,8 +174,8 @@ def predict_from_otdr(otdr_values: dict) -> dict:
         # Ambil label dan confidence dari sumber yang sama (predict_proba)
         # agar keduanya tidak mungkin berbeda.
         if hasattr(lgbm_model, "predict_proba"):
-            proba = lgbm_model.predict_proba(X)[0]
-            pred_int = int(np.argmax(proba))
+            proba = lgbm_model.predict_proba(X)[0] # probability untuk setiap kelas
+            pred_int = int(np.argmax(proba))       # ambil indeks kelas dengan probabilitas tertinggi
             confidence = float(proba[pred_int]) * 100
         else:
             pred_int = int(round(float(lgbm_model.predict(X)[0])))
@@ -231,6 +198,4 @@ def predict_from_otdr(otdr_values: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Prediction error: {e}")
-        import traceback
-        traceback.print_exc()
-        return _rule_based(otdr_values, 70.0)
+        raise RuntimeError("Prediksi gagal. Periksa log untuk detail.") from e
