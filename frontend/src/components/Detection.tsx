@@ -474,9 +474,9 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
 
             {activeInputMethod === 'ocr' ? (
               <>
-                <Camera className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2 text-white text-center">Upload Photo OTDR</h3>
-                <p className="text-xs text-slate-100 mb-5 text-center">Format: JPG, PNG</p>
+                <Camera className="w-15 h-15 text-blue-500 mx-auto mb-3" />
+                <h3 className="text-lg font-semibold mb-4 text-white text-center">Upload Photo OTDR</h3>
+
                 {/* 🔥 TAMBAHKAN: Peringatan/Note untuk OCR */}
 <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
   <div className="flex items-start gap-2">
@@ -527,7 +527,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                       onChange={e => setPrxManual(e.target.value)}
                       className="flex-1 px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100"
                     />
-                    <span className="text-sm text-white whitespace-nowrap">dBm</span>
+                    <span className="text-sm font-bold text-white whitespace-nowrap">dBm</span>
                   </div>
                 </div>
                 
@@ -572,11 +572,11 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Prx (dBm)</label>
-                    <input type="number" step="0.01" value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="-15.60" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
+                    <input type="number" step="0.01" value={manualForm.prx} onChange={e => setManualForm({ ...manualForm, prx: e.target.value })} placeholder="0.0" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-600 font-mono" />
                   </div>
                   <div>
                     <label className="text-[14px] font-bold text-white tracking-widest mb-1.5 block">Avg-Total (dB/km)</label>
-                    <input type="number" step="0.001" value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.250" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
+                    <input type="number" step="0.001" value={manualForm.avg_total} onChange={e => setManualForm({ ...manualForm, avg_total: e.target.value })} placeholder="0.0" className="w-full px-3 py-2 bg-[#0f1a2e] border border-[#3b4f6e] rounded-lg text-white text-xs focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-100 font-mono" />
                   </div>
                 </div>
                 <div className="border border-[#3b4f6e]/50 rounded-xl overflow-x-auto mt-4">
@@ -594,7 +594,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     <tbody className="divide-y divide-[#3b4f6e]/30">
                       {[1, 2, 3, 4].map(km => (
                         <tr key={km} className="hover:bg-[#0f1a2e]/20">
-                          <td className="p-2 font-bold text-white text-xs">Km {km}</td>
+                          <td className="p-2 font-bold text-white text-xs">km {km}</td>
                           <td className="p-2">
                             <input type="number" step="0.00001" value={manualForm[`distance_${km}` as keyof typeof manualForm]} onChange={e => setManualForm({ ...manualForm, [`distance_${km}`]: e.target.value })} placeholder="0.0" className="w-full px-1.5 py-1 bg-[#0f1a2e]/50 border border-[#3b4f6e] rounded text-white text-[11px] font-mono outline-none" />
                           </td>
@@ -701,7 +701,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     <div className="grid grid-cols-2 gap-2 text-sm">
       {[1, 2, 3, 4].map((i) => (
         <div key={`loss-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Loss Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+          <span className="text-white font-medium">Loss km {i} <span className="text-white text-[13px]">(dB)</span></span>
           <div className="flex items-center gap-1.5">
             <input
               type="text"
@@ -729,7 +729,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     <div className="grid grid-cols-2 gap-2 text-sm mt-1">
       {[1, 2, 3, 4].map((i) => (
         <div key={`total-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Total-L Km {i} <span className="text-white text-[13px]">(dB)</span></span>
+          <span className="text-white font-medium">Total-L km {i} <span className="text-white text-[13px]">(dB)</span></span>
           <div className="flex items-center gap-1.5">
             <input
               type="text"
@@ -748,7 +748,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
     <div className="grid grid-cols-2 gap-2 text-sm mt-1">
       {[1, 2, 3, 4].map((i) => (
         <div key={`avg-${i}`} className="bg-[#0f1a2e]/50 rounded-lg p-2 flex justify-between items-center hover:bg-[#0f1a2e] transition-colors">
-          <span className="text-white font-medium">Avg-L Km {i} <span className="text-white text-[13px]">(dB/km)</span></span>
+          <span className="text-white font-medium">Avg-L km {i} <span className="text-white text-[13px]">(dB/km)</span></span>
           <div className="flex items-center gap-1.5">
             <input
               type="text"
@@ -826,7 +826,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
               <div className="space-y-4">
                 <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
                   <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
-                  <p className="text-2xl font-black">{lastResult.prediction}</p>
+                  <p className="text-2xl font-black text-red-500">{lastResult.prediction}</p>
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -842,7 +842,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {lastResult.extracted.losses?.map((l: number | null, i: number) => (
                       <div key={`loss-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-white">Loss Km {i + 1}</span>
+                        <span className="text-white">Loss km {i + 1}</span>
                         <span className="text-white font-mono">{l === null || l === undefined || l === 0 ? '---' : Math.abs(l).toFixed(2)} dB</span>
                       </div>
                     ))}
@@ -851,7 +851,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.total_ls.map((tl: number, i: number) => (
                         <div key={`total-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-white">Total-L Km {i + 1}</span>
+                          <span className="text-white">Total-L km {i + 1}</span>
                           <span className="text-white font-mono">{tl === 0 || tl === null || tl === undefined ? '---' : Math.abs(tl).toFixed(2)} dB</span>
                         </div>
                       ))}
@@ -861,7 +861,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                       {lastResult.extracted.avg_ls.map((al: number, i: number) => (
                         <div key={`avg-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                          <span className="text-white">Avg-L Km {i + 1}</span>
+                          <span className="text-white">Avg-L km {i + 1}</span>
                           <span className="text-white font-mono">{al === 0 ? '---' : Math.abs(al).toFixed(2)} dB/km</span>
                         </div>
                       ))}
@@ -876,7 +876,7 @@ const populateFormFromOcr = (ocrData: OcrParseResult) => {
                   <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     {lastResult.extracted.returns?.map((r: number | null, i: number) => (
                       <div key={`ret-${i}`} className="bg-[#0f1a2e] rounded-lg p-2 flex justify-between">
-                        <span className="text-white">Return Km {i + 1}</span>
+                        <span className="text-white">Return km {i + 1}</span>
                         <span className="text-white font-mono">{r === null || r === undefined ? '---' : r.toFixed(2)} dB</span>
                       </div>
                     ))}

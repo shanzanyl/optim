@@ -837,7 +837,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           {/* Classification Result — verdict tetap dari backend */}
           <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
             <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Classification Result</h3>
-            {verdictClass ? (
+            {verdictClass ? ( 
               <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                 <span className={`px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-sm sm:text-base font-bold border ${getPredictionColor(verdictClass)}`}>
                   {verdictClass}
@@ -864,10 +864,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                   {status === 'error' ? 'Error' : 'Idle'}
                 </span>
               </div>
-            )}
-            <div className="text-xs sm:text-xs text-white/80 mt-1.5">
-              {currentDistance !== null ? `Distance: ${currentDistance.toFixed(4)} km` : 'Distance: -'}
-            </div>
+            )} 
           </div>
 
           {/* Zoom Controls */}
