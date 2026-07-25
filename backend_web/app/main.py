@@ -1849,10 +1849,10 @@ async def process_sor_file(
     # Alias untuk kompatibilitas kode di bawah
     backscatter_data = loss_data # alias: data ini adalah Loss (dB), nama historis "backscatter"
 
-    if len(backscatter_data) < 50: # minimal 50 titik diperlukan untuk sliding window
+    if len(backscatter_data) < 80: # minimal 80 titik diperlukan untuk sliding window
         raise HTTPException(
             status_code=400,
-            detail=f"Data Loss (dB) hanya {len(backscatter_data)} titik. Minimal 50 titik diperlukan."
+            detail=f"Data Loss (dB) hanya {len(backscatter_data)} titik. Minimal 80 titik diperlukan."
         )
 
     # 5. Cek model SOR sudah loaded
@@ -1868,9 +1868,9 @@ async def process_sor_file(
     logger.info(f"[SOR]   normalization: per-segment (normalization.py)")
     logger.info(f"[SOR]   label encoder = {ml_sor.sor_le is not None}")
 
-    # 6. BATCH PREDICT — window_size=50, stride=25 (LSTM model)
-    window_size  = 50
-    stride       = 25
+    # 6. BATCH PREDICT — window_size=80, stride=40 (CNN-BiGRU model)
+    window_size  = 80
+    stride       = 40
     total_windows = max(0, (len(backscatter_data) - window_size) // stride + 1)
 
     logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")

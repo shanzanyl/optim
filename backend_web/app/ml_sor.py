@@ -1,5 +1,5 @@
 # backend_web/app/ml_sor.py
-# Model CNN-BiGRU untuk Dashboard SOR — window_size=50, stride=25
+# Model CNN-BiGRU untuk Dashboard SOR — window_size=80, stride=40
 # Preprocessing: per-segment normalization via normalization.py (BUKAN scaler.pkl)
 
 import importlib.util
@@ -26,8 +26,8 @@ SOR_MODEL_PATHS = [
     Path.cwd() / "models" / "sor" / "model_cnn_bigru.keras",
 ]
 SOR_LABEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "label_encoder_50_25.joblib",
-    Path.cwd() / "models" / "sor" / "label_encoder_50_25.joblib",
+    BASE_DIR / "models" / "sor" / "label_encoder.pkl",
+    Path.cwd() / "models" / "sor" / "label_encoder.pkl",
 ]
 
 sor_model = None
@@ -38,7 +38,7 @@ def load_sor_models():
     global sor_model, sor_le
 
     logger.info("=" * 50)
-    logger.info("[ML_SOR] 🔄 Loading SOR CNN-BiGRU model (window=50, stride=25)...")
+    logger.info("[ML_SOR] 🔄 Loading SOR CNN-BiGRU model (window=80, stride=40)...")
     logger.info(f"[ML_SOR]   BASE_DIR = {BASE_DIR}")
     logger.info(f"[ML_SOR]   CWD      = {Path.cwd()}")
 
@@ -72,9 +72,9 @@ def load_sor_models():
         logger.error("[ML_SOR] ❌ Label encoder NOT loaded")
 
 
-def predict_sor_batch(backscatter_data: list, window_size: int = 50, stride: int = 25) -> list:
+def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int = 40) -> list:
     """
-    BATCH PREDICT dengan CNN-BiGRU — window_size=50, stride=25.
+    BATCH PREDICT dengan CNN-BiGRU — window_size=80, stride=40.
 
     Pipeline:
     1. Sliding window pada data backscatter (kolom Loss dB)
