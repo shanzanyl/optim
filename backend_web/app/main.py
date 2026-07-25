@@ -365,12 +365,12 @@ async def lifespan(app: FastAPI):
     
     logger.info("✅ Database tables ready")
     
-    # 🔥 Load SOR LSTM model in background so startup completes instantly
+    # 🔥 Load SOR CNN-BiGRU model in background so startup completes instantly
     async def load_models_bg():
         try:
-            logger.info("⏳ Starting SOR LSTM model loading in background...")
+            logger.info("⏳ Starting SOR CNN-BiGRU model loading in background...")
             await asyncio.to_thread(ml_sor.load_sor_models)
-            logger.info("✅ SOR LSTM models loaded in background")
+            logger.info("✅ SOR CNN-BiGRU model loaded in background")
         except Exception as e:
             logger.error(f"❌ Failed to load SOR models in background: {e}")
 
@@ -1760,7 +1760,7 @@ async def detect_manual(
     }
 
 # ============================================================
-# DASHBOARD - PROCESS SOR EXCEL FILE (LSTM)
+# DASHBOARD - PROCESS SOR EXCEL FILE (CNN-BiGRU)
 # ============================================================
 
 @app.post("/api/dashboard/process-sor")
@@ -1770,7 +1770,7 @@ async def process_sor_file(
     current_user: User = Depends(get_current_user), # user yang sedang login
 ):
     """
-    Proses file SOR (CSV atau Excel) dengan sliding window dan klasifikasi LSTM.
+    Proses file SOR (CSV atau Excel) dengan sliding window dan klasifikasi CNN-BiGRU.
     """
     # ── LOG: MAIN START ──
     logger.info("=" * 70)
@@ -1862,10 +1862,10 @@ async def process_sor_file(
         logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
         raise HTTPException(
             status_code=500,
-            detail="Model LSTM belum dimuat. Pastikan file model ada di folder models/sor/"
+            detail="Model CNN-BiGRU belum dimuat. Pastikan file model_cnn_bigru.keras ada di folder models/sor/"
         )
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
-    logger.info(f"[SOR]   scaler loaded = {ml_sor.sor_scaler is not None}")
+    logger.info(f"[SOR]   normalization: per-segment (normalization.py)")
     logger.info(f"[SOR]   label encoder = {ml_sor.sor_le is not None}")
 
     # 6. BATCH PREDICT — window_size=50, stride=25 (LSTM model)

@@ -1,9 +1,10 @@
 # backend_web/app/ml_sor.py
-# Model LSTM untuk Dashboard SOR — window_size=50, stride=25
+# Model CNN-BiGRU untuk Dashboard SOR — window_size=50, stride=25
+# Preprocessing: per-segment normalization via normalization.py (BUKAN scaler.pkl)
 
+import importlib.util
 import joblib
 import numpy as np
-import warnings
 from pathlib import Path
 import logging
 
@@ -12,52 +13,44 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ── Path model LSTM ──────────────────────────────────────────
+# ── Load normalization.py langsung dari path absolut (tidak perlu sys.path) ──
+_NORM_PATH = BASE_DIR / "models" / "sor" / "normalization.py"
+_norm_spec = importlib.util.spec_from_file_location("normalization", _NORM_PATH)
+_norm_module = importlib.util.module_from_spec(_norm_spec)
+_norm_spec.loader.exec_module(_norm_module)
+apply_normalization = _norm_module.apply_normalization
+
+# ── Path model CNN-BiGRU ──────────────────────────────────────────────────────
 SOR_MODEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "lstm_model_50_25.keras",
-    Path.cwd() / "models" / "sor" / "lstm_model_50_25.keras",
-]
-SOR_SCALER_PATHS = [
-    BASE_DIR / "models" / "sor" / "standard_scaler_50_25.joblib",
-    Path.cwd() / "models" / "sor" / "standard_scaler_50_25.joblib",
+    BASE_DIR / "models" / "sor" / "model_cnn_bigru.keras",
+    Path.cwd() / "models" / "sor" / "model_cnn_bigru.keras",
 ]
 SOR_LABEL_PATHS = [
     BASE_DIR / "models" / "sor" / "label_encoder_50_25.joblib",
     Path.cwd() / "models" / "sor" / "label_encoder_50_25.joblib",
 ]
 
-sor_model  = None
-sor_scaler = None
-sor_le     = None
+sor_model = None
+sor_le    = None
 
 
 def load_sor_models():
-    global sor_model, sor_scaler, sor_le
+    global sor_model, sor_le
 
     logger.info("=" * 50)
-    logger.info("[ML_SOR] 🔄 Loading SOR LSTM models (window=50, stride=25)...")
+    logger.info("[ML_SOR] 🔄 Loading SOR CNN-BiGRU model (window=50, stride=25)...")
     logger.info(f"[ML_SOR]   BASE_DIR = {BASE_DIR}")
     logger.info(f"[ML_SOR]   CWD      = {Path.cwd()}")
 
-    # Load LSTM model
+    # Load CNN-BiGRU model
     for path in SOR_MODEL_PATHS:
         logger.info(f"[ML_SOR]   model path: {path} → exists={path.exists()}")
         if path.exists():
             try:
                 import tensorflow as tf
                 sor_model = tf.keras.models.load_model(str(path))
-                logger.info(f"[ML_SOR] ✅ LSTM model loaded: {path}")
+                logger.info(f"[ML_SOR] ✅ CNN-BiGRU model loaded: {path}")
                 logger.info(f"[ML_SOR]   input_shape={sor_model.input_shape}, output_shape={sor_model.output_shape}")
-                break
-            except Exception as e:
-                logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
-
-    # Load scaler
-    for path in SOR_SCALER_PATHS:
-        if path.exists():
-            try:
-                sor_scaler = joblib.load(path)
-                logger.info(f"[ML_SOR] ✅ Scaler loaded: {path}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
@@ -74,25 +67,24 @@ def load_sor_models():
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
     if sor_model is None:
-        logger.error("[ML_SOR] ❌ LSTM model NOT loaded")
-    if sor_scaler is None:
-        logger.error("[ML_SOR] ❌ Scaler NOT loaded")
+        logger.error("[ML_SOR] ❌ CNN-BiGRU model NOT loaded")
     if sor_le is None:
         logger.error("[ML_SOR] ❌ Label encoder NOT loaded")
 
 
 def predict_sor_batch(backscatter_data: list, window_size: int = 50, stride: int = 25) -> list:
     """
-    BATCH PREDICT dengan LSTM — window_size=50, stride=25.
+    BATCH PREDICT dengan CNN-BiGRU — window_size=50, stride=25.
 
     Pipeline:
     1. Sliding window pada data backscatter (kolom Loss dB)
-    2. Setiap window di-scale dengan StandardScaler
-    3. Reshape ke (batch, window_size, 1) untuk LSTM
-    4. Prediksi batch, decode label
+    2. Setiap window dinormalisasi secara independen dengan normalize_per_segment()
+       dari normalization.py (BUKAN StandardScaler/scaler.pkl)
+    3. Reshape ke (batch, window_size, 1) untuk CNN-BiGRU
+    4. Prediksi batch, decode label via label encoder
 
     Args:
-        backscatter_data: list nilai backscatter/loss dari CSV
+        backscatter_data: list nilai Loss (dB) dari CSV/Excel
         window_size: ukuran sliding window (default 50)
         stride: pergeseran antar window (default 25)
 
@@ -100,9 +92,7 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 50, stride: int
         list of dict: [{start, end, prediction, confidence}, ...]
     """
     if sor_model is None:
-        raise Exception("[ML_SOR] LSTM model is None — model belum dimuat")
-    if sor_scaler is None:
-        raise Exception("[ML_SOR] Scaler is None — scaler belum dimuat")
+        raise Exception("[ML_SOR] CNN-BiGRU model is None — model belum dimuat")
     if sor_le is None:
         raise Exception("[ML_SOR] Label encoder is None — label encoder belum dimuat")
 
@@ -130,20 +120,24 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 50, stride: int
 
     logger.info(f"[ML_SOR] ✅ Matrix built: shape={X_all.shape}")
 
-    # Scale: StandardScaler (fit per window — transform seluruh batch)
-    # StandardScaler dilatih dengan shape (n_samples, window_size)
-    X_scaled = sor_scaler.transform(X_all)  # shape: (total_windows, window_size)
+    # ── Normalisasi per-segment (menggantikan StandardScaler) ─────────────────
+    # Setiap baris (window) dinormalisasi secara independen:
+    #   normalized = (window - mean) / (std + 1e-8)
+    # Ini sesuai dengan cara model CNN-BiGRU dilatih.
+    X_normalized = apply_normalization(X_all)  # shape: (total_windows, window_size)
 
-    # Reshape untuk LSTM: (batch, timesteps, features) = (total_windows, window_size, 1)
-    X_lstm = X_scaled.reshape(total_windows, window_size, 1)
+    logger.info(f"[ML_SOR] ✅ Per-segment normalization applied")
 
-    logger.info(f"[ML_SOR] 🔄 Running LSTM batch predict on {total_windows} windows...")
+    # Reshape untuk CNN-BiGRU: (batch, timesteps, features) = (total_windows, window_size, 1)
+    X_input = X_normalized.reshape(total_windows, window_size, 1)
+
+    logger.info(f"[ML_SOR] 🔄 Running CNN-BiGRU batch predict on {total_windows} windows...")
 
     # Predict semua window sekaligus
-    proba_all = sor_model.predict(X_lstm, batch_size=256, verbose=0)
+    proba_all = sor_model.predict(X_input, batch_size=256, verbose=0)
     # proba_all shape: (total_windows, n_classes)
 
-    preds = np.argmax(proba_all, axis=1)
+    preds       = np.argmax(proba_all, axis=1)
     confidences = np.max(proba_all, axis=1)
 
     # Decode label
