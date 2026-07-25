@@ -1965,6 +1965,17 @@ async def process_sor_file(
 
     clean_backscatter = [sanitize(v) for v in backscatter_data]
 
+    # Hitung average confidence untuk final_class
+    matching_confidences = [
+        p["confidence"] for p in predictions if p["prediction"].lower() == final_class.lower()
+    ]
+    if matching_confidences:
+        final_confidence = round(float(np.mean(matching_confidences)), 2)
+    elif predictions:
+        final_confidence = round(float(np.mean([p["confidence"] for p in predictions])), 2)
+    else:
+        final_confidence = 0.0
+
     return {
         "success"      : True,
         "backscatter"  : clean_backscatter,   # Loss (dB) — untuk grafik Y
@@ -1977,6 +1988,7 @@ async def process_sor_file(
         "filename"     : file.filename,
         "classification": final_class,
         "status"       : final_status,
+        "confidence"   : final_confidence,
         "metadata": {
             "columns": df.columns.tolist(),
             "rows"   : len(df),

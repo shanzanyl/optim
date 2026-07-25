@@ -62,6 +62,9 @@ type ProcessedData = {
   // disimpan ke DB dan yang memicu notifikasi Telegram.
   classification: string;
   status: string;
+  // Rata-rata confidence model CNN-BiGRU untuk kelas final (classification).
+  // Dikirim backend sebagai top-level field, terpisah dari confidence per-window.
+  confidence?: number;
   metadata: {
     columns: string[];
     rows: number;
@@ -84,7 +87,7 @@ type DashboardHistoryItem = {
 // KOMPONEN PEMBANTU
 // ─────────────────────────────────────────────────────────────
 
-const StatusBadge = ({ status }: { status: string | null | undefined }) => {
+const StatusBadge = ({ status, size = 'md' }: { status: string | null | undefined; size?: 'sm' | 'md' | 'lg' }) => {
   const cfg: Record<string, string> = {
     'Normal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
     'Warning': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
@@ -97,10 +100,20 @@ const StatusBadge = ({ status }: { status: string | null | undefined }) => {
     'Critical': 'bg-red-400',
     'Error': 'bg-red-400',
   };
+  const sizeClass = {
+    sm: 'gap-1.5 px-2.5 py-1 text-xs',
+    md: 'gap-2 px-3 py-1.5 text-sm',
+    lg: 'gap-2.5 px-5 py-2.5 text-lg sm:text-xl',
+  }[size];
+  const dotSize = {
+    sm: 'w-1.5 h-1.5',
+    md: 'w-2 h-2',
+    lg: 'w-2.5 h-2.5',
+  }[size];
   const s = status || 'Warning';
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black uppercase border ${cfg[s] || cfg.Warning}`}>
-      <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${dot[s] || dot.Warning}`} />
+    <span className={`inline-flex items-center rounded-full font-black uppercase border ${sizeClass} ${cfg[s] || cfg.Warning}`}>
+      <span className={`rounded-full animate-pulse ${dotSize} ${dot[s] || dot.Warning}`} />
       {s}
     </span>
   );
@@ -140,8 +153,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   // ── Playback speed ──
   // Animasi trace dipercepat: interval lebih pendek + beberapa titik per tick,
   // sehingga visualisasi selesai jauh lebih cepat namun tetap terlihat halus.
-  const PLAYBACK_INTERVAL_MS = 16;
-  const POINTS_PER_TICK = 5;
+  const PLAYBACK_INTERVAL_MS = 50;
+  const POINTS_PER_TICK = 1;
 
   // ── Normalisasi nama kelas untuk tampilan ──
   // Label encoder mengeluarkan casing campur ('normal' huruf kecil, sisanya
@@ -409,21 +422,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   }, [data, currentPointIndex]);
 
   // ── Chart Options ──
-  // xMax mengikuti currentPointIndex agar sumbu X tumbuh bertahap seiring animasi
-  const xMax = useMemo(() => {
-    if (!data || currentPointIndex < 0) return undefined;
-    const distArr = data.distance ?? [];
-    const hasDistance =
-      distArr.length === data.backscatter.length &&
-      distArr.some(v => v !== null && v !== undefined);
-
-    if (hasDistance) {
-      const d = distArr[currentPointIndex];
-      return d !== null && d !== undefined ? Number(d) : undefined;
-    }
-    return currentPointIndex;
-  }, [data, currentPointIndex]);
-
+  // Sumbu X sengaja tidak diberi `max` statis (lihat scales.x di bawah) —
+  // Chart.js autoscale mengikuti titik data terbaru saat animasi berjalan,
+  // sehingga sumbu tetap tumbuh bertahap tanpa perlu dependency yang berubah
+  // tiap tick. Ini juga membuat chartjs-plugin-zoom mempertahankan status
+  // zoom pengguna melewati update data, sehingga Zoom In/Out tetap berfungsi
+  // walau trace sedang playing.
   const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -441,7 +445,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         borderColor: '#3b4f6e',
         borderWidth: 1,
         cornerRadius: 8,
-        padding: 10,
+        padding: 12,
+        titleFont: { size: 14 },
+        bodyFont: { size: 13 },
         callbacks: {
           title: function(items: any[]) {
             if (!items.length) return '';
@@ -472,18 +478,18 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       x: {
         type: 'linear' as const,
         min: 0,
-        max: xMax,   // ← X axis stops at last data point
+        // max sengaja tidak di-hardcode — lihat komentar di atas chartOptions
         title: {
           display: true,
           text: 'Distance (km)',
           color: '#ffffff',
-          font: { weight: 'bold' as const, size: 13 },
+          font: { weight: 'bold' as const, size: 15 },
         },
         grid: { color: '#2a3d6080' },
         ticks: {
           color: '#ffffff',
           maxTicksLimit: 8,
-          font: { size: 12 },
+          font: { size: 13 },
           callback: function(val: any) {
             const n = Number(val);
             return n.toFixed(3);
@@ -495,17 +501,48 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           display: true,
           text: 'Loss (dB)',
           color: '#ffffff',
-          font: { weight: 'bold' as const, size: 13 },
+          font: { weight: 'bold' as const, size: 15 },
         },
         grid: { color: '#2a3d6080' },
         ticks: {
           color: '#ffffff',
-          font: { size: 12 },
+          font: { size: 13 },
         },
         reverse: false,
       },
     },
-  }), [xMax]);
+  }), []);
+
+  // ── Update sumbu X secara programatik via ref ──
+  // chartOptions sengaja tidak punya `max` (agar stabil / tidak dibuat ulang
+  // tiap tick → zoom plugin tidak terganggu). Sebagai gantinya, sumbu X
+  // di-update langsung lewat chartRef setiap currentPointIndex berubah.
+  // Kalau user sedang zoom (isZoomedOrPanned), update diskip agar zoom persist.
+  useEffect(() => {
+    if (!chartRef.current || !data || currentPointIndex < 0) return;
+    const chart = chartRef.current;
+
+    const distArr = data.distance ?? [];
+    const hasDistance =
+      distArr.length === data.backscatter.length &&
+      distArr.some(v => v !== null && v !== undefined);
+
+    let newMax: number | undefined;
+    if (hasDistance) {
+      const d = distArr[currentPointIndex];
+      newMax = d !== null && d !== undefined ? Number(d) : undefined;
+    } else {
+      newMax = currentPointIndex;
+    }
+
+    if (newMax !== undefined && chart.scales?.x) {
+      const isZoomed = chart.isZoomedOrPanned?.() ?? false;
+      if (!isZoomed) {
+        chart.scales.x.options.max = newMax;
+        chart.update('none');
+      }
+    }
+  }, [data, currentPointIndex]);
 
   // ── Verdict final (tetap, tidak berubah selama animasi) ──
   // Diambil langsung dari respons backend — hasil majority vote seluruh window
@@ -584,8 +621,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         position: 'bottom' as const,
         labels: {
           color: '#e2e8f0',
-          font: { size: 12 },
-          padding: 12,
+          font: { size: 14 },
+          padding: 16,
           usePointStyle: true,
           pointStyle: 'circle' as const,
         },
@@ -597,7 +634,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         borderColor: '#3b4f6e',
         borderWidth: 1,
         cornerRadius: 8,
-        padding: 10,
+        padding: 12,
+        titleFont: { size: 14 },
+        bodyFont: { size: 13 },
         callbacks: {
           label: function(context: any) {
             const value = Number(context.parsed) || 0;
@@ -623,14 +662,15 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       distArr.length === data.backscatter.length &&
       distArr.some(v => v !== null && v !== undefined);
 
-    const raw: { cls: string; startIdx: number; endIdx: number }[] = [];
+    const raw: { cls: string; startIdx: number; endIdx: number; confidences: number[] }[] = [];
     data.predictions.forEach(p => {
       const cls = formatClassName(p.prediction);
       const last = raw[raw.length - 1];
       if (last && last.cls === cls) {
         last.endIdx = p.end;
+        last.confidences.push(p.confidence);
       } else {
-        raw.push({ cls, startIdx: p.start, endIdx: p.end });
+        raw.push({ cls, startIdx: p.start, endIdx: p.end, confidences: [p.confidence] });
       }
     });
 
@@ -646,10 +686,22 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     return raw.map((s, i) => {
       const endIdx =
         i + 1 < raw.length ? raw[i + 1].startIdx - 1 : data.total_points - 1;
+      const avgConfidence =
+        s.confidences.reduce((a, b) => a + b, 0) / s.confidences.length;
+      // Status per segmen mengikuti aturan sama seperti verdict final di
+      // backend: Normal → Normal, mengandung "cut" → Critical, gangguan
+      // lain → Warning.
+      const clsLower = s.cls.toLowerCase();
+      const segStatus =
+        clsLower === 'normal' ? 'Normal' :
+        clsLower.includes('cut') ? 'Critical' :
+        'Warning';
       return {
         cls: s.cls,
+        status: segStatus,
         start: hasDistance ? at(s.startIdx) : null,
         end: hasDistance ? at(endIdx) : null,
+        confidence: avgConfidence,
       };
     });
   }, [data]);
@@ -660,17 +712,15 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
       <main className="w-full px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-6 space-y-3 sm:space-y-4 md:space-y-6">
 
         {/* Header - Responsive */}
-        <div className="flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-2 sm:gap-3">
+        <div className="flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-3 sm:gap-4">
           <div className="w-full sm:w-auto">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-              <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 flex-shrink-0" />
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white flex items-center gap-2.5">
+              <Activity className="w-6 h-6 sm:w-7 sm:h-7 text-blue-400 flex-shrink-0" />
               <span className="truncate">OTDR Monitoring Simulator</span>
             </h1>
-            <p className="text-xs sm:text-sm text-white/80 truncate">
-            </p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <label className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl font-medium cursor-pointer transition-colors text-xs sm:text-sm text-center ${
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            <label className={`flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl font-semibold cursor-pointer transition-colors text-sm sm:text-base text-center ${
               loading ? 'bg-slate-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25'
             }`}>
               <input
@@ -684,11 +734,11 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 disabled={loading}
                 className="hidden"
               />
-              <FileSpreadsheet size={14} className="inline mr-1 sm:mr-2" />
+              <FileSpreadsheet size={16} className="inline mr-1.5 sm:mr-2" />
               {loading ? 'Uploading...' : 'Upload File'}
             </label>
             {data && (
-              <span className="text-xs text-white/80 bg-[#1e2f50] px-2 sm:px-3 py-1 rounded-full border border-[#3b4f6e] truncate max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
+              <span className="text-sm text-white/80 bg-[#1e2f50] px-3 sm:px-4 py-1.5 rounded-full border border-[#3b4f6e] truncate max-w-[120px] sm:max-w-[180px] md:max-w-[240px]">
                 {data.filename}
               </span>
             )}
@@ -696,10 +746,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         </div>
 
         {/* Status Bar - Responsive */}
-        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-xl p-2 sm:p-3 md:p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
+        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-xl p-3 sm:p-4 md:p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className={`w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full flex-shrink-0 ${
                 status === 'error' ? 'bg-red-500' :
                 status === 'ready' ? 'bg-green-500' :
                 status === 'playing' ? 'bg-green-500 animate-pulse' :
@@ -707,7 +757,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                 status === 'idle' ? 'bg-slate-400' :
                 'bg-amber-500 animate-pulse'
               }`} />
-              <span className="text-xs sm:text-xs md:text-sm font-medium text-white truncate">
+              <span className="text-sm sm:text-base font-semibold text-white truncate">
                 {status === 'idle' && '📂 Ready to upload'}
                 {status === 'uploading' && 'Uploading...'}
                 {status === 'processing' && 'Processing data...'}
@@ -719,10 +769,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
               </span>
             </div>
             {data && (
-              <div className="flex items-center gap-1 sm:gap-3 text-xs sm:text-xs text-white/80 flex-wrap">
-                <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">Points: {data.total_points}</span>
+              <div className="flex items-center gap-2 sm:gap-3 text-sm text-white/80 flex-wrap">
+                <span className="bg-[#0f1a2e] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded border border-[#3b4f6e] font-medium">Points: {data.total_points}</span>
                 {currentDistance !== null && (
-                  <span className="bg-[#0f1a2e] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border border-[#3b4f6e]">
+                  <span className="bg-[#0f1a2e] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded border border-[#3b4f6e] font-medium">
                     Distance: {currentDistance.toFixed(4)} km
                   </span>
                 )}
@@ -731,9 +781,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           </div>
           {/* Progress Bar */}
           {data && (
-            <div className="mt-1.5 sm:mt-2 w-full bg-slate-700 rounded-full h-1 overflow-hidden">
+            <div className="mt-2 sm:mt-3 w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
               <div
-                className={`h-1 rounded-full transition-all duration-100 ${
+                className={`h-1.5 rounded-full transition-all duration-100 ${
                   status === 'error' ? 'bg-red-500' :
                   status === 'complete' ? 'bg-blue-500' :
                   status === 'playing' || status === 'paused' ? 'bg-green-500' :
@@ -744,28 +794,28 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             </div>
           )}
           {loading && (
-            <div className="mt-1.5 sm:mt-2 w-full bg-slate-700 rounded-full h-1 overflow-hidden">
+            <div className="mt-2 sm:mt-3 w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
               <div
-                className="h-1 rounded-full bg-blue-500 transition-all duration-300"
+                className="h-1.5 rounded-full bg-blue-500 transition-all duration-300"
                 style={{ width: `${uploadProgress}%` }}
               />
             </div>
           )}
           {errorDetail && status === 'error' && (
-            <div className="mt-1.5 sm:mt-2 p-1.5 sm:p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs sm:text-xs text-red-400 break-all">
+            <div className="mt-2 sm:mt-3 p-2.5 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 break-all">
               <strong>Error:</strong> {errorDetail}
             </div>
           )}
           {statusMessage && status !== 'error' && (
-            <div className="mt-0.5 sm:mt-1 text-xs sm:text-xs text-white/80 truncate">
+            <div className="mt-1 sm:mt-1.5 text-sm text-white/80 truncate">
               {statusMessage}
             </div>
           )}
         </div>
 
         {/* Chart - Full Width Responsive */}
-        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-2 sm:p-3 md:p-4 shadow-sm w-full">
-          <div className="h-[200px] sm:h-[280px] md:h-[350px] lg:h-[400px] w-full">
+        <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 md:p-5 shadow-sm w-full">
+          <div className="h-[260px] sm:h-[340px] md:h-[420px] lg:h-[480px] w-full">
             {chartData ? (
               <Line
                 ref={chartRef}
@@ -775,11 +825,11 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
             ) : (
               <div className="h-full flex items-center justify-center text-white/60">
                 <div className="text-center px-4">
-                  <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 mx-auto mb-2 sm:mb-3 md:mb-4 bg-[#0f1a2e] rounded-full flex items-center justify-center border border-[#3b4f6e]">
-                    <Activity className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 text-white/60" />
+                  <div className="w-14 h-14 sm:w-20 sm:h-20 md:w-24 md:h-24 mx-auto mb-3 sm:mb-4 md:mb-5 bg-[#0f1a2e] rounded-full flex items-center justify-center border border-[#3b4f6e]">
+                    <Activity className="w-7 h-7 sm:w-9 sm:h-9 md:w-12 md:h-12 text-white/60" />
                   </div>
-                  <p className="font-medium text-white text-sm sm:text-base">Upload file to view the classification result</p>
-                  <p className="text-xs sm:text-sm text-white/80 mt-1">Format: CSV, Excel (.xlsx)</p>
+                  <p className="font-medium text-white text-base sm:text-lg">Upload file to view the classification result</p>
+                  <p className="text-sm sm:text-base text-white/80 mt-1.5">Format: CSV, Excel (.xlsx)</p>
                 </div>
               </div>
             )}
@@ -787,45 +837,45 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         </div>
 
         {/* Controls & Status - Responsive Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           {/* Controls */}
-          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4 sm:p-5 shadow-sm">
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
               <button
                 onClick={startPlayback}
                 disabled={!data || isPlaying || status === 'complete'}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2.5 py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-1 text-sm"
               >
-                <Play size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Play</span>
+                <Play size={16} className="sm:w-[18px] sm:h-[18px]" />
               </button>
               <button
                 onClick={pausePlayback}
                 disabled={!isPlaying}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2.5 py-2.5 sm:py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-1 text-sm"
               >
-                <Pause size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Pause</span>
+                <Pause size={16} className="sm:w-[18px] sm:h-[18px]" />
               </button>
               <button
                 onClick={stopPlayback}
                 disabled={!data || currentPointIndex === 0}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2.5 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-1 text-sm"
               >
-                <Square size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Stop</span>
+                <Square size={16} className="sm:w-[18px] sm:h-[18px]" />
               </button>
               <button
                 onClick={resetPlayback}
                 disabled={!data}
-                className="px-1.5 sm:px-2 py-1.5 sm:py-2 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-500 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1 text-xs sm:text-xs md:text-sm"
+                className="px-1.5 sm:px-2.5 py-2.5 sm:py-3 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-500 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-1 text-sm"
               >
-                <RotateCcw size={12} className="sm:w-3.5 sm:h-3.5" /> <span className="hidden xs:inline">Reset</span>
+                <RotateCcw size={16} className="sm:w-[18px] sm:h-[18px]" />
               </button>
             </div>
-            <div className="mt-1.5 sm:mt-2 text-xs sm:text-xs text-white/80 text-center truncate">
+            <div className="mt-3 text-sm text-white/80 text-center truncate">
               {data ? (
                 <>
                   Point {Math.min(currentPointIndex + 1, data.total_points)} / {data.total_points}
                   {currentDistance !== null && (
-                    <> · Distance {currentDistance.toFixed(4)} km</>
+                    <> · {currentDistance.toFixed(4)} km</>
                   )}
                 </>
               ) : (
@@ -835,55 +885,57 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           </div>
 
           {/* Classification Result — verdict tetap dari backend */}
-          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Classification Result</h3>
-            {verdictClass ? ( 
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <span className={`px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-sm sm:text-base font-bold border ${getPredictionColor(verdictClass)}`}>
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col">
+            <h3 className="text-sm font-bold text-white/80 uppercase tracking-wider mb-2">Classification Result</h3>
+            <div className="flex-1 flex items-center">
+              {verdictClass ? ( 
+                <span className={`px-5 sm:px-6 py-2.5 sm:py-3 rounded-full text-lg sm:text-xl font-bold border ${getPredictionColor(verdictClass)}`}>
                   {verdictClass}
                 </span>
-              </div>
-            ) : (
-              <div className="text-xs sm:text-sm text-white/80">
-                Upload a file to see the result
-              </div>
-            )}
+              ) : (
+                <span className="text-base text-white/80">
+                  Upload a file to see the result
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Status — mengikuti verdict backend */}
-          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Status</h3>
-            {verdictStatus ? (
-              <StatusBadge status={verdictStatus} />
-            ) : (
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${
-                  status === 'error' ? 'bg-red-500' : 'bg-slate-400'
-                }`} />
-                <span className="font-medium text-xs sm:text-sm text-white">
-                  {status === 'error' ? 'Error' : 'Idle'}
-                </span>
-              </div>
-            )} 
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col">
+            <h3 className="text-sm font-bold text-white/80 uppercase tracking-wider mb-2">Status</h3>
+            <div className="flex-1 flex items-center">
+              {verdictStatus ? (
+                <StatusBadge status={verdictStatus} size="lg" />
+              ) : (
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                    status === 'error' ? 'bg-red-500' : 'bg-slate-400'
+                  }`} />
+                  <span className="font-semibold text-base text-white">
+                    {status === 'error' ? 'Error' : 'Idle'}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Zoom Controls */}
-          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm">
-            <h3 className="text-xs sm:text-xs font-bold text-white/80 uppercase tracking-wider mb-1 sm:mb-2">Zoom</h3>
-            <div className="flex gap-1.5 sm:gap-2">
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col justify-center">
+            <h3 className="text-sm font-bold text-white/80 uppercase tracking-wider mb-3">Zoom</h3>
+            <div className="flex gap-2.5">
               <button
                 onClick={() => {
                   if (chartRef.current) {
                     try {
-                      chartRef.current.zoom?.(-1);
+                      chartRef.current.zoom?.(1.25);
                     } catch {
                       // Ignore
                     }
                   }
                 }}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
+                className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm sm:text-base font-semibold transition-colors flex items-center justify-center gap-1"
               >
-                <ChevronLeft size={12} className="sm:w-3.5 sm:h-3.5" /> Zoom In
+                <ChevronLeft size={16} className="sm:w-[18px] sm:h-[18px]" /> Zoom In
               </button>
               <button
                 onClick={() => {
@@ -895,9 +947,9 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     }
                   }
                 }}
-                className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-0.5 sm:gap-1"
+                className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm sm:text-base font-semibold transition-colors flex items-center justify-center gap-1"
               >
-                Zoom Out <ChevronRight size={12} className="sm:w-3.5 sm:h-3.5" />
+                Zoom Out <ChevronRight size={16} className="sm:w-[18px] sm:h-[18px]" />
               </button>
             </div>
           </div>
@@ -905,12 +957,12 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
         {/* Info Panel */}
         {data && (
-          <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 sm:p-4 text-xs sm:text-sm text-blue-400">
-            <div className="flex items-start gap-2 sm:gap-3">
-              <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 sm:p-5 text-sm sm:text-base text-blue-400">
+            <div className="flex items-start gap-3">
+              <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 flex-shrink-0 mt-0.5" />
               <div className="w-full overflow-hidden">
-                <p className="font-medium text-white text-xs sm:text-sm">Data Information</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 mt-1 text-xs sm:text-xs text-white">
+                <p className="font-semibold text-white text-base sm:text-lg">Data Information</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2.5 mt-1.5 text-sm sm:text-base text-white">
                   <span className="truncate">Points: <strong className="text-white">{data.total_points}</strong></span>
                   <span className="truncate">File: <strong className="text-white truncate">{data.filename}</strong></span>
                 </div>
@@ -921,34 +973,42 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
         {/* ── Trace Segments ── */}
         {segments.length > 0 && (
-          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-3 sm:p-4 shadow-sm w-full overflow-hidden">
-            <h3 className="text-xs sm:text-sm font-bold text-white mb-2 sm:mb-3 flex items-center gap-2">
-              <span className="w-1 h-4 sm:w-1.5 sm:h-5 bg-blue-500 rounded-full" />
+          <div className="bg-[#1e2f50] border border-[#3b4f6e] rounded-2xl p-4 sm:p-5 shadow-sm w-full overflow-hidden">
+            <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center gap-2.5">
+              <span className="w-1.5 h-5 sm:w-2 sm:h-6 bg-blue-500 rounded-full" />
               Trace Segments
-              <span className="text-xs font-normal text-white/80 ml-1">
+              <span className="text-sm font-normal text-white/80 ml-1">
                 ({segments.length} segments · {data?.total_windows || 0} windows)
               </span>
             </h3>
-            <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
-                <thead className="bg-[#0f1a2e] sticky top-0">
-                  <tr className="text-white/80 font-medium text-xs border-b border-[#3b4f6e]">
-                    <th className="px-2 sm:px-3 py-1.5 sm:py-2 text-left">Distance</th>
-                    <th className="px-2 sm:px-3 py-1.5 sm:py-2 text-left">Classification</th>
+            <div className="max-h-[360px] overflow-y-auto overflow-x-auto relative">
+              <table className="w-full text-sm">
+                <thead className="bg-[#0f1a2e] sticky top-0 z-10">
+                  <tr className="text-white/90 font-semibold text-sm border-b-2 border-[#3b4f6e]">
+                    <th className="px-3 sm:px-4 py-2.5 sm:py-3 text-left bg-[#0f1a2e]">Distance</th>
+                    <th className="px-3 sm:px-4 py-2.5 sm:py-3 text-left bg-[#0f1a2e]">Classification</th>
+                    <th className="px-3 sm:px-4 py-2.5 sm:py-3 text-left bg-[#0f1a2e]">Status</th>
+                    <th className="px-3 sm:px-4 py-2.5 sm:py-3 text-left bg-[#0f1a2e]">Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
                   {segments.map((s, i) => (
-                    <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/20">
-                      <td className="px-2 sm:px-3 py-1 font-mono text-xs text-white whitespace-nowrap">
+                    <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/30">
+                      <td className="px-3 sm:px-4 py-2 font-mono text-sm text-white whitespace-nowrap">
                         {s.start !== null && s.end !== null
                           ? `${s.start.toFixed(3)} – ${s.end.toFixed(3)} km`
                           : '-'}
                       </td>
-                      <td className="px-2 sm:px-3 py-1">
-                        <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap border ${getPredictionColor(s.cls)}`}>
+                      <td className="px-3 sm:px-4 py-2">
+                        <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold whitespace-nowrap border ${getPredictionColor(s.cls)}`}>
                           {s.cls}
                         </span>
+                      </td>
+                      <td className="px-3 sm:px-4 py-2">
+                        <StatusBadge status={s.status} />
+                      </td>
+                      <td className="px-3 sm:px-4 py-2 font-mono text-sm text-white whitespace-nowrap">
+                        {s.confidence.toFixed(2)}%
                       </td>
                     </tr>
                   ))}
@@ -959,42 +1019,42 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
         )}
 
         {/* ── Classification History + Fault Distribution (2 kolom) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 md:gap-6 items-stretch">
 
         {/* Kiri: Classification History */}
         <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a3d60]">
-            <div className="flex items-center gap-2">
-              <span className="w-1 h-4 bg-blue-400 rounded-full" />
-              <span className="text-white text-sm font-semibold">Classification History</span>
-              <span className="text-white/80 text-xs">({dbHistory.length} entries)</span>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a3d60]">
+            <div className="flex items-center gap-2.5">
+              <span className="w-1.5 h-5 bg-blue-400 rounded-full" />
+              <span className="text-white text-base sm:text-lg font-bold">Classification History</span>
+              <span className="text-white/80 text-sm">({dbHistory.length} entries)</span>
             </div>
             <button
               onClick={fetchDbHistory}
               className="text-white/80 hover:text-white transition-colors"
               title="Refresh"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-4.5 h-4.5" />
             </button>
           </div>
-          <div className="flex-1 overflow-x-auto max-h-96 overflow-y-auto">
-            <table className="w-full text-xs sm:text-sm">
-              <thead className="bg-[#0f1e35] text-white/80 uppercase tracking-wide sticky top-0">
+          <div className="flex-1 overflow-x-auto max-h-[480px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-[#0f1e35] text-white/90 uppercase tracking-wide sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2 text-left w-10">No</th>
-                  <th className="px-3 py-2 text-left">Time</th>
-                  <th className="px-3 py-2 text-left">Classification Result</th>
-                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-4 py-3 text-left w-12 text-sm font-semibold bg-[#0f1e35]">No</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold bg-[#0f1e35]">Time</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold bg-[#0f1e35]">Classification Result</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold bg-[#0f1e35]">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {historyLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-white/60">Loading...</td>
+                    <td colSpan={4} className="px-4 py-8 text-center text-white/60 text-base">Loading...</td>
                   </tr>
                 ) : dbHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-8 text-center text-white/60">
+                    <td colSpan={4} className="px-4 py-10 text-center text-white/60 text-base">
                       No classification history yet.
                     </td>
                   </tr>
@@ -1033,19 +1093,19 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     };
 
                     return (
-                      <tr key={item.id} className="border-t border-[#2a3d60]/50 hover:bg-[#2a3d60]/20">
-                        <td className="px-3 py-2 text-white/80 font-mono">{idx + 1}</td>
-                        <td className="px-3 py-2 text-white/80 font-mono whitespace-nowrap">
+                      <tr key={item.id} className="border-t border-[#2a3d60]/50 hover:bg-[#2a3d60]/30">
+                        <td className="px-4 py-2.5 text-white/80 font-mono text-sm">{idx + 1}</td>
+                        <td className="px-4 py-2.5 text-white/80 font-mono text-sm whitespace-nowrap">
                           {item.created_at ? formatDate(item.created_at) : '-'}
                         </td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${clsBadge}`}>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold ${clsBadge}`}>
                             {formatClassName(item.classification)}
                           </span>
                         </td>
-                        <td className="px-3 py-2">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge[itemStatus] || statusBadge.Warning}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusDot[itemStatus] || statusDot.Warning}`} />
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold ${statusBadge[itemStatus] || statusBadge.Warning}`}>
+                            <span className={`w-2 h-2 rounded-full ${statusDot[itemStatus] || statusDot.Warning}`} />
                             {itemStatus}
                           </span>
                         </td>
@@ -1060,18 +1120,18 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
 
         {/* Kanan: Fault Distribution */}
         <div className="bg-[#1a2a45] border border-[#2a3d60] rounded-2xl overflow-hidden flex flex-col">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2a3d60]">
-            <span className="w-1 h-4 bg-blue-400 rounded-full" />
-            <span className="text-white text-sm font-semibold">Fault Distribution</span>
-            <span className="text-white/80 text-xs">({faultDistribution.total} entries)</span>
+          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-[#2a3d60]">
+            <span className="w-1.5 h-5 bg-blue-400 rounded-full" />
+            <span className="text-white text-base sm:text-lg font-bold">Fault Distribution</span>
+            <span className="text-white/80 text-sm">({faultDistribution.total} entries)</span>
           </div>
-          <div className="flex-1 flex items-center justify-center p-4 min-h-[300px]">
+          <div className="flex-1 flex items-center justify-center p-5 sm:p-6 min-h-[480px]">
             {faultDistribution.total > 0 ? (
-              <div className="w-full h-full max-w-[420px] mx-auto">
+              <div className="w-full h-full max-w-[520px] mx-auto">
                 <Pie data={pieData} options={pieOptions} />
               </div>
             ) : (
-              <div className="text-center text-white/60 text-sm py-8">
+              <div className="text-center text-white/60 text-base py-10">
                 No classification data yet.
               </div>
             )}
