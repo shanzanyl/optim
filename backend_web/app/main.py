@@ -1904,12 +1904,28 @@ async def process_sor_file(
     if not fault_counts:
         final_class = "normal"
     else:
-        final_class = fault_counts.most_common(1)[0][0]
+        max_count = max(fault_counts.values())
+        tied = [cls for cls, cnt in fault_counts.items() if cnt == max_count]
+
+        if len(tied) == 1:
+            final_class = tied[0]
+        else:
+            # Ada tie — menangkan kelas dengan rata-rata confidence tertinggi
+            avg_conf = {
+                cls: np.mean([p["confidence"] for p in predictions if p["prediction"] == cls])
+                for cls in tied
+            }
+            final_class = max(avg_conf, key=avg_conf.get)
+            logger.warning(
+                f"[SOR]   ⚠️ TIE terdeteksi antara {tied} (masing-masing {max_count} window). "
+                f"Dipilih via confidence tertinggi: {final_class} ({avg_conf})"
+            )
+
         if len(fault_counts) > 1:
             logger.warning(
                 f"[SOR]   ⚠️ MODEL TIDAK KONSISTEN — window gangguan berisi "
                 f"{len(fault_counts)} kelas berbeda: {dict(fault_counts)}. "
-                f"Dipilih terbanyak: {final_class}"
+                f"Dipilih: {final_class}"
             )
 
     cls_lower = final_class.lower()
