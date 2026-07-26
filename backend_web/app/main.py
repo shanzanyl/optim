@@ -1567,7 +1567,7 @@ async def health_check():
         "status": "online",
         "app": "OptiM API",
         "version": "2.0.1",
-        "model": "loaded" if ml.rf_model else "not found",
+        "model": "loaded" if ml.lgbm_model else "not found",
     }
 
 @app.post("/api/detect-manual")

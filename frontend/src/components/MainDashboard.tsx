@@ -996,7 +996,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/30">
                       <td className="px-3 sm:px-4 py-2 font-mono text-sm text-white whitespace-nowrap">
                         {s.start !== null && s.end !== null
-                          ? `${s.start.toFixed(3)} – ${s.end.toFixed(3)} km`
+                          ? `${s.start.toFixed(4)} – ${s.end.toFixed(4)} km`
                           : '-'}
                       </td>
                       <td className="px-3 sm:px-4 py-2">

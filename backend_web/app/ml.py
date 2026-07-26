@@ -12,13 +12,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
-# PATH — Model RF untuk OTDR (folder models/otdr/)
+# PATH — Model LGBM untuk OTDR (folder models/otdr/)
 # ══════════════════════════════════════════════════════════════════
-# Hanya artefak model final (.pkl) yang dimuat. Nama berkas lama sengaja
-# TIDAK dijadikan cadangan: bila berkas baru tidak ditemukan, sistem harus
-# gagal secara terang-terangan. Memuat model lama diam-diam jauh lebih
-# berbahaya, karena artefak lama saling cocok satu sama lain sehingga
-# validasi di bawah tidak akan berbunyi dan salah model tidak akan ketahuan.
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -31,7 +26,7 @@ def _candidates(name):
     ]
 
 
-OTDR_MODEL_PATHS   = _candidates("rf_model.pkl")
+OTDR_MODEL_PATHS   = _candidates("lgbm_model.pkl")
 OTDR_ENCODER_PATHS = _candidates("label_encoder.pkl")
 OTDR_FEATURE_PATHS = _candidates("feature_order.pkl")
 OTDR_SCALER_PATHS  = _candidates("scaler.pkl")
@@ -63,7 +58,7 @@ def _load_first(paths, label):
 # LOAD MODEL
 # ══════════════════════════════════════════════════════════════════
 
-rf_model      = _load_first(OTDR_MODEL_PATHS,   "Random Forest model")
+lgbm_model      = _load_first(OTDR_MODEL_PATHS,   "LightGBM model")
 label_encoder   = _load_first(OTDR_ENCODER_PATHS, "Label encoder")
 feature_columns = _load_first(OTDR_FEATURE_PATHS, "Feature order")
 scaler          = _load_first(OTDR_SCALER_PATHS,  "Scaler")
@@ -92,14 +87,14 @@ def _validate_artifacts():
     logger.info("─" * 55)
     logger.info(f"[ML] Feature order : {n_feat} fitur")
 
-    if rf_model is not None and hasattr(rf_model, "n_features_in_"):
-        if rf_model.n_features_in_ != n_feat:
+    if lgbm_model is not None and hasattr(lgbm_model, "n_features_in_"):
+        if lgbm_model.n_features_in_ != n_feat:
             logger.error(
-                f"[ML] ⚠️ TIDAK COCOK: model mengharapkan {rf_model.n_features_in_} "
+                f"[ML] ⚠️ TIDAK COCOK: model mengharapkan {lgbm_model.n_features_in_} "
                 f"fitur, feature_order berisi {n_feat}"
             )
         else:
-            logger.info(f"[ML] Model         : {rf_model.n_features_in_} fitur ✅")
+            logger.info(f"[ML] Model         : {lgbm_model.n_features_in_} fitur ✅")
 
     if scaler is not None and hasattr(scaler, "n_features_in_"):
         if scaler.n_features_in_ != n_feat:
@@ -114,10 +109,10 @@ def _validate_artifacts():
     if label_encoder is not None and hasattr(label_encoder, "classes_"):
         classes = list(label_encoder.classes_)
         logger.info(f"[ML] Kelas         : {len(classes)} → {classes}")
-        if rf_model is not None and hasattr(rf_model, "n_classes_"):
-            if rf_model.n_classes_ != len(classes):
+        if lgbm_model is not None and hasattr(lgbm_model, "n_classes_"):
+            if lgbm_model.n_classes_ != len(classes):
                 logger.error(
-                    f"[ML] ⚠️ TIDAK COCOK: model punya {rf_model.n_classes_} kelas, "
+                    f"[ML] ⚠️ TIDAK COCOK: model punya {lgbm_model.n_classes_} kelas, "
                     f"encoder punya {len(classes)}"
                 )
         unknown = [c for c in classes if c not in STATUS_MAP]
@@ -153,7 +148,7 @@ _validate_artifacts()
 def predict_from_otdr(otdr_values: dict) -> dict:
     """Prediksi jenis gangguan dari parameter tabel event OTDR."""
 
-    if rf_model is None or feature_columns is None:
+    if lgbm_model is None or feature_columns is None:
         raise RuntimeError("Model klasifikasi tidak tersedia.")
 
     try:
@@ -165,7 +160,7 @@ def predict_from_otdr(otdr_values: dict) -> dict:
             if col not in row.columns:
                 row[col] = np.nan # Kolom yang tidak ada diisi NaN — bukan 0.0.
 
-        # TIDAK menggunakan fillna(). NaN dipertahankan sampai ke RF,
+        # TIDAK menggunakan fillna(). NaN dipertahankan sampai ke LGBM,
         X = row[feature_columns].astype(np.float64)
 
         if scaler is not None:
@@ -173,12 +168,12 @@ def predict_from_otdr(otdr_values: dict) -> dict:
 
         # Ambil label dan confidence dari sumber yang sama (predict_proba)
         # agar keduanya tidak mungkin berbeda.
-        if hasattr(rf_model, "predict_proba"):
-            proba = rf_model.predict_proba(X)[0] # probability untuk setiap kelas
+        if hasattr(lgbm_model, "predict_proba"):
+            proba = lgbm_model.predict_proba(X)[0] # probability untuk setiap kelas
             pred_int = int(np.argmax(proba))       # ambil indeks kelas dengan probabilitas tertinggi
             confidence = float(proba[pred_int]) * 100
         else:
-            pred_int = int(round(float(rf_model.predict(X)[0])))
+            pred_int = int(round(float(lgbm_model.predict(X)[0])))
             confidence = 0.0
 
         if label_encoder is not None:
@@ -188,7 +183,7 @@ def predict_from_otdr(otdr_values: dict) -> dict:
                       "Dirty Connector", "Fiber Cut", "Normal"]
             label = labels[pred_int % len(labels)]
 
-        logger.info(f"🤖 Random Forest → {label} (confidence: {confidence:.1f}%)")
+        logger.info(f"LightGBM → {label} (confidence: {confidence:.1f}%)")
 
         return {
             "prediction": label,
