@@ -1862,7 +1862,7 @@ async def process_sor_file(
         logger.error(f"[SOR]   SOR_MODEL_PATHS dicek: {[str(p) for p in ml_sor.SOR_MODEL_PATHS]}")
         raise HTTPException(
             status_code=500,
-            detail="Model CNN-BiGRU belum dimuat. Pastikan file model_cnn_bigru.keras ada di folder models/sor/"
+            detail="Model CNN-BiGRU belum dimuat. Pastikan file cnn_bigru_91.keras ada di folder models/sor/"
         )
     logger.info(f"[SOR] ✅ MODEL READY: {type(ml_sor.sor_model).__name__}")
     logger.info(f"[SOR]   normalization: per-segment (normalization.py)")
