@@ -825,15 +825,15 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
           {lastResult && imageStatus === 'success' && (
             <div className="space-y-4">
               <div className={`rounded-xl p-4 text-center border ${lastResult.status === 'Normal' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : lastResult.status === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
-                <p className="text-xs uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
-                <p className={`text-2xl font-black ${lastResult.status === 'Normal' ? 'text-emerald-400' :
+                <p className="text-sm uppercase tracking-widest mb-1 opacity-70">Klasifikasi</p>
+                <p className={`text-3xl font-black ${lastResult.status === 'Normal' ? 'text-emerald-400' :
                   lastResult.status === 'Critical' ? 'text-red-500' :
                     'text-amber-400'
                   }`}>
                   {lastResult.prediction}
                 </p>
                 {lastResult.confidence !== undefined && lastResult.confidence !== null && (
-                  <p className="text-xs font-bold text-emerald-400 mt-1.5">
+                  <p className="text-sm font-bold text-emerald-400 mt-1.5">
                     Confidence: <span className="font-extrabold">{lastResult.confidence > 1 ? lastResult.confidence.toFixed(2) : (lastResult.confidence * 100).toFixed(2)}%</span>
                   </p>
                 )}
@@ -841,7 +841,7 @@ const Detection = ({ refreshTrigger, onDataChange }: DetectionProps) => {
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Info size={14} className="text-blue-400" />
-                  <span className="text-xs text-blue-400 font-bold">Signal Power (Prx)</span>
+                  <span className="text-sm text-blue-400 font-bold">Signal Power (Prx)</span>
                 </div>
                 <div className="text-right">
                   <span className="text-white font-black text-sm">{lastResult.prx != null ? lastResult.prx.toFixed(2) : '---'} dBm</span>

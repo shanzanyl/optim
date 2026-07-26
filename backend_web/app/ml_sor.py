@@ -22,8 +22,8 @@ apply_normalization = _norm_module.apply_normalization
 
 # ── Path model CNN-BiGRU ──────────────────────────────────────────────────────
 SOR_MODEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "model_cnn_bigru.keras",
-    Path.cwd() / "models" / "sor" / "model_cnn_bigru.keras",
+    BASE_DIR / "models" / "sor" / "cnn_bigru_91.keras",
+    Path.cwd() / "models" / "sor" / "cnn_bigru_91.keras",
 ]
 SOR_LABEL_PATHS = [
     BASE_DIR / "models" / "sor" / "label_encoder.pkl",
@@ -85,8 +85,8 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
 
     Args:
         backscatter_data: list nilai Loss (dB) dari CSV/Excel
-        window_size: ukuran sliding window (default 50)
-        stride: pergeseran antar window (default 25)
+        window_size: ukuran sliding window (default 80)
+        stride: pergeseran antar window (default 40)
 
     Returns:
         list of dict: [{start, end, prediction, confidence}, ...]
