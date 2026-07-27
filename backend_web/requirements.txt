@@ -34,7 +34,7 @@ scipy==1.16.3
 
 # Deep Learning (Dashboard - BiGRU Feature Extractor)
 tensorflow==2.19.0
-xgboost==3.3.0
+xgboost==3.2.0
 
 # OCR
 pillow==10.4.0
