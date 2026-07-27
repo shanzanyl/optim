@@ -1,5 +1,5 @@
 # backend_web/app/ml_sor.py
-# Model CNN-BiGRU untuk Dashboard SOR — window_size=80, stride=40
+# Model Dashboard SOR — BiGRU Feature Extractor + Stacking Classifier (window_size=80, stride=40)
 # Preprocessing: per-segment normalization via normalization.py (BUKAN scaler.pkl)
 
 import importlib.util
@@ -20,38 +20,67 @@ _norm_module = importlib.util.module_from_spec(_norm_spec)
 _norm_spec.loader.exec_module(_norm_module)
 apply_normalization = _norm_module.apply_normalization
 
-# ── Path model CNN-BiGRU ──────────────────────────────────────────────────────
+# ── Path model: BiGRU Feature Extractor + Stacking Classifier ────────────────
 SOR_MODEL_PATHS = [
-    BASE_DIR / "models" / "sor" / "cnn_bigru_91.keras",
-    Path.cwd() / "models" / "sor" / "cnn_bigru_91.keras",
+    BASE_DIR / "models" / "sor" / "bigru_feature_extractor_model.keras",
+    Path.cwd() / "models" / "sor" / "bigru_feature_extractor_model.keras",
+]
+SOR_STACKING_PATHS = [
+    BASE_DIR / "models" / "sor" / "stacking_classifier.joblib",
+    Path.cwd() / "models" / "sor" / "stacking_classifier.joblib",
 ]
 SOR_LABEL_PATHS = [
     BASE_DIR / "models" / "sor" / "label_encoder.pkl",
     Path.cwd() / "models" / "sor" / "label_encoder.pkl",
 ]
 
-sor_model = None
-sor_le    = None
+sor_model             = None   # model BiGRU penuh (dipakai untuk membangun feature extractor)
+sor_feature_extractor  = None   # sub-model: input -> output layer GRU (64-dim feature)
+sor_stacking           = None   # StackingClassifier (RF + XGB -> LogisticRegression)
+sor_le                 = None
 
 
 def load_sor_models():
-    global sor_model, sor_le
+    global sor_model, sor_feature_extractor, sor_stacking, sor_le
 
     logger.info("=" * 50)
-    logger.info("[ML_SOR] 🔄 Loading SOR CNN-BiGRU model (window=80, stride=40)...")
+    logger.info("[ML_SOR] 🔄 Loading SOR BiGRU Feature Extractor + Stacking Classifier (window=80, stride=40)...")
     logger.info(f"[ML_SOR]   BASE_DIR = {BASE_DIR}")
     logger.info(f"[ML_SOR]   CWD      = {Path.cwd()}")
 
-    # Load CNN-BiGRU model
+    # Load BiGRU feature extractor model
     for path in SOR_MODEL_PATHS:
         logger.info(f"[ML_SOR]   model path: {path} → exists={path.exists()}")
         if path.exists():
             try:
                 import tensorflow as tf
                 sor_model = tf.keras.models.load_model(str(path))
-                logger.info(f"[ML_SOR] ✅ CNN-BiGRU model loaded: {path}")
+                logger.info(f"[ML_SOR] ✅ BiGRU model loaded: {path}")
                 logger.info(f"[ML_SOR]   input_shape={sor_model.input_shape}, output_shape={sor_model.output_shape}")
+
+                # Bangun ulang sub-model sampai layer GRU saja (nama layer: 'gru_4').
+                # Dense terakhir di file model ini TIDAK dipakai — output-nya digantikan
+                # oleh Stacking Classifier terpisah.
+                inp = tf.keras.Input(shape=(80, 1))
+                x = inp
+                for layer in sor_model.layers:
+                    x = layer(x)
+                    if layer.name == "gru_4":
+                        break
+                sor_feature_extractor = tf.keras.Model(inputs=inp, outputs=x)
+                logger.info(f"[ML_SOR] ✅ Feature extractor built: output_shape={sor_feature_extractor.output_shape}")
                 break
+            except Exception as e:
+                logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
+
+    # Load Stacking Classifier
+    for path in SOR_STACKING_PATHS:
+        logger.info(f"[ML_SOR]   stacking path: {path} → exists={path.exists()}")
+        if path.exists():
+            try:
+                sor_stacking = joblib.load(path)
+                logger.info(f"[ML_SOR] ✅ Stacking classifier loaded: {path}")
+                logger.info(f"[ML_SOR]   n_features_in_={getattr(sor_stacking, 'n_features_in_', '?')}")
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
@@ -66,22 +95,26 @@ def load_sor_models():
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
-    if sor_model is None:
-        logger.error("[ML_SOR] ❌ CNN-BiGRU model NOT loaded")
+    if sor_feature_extractor is None:
+        logger.error("[ML_SOR] ❌ BiGRU feature extractor NOT loaded")
+    if sor_stacking is None:
+        logger.error("[ML_SOR] ❌ Stacking classifier NOT loaded")
     if sor_le is None:
         logger.error("[ML_SOR] ❌ Label encoder NOT loaded")
 
 
 def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int = 40) -> list:
     """
-    BATCH PREDICT dengan CNN-BiGRU — window_size=80, stride=40.
+    BATCH PREDICT dengan BiGRU Feature Extractor + Stacking Classifier — window_size=80, stride=40.
 
     Pipeline:
     1. Sliding window pada data backscatter (kolom Loss dB)
     2. Setiap window dinormalisasi secara independen dengan normalize_per_segment()
        dari normalization.py (BUKAN StandardScaler/scaler.pkl)
-    3. Reshape ke (batch, window_size, 1) untuk CNN-BiGRU
-    4. Prediksi batch, decode label via label encoder
+    3. Reshape ke (batch, window_size, 1)
+    4. Ekstrak fitur 64-dimensi lewat layer GRU BiGRU (sor_feature_extractor)
+    5. Fitur diklasifikasi oleh Stacking Classifier (RF + XGBoost -> Logistic Regression)
+    6. Decode label via label encoder
 
     Args:
         backscatter_data: list nilai Loss (dB) dari CSV/Excel
@@ -91,8 +124,10 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
     Returns:
         list of dict: [{start, end, prediction, confidence}, ...]
     """
-    if sor_model is None:
-        raise Exception("[ML_SOR] CNN-BiGRU model is None — model belum dimuat")
+    if sor_feature_extractor is None:
+        raise Exception("[ML_SOR] Feature extractor is None — model belum dimuat")
+    if sor_stacking is None:
+        raise Exception("[ML_SOR] Stacking classifier is None — model belum dimuat")
     if sor_le is None:
         raise Exception("[ML_SOR] Label encoder is None — label encoder belum dimuat")
 
@@ -123,18 +158,23 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
     # ── Normalisasi per-segment (menggantikan StandardScaler) ─────────────────
     # Setiap baris (window) dinormalisasi secara independen:
     #   normalized = (window - mean) / (std + 1e-8)
-    # Ini sesuai dengan cara model CNN-BiGRU dilatih.
     X_normalized = apply_normalization(X_all)  # shape: (total_windows, window_size)
 
     logger.info(f"[ML_SOR] ✅ Per-segment normalization applied")
 
-    # Reshape untuk CNN-BiGRU: (batch, timesteps, features) = (total_windows, window_size, 1)
+    # Reshape untuk BiGRU: (batch, timesteps, features) = (total_windows, window_size, 1)
     X_input = X_normalized.reshape(total_windows, window_size, 1)
 
-    logger.info(f"[ML_SOR] 🔄 Running CNN-BiGRU batch predict on {total_windows} windows...")
+    logger.info(f"[ML_SOR] 🔄 Extracting {total_windows} window features via BiGRU...")
 
-    # Predict semua window sekaligus
-    proba_all = sor_model.predict(X_input, batch_size=256, verbose=0)
+    # Tahap 1: ekstraksi fitur 64-dimensi lewat layer GRU
+    features = sor_feature_extractor.predict(X_input, batch_size=256, verbose=0)
+    # features shape: (total_windows, 64)
+
+    logger.info(f"[ML_SOR] 🔄 Running Stacking Classifier on extracted features...")
+
+    # Tahap 2: klasifikasi oleh Stacking Classifier
+    proba_all = sor_stacking.predict_proba(features)
     # proba_all shape: (total_windows, n_classes)
 
     preds       = np.argmax(proba_all, axis=1)

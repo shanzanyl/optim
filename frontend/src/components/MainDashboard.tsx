@@ -62,7 +62,7 @@ type ProcessedData = {
   // disimpan ke DB dan yang memicu notifikasi Telegram.
   classification: string;
   status: string;
-  // Rata-rata confidence model CNN-BiGRU untuk kelas final (classification).
+  // Rata-rata confidence model BiGRU+Stacking untuk kelas final (classification).
   // Dikirim backend sebagai top-level field, terpisah dari confidence per-window.
   confidence?: number;
   metadata: {
