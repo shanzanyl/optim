@@ -90,7 +90,7 @@ type DashboardHistoryItem = {
 const StatusBadge = ({ status, size = 'md' }: { status: string | null | undefined; size?: 'sm' | 'md' | 'lg' }) => {
   const cfg: Record<string, string> = {
     'Normal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    'Warning': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    'Warning': 'bg-amber-500/15 text-amber-500 border-amber-500/30',
     'Critical': 'bg-red-500/15 text-red-400 border-red-500/30',
     'Error': 'bg-red-500/15 text-red-400 border-red-500/30',
   };
@@ -1039,7 +1039,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           </div>
           <div className="flex-1 overflow-x-auto max-h-[480px] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#0f1e35] text-white/90 uppercase tracking-wide sticky top-0 z-10">
+              <thead className="bg-[#0f1e35] text-white/90 tracking-wide sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3 text-left w-12 text-sm font-semibold bg-[#0f1e35]">No</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold bg-[#0f1e35]">Time</th>
