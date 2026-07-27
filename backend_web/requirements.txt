@@ -32,7 +32,8 @@ numpy==2.0.2
 pandas==2.2.2
 scipy==1.16.3
 
-# Deep Learning (Dashboard LSTM model)
+# Deep Learning (Dashboard - BiGRU Feature Extractor)
+tensorflow==2.19.0
 tensorflow==2.19.0
 
 # OCR
