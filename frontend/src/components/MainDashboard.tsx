@@ -157,10 +157,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const POINTS_PER_TICK = 1;
 
   // ── Normalisasi nama kelas untuk tampilan ──
-  // Label encoder mengeluarkan casing campur ('normal' huruf kecil, sisanya
-  // 'Air Gap' / 'Bad Splice' / 'Bending' / 'Dirty Connector'). DB juga masih
-  // menyimpan record lama dengan casing berbeda. Semua dinormalkan di sini agar
-  // tampil seragam dan agar pengelompokan tidak terpecah.
   const classKey = (s: string | null | undefined) =>
     (s || 'Unknown').trim().toLowerCase();
 
@@ -514,10 +510,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   }), []);
 
   // ── Update sumbu X secara programatik via ref ──
-  // chartOptions sengaja tidak punya `max` (agar stabil / tidak dibuat ulang
-  // tiap tick → zoom plugin tidak terganggu). Sebagai gantinya, sumbu X
-  // di-update langsung lewat chartRef setiap currentPointIndex berubah.
-  // Kalau user sedang zoom (isZoomedOrPanned), update diskip agar zoom persist.
   useEffect(() => {
     if (!chartRef.current || !data || currentPointIndex < 0) return;
     const chart = chartRef.current;
@@ -571,6 +563,8 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     if (p.includes('cut') || p === 'fiber cut') return 'text-red-400 bg-red-500/20 border-red-500/30';
     if (p.includes('bend')) return 'text-amber-400 bg-amber-500/20 border-amber-500/30';
     if (p.includes('splice')) return 'text-orange-400 bg-orange-500/20 border-orange-500/30';
+    if (p.includes('dirty') || p.includes('airgap')) return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
+    if (p.includes('air gap')) return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
     return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
   };
 
@@ -578,7 +572,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const CLASS_COLORS: Record<string, string> = {
     normal: '#34d399',
     'fiber cut': '#f87171',
-    bending: '#fbbf24',
+    'bending': '#fbbf24',
     'bad splice': '#fb923c',
     'dirty connector': '#22d3ee',
     'air gap': '#a78bfa',
