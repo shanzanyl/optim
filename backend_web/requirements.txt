@@ -56,3 +56,4 @@ pydantic==2.9.0
 # SOR
 openpyxl==3.1.5
 xlrd==2.0.1
+apscheduler==3.10.4
