@@ -190,38 +190,54 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [API_URL]);
 
-  // ── Otomatis tampilkan trace hasil auto-fetch TERBARU saat halaman dibuka ──
-  // (tidak perlu klik apa pun — begitu ada hasil auto-fetch baru, langsung tampil)
-  const fetchLatestAutoTrace = useCallback(async () => {
+  // ── Mode "auto-fetch berjalan" — file berikutnya baru diambil SETELAH
+  // trace file sebelumnya selesai diputar (bukan berdasarkan jadwal waktu) ──
+  const [isAutoMode, setIsAutoMode] = useState(false);
+
+  const fetchNextAutoFile = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/dashboard/latest-auto-trace`, {
+      const res = await fetch(`${API_URL}/api/dashboard/next-auto-file`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const result = await res.json();
         setData(result);
-        setStatus('ready');
-        setStatusMessage(`Ready! ${result.total_points} data points (auto-fetch: ${result.filename})`);
-        setCurrentPointIndex(-1);
-        setIsPlaying(false);
+        setIsAutoMode(true);
+        setStatusMessage(`Auto-fetch: ${result.filename} (${result.total_points} data points)`);
+        // Langsung mulai Play otomatis, tanpa perlu diklik
+        setCurrentPointIndex(0);
+        setStatus('playing');
+        setIsPlaying(true);
       }
-      // Kalau 404 (belum ada hasil auto-fetch), diamkan saja — tidak perlu tampilkan error.
+      // Kalau 404 (folder kosong), diamkan saja — tidak perlu tampilkan error.
     } catch (e) {
-      console.error('[DASHBOARD] fetchLatestAutoTrace error:', e);
+      console.error('[DASHBOARD] fetchNextAutoFile error:', e);
     }
   }, [API_URL]);
+
+  // ── Begitu trace SELESAI diputar DAN sedang dalam mode auto —
+  // langsung ambil & putar file berikutnya ──
+  useEffect(() => {
+    if (isAutoMode && status === 'complete') {
+      fetchNextAutoFile();
+    }
+  }, [isAutoMode, status, fetchNextAutoFile]);
 
   // ── Load history on mount ──
   useEffect(() => {
     fetchDbHistory();
-    fetchLatestAutoTrace();
-  }, [fetchDbHistory, fetchLatestAutoTrace]);
+    fetchNextAutoFile();
+  }, [fetchDbHistory, fetchNextAutoFile]);
 
   // ── Handle Upload ──
   const handleUpload = useCallback(async (file: File) => {
     if (!file) return;
+
+    // Upload manual mengambil alih — matikan mode auto-fetch supaya
+    // loop otomatis tidak "menimpa" hasil upload manual ini nantinya.
+    setIsAutoMode(false);
 
     const formData = new FormData();
     formData.append('file', file);

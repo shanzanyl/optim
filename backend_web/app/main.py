@@ -390,8 +390,9 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(load_models_bg())
 
-    # 🔥 Auto-proses file dari folder lokal tiap 15 menit
-    local_folder_watcher.start_local_scheduler()
+    # 🔥 Auto-fetch folder lokal sekarang dipicu frontend (per file, per selesai
+    # trace diputar) — bukan lagi APScheduler dengan interval tetap.
+    logger.info("[LOCAL_WATCHER] Mode: diproses satu-per-satu sesuai permintaan frontend.")
     
     yield
     
@@ -2094,56 +2095,24 @@ async def get_dashboard_history(
     return result.scalars().all()
 
 
-@app.get("/api/dashboard/latest-auto-trace")
-async def get_latest_auto_trace(
-    db: AsyncSession = Depends(get_db),
+@app.get("/api/dashboard/next-auto-file")
+async def get_next_auto_file(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Ambil otomatis trace hasil auto-fetch TERBARU (user_id kosong), supaya
-    bisa langsung ditampilkan begitu halaman Dashboard dibuka — tanpa perlu
-    klik apa pun. Kalau belum ada hasil auto-fetch sama sekali, kembalikan
-    404 (frontend cukup diamkan, tidak perlu tampilkan error ke user).
+    Proses SATU file berikutnya dari folder lokal (data_incoming/), simpan ke
+    database, lalu kembalikan trace-nya. Dipanggil frontend: sekali saat
+    Dashboard dibuka, lalu berulang setiap kali animasi trace file sebelumnya
+    selesai diputar — sehingga file berikutnya baru diproses SETELAH file
+    sebelumnya selesai ditampilkan, bukan berdasarkan jadwal waktu tetap.
     """
-    result = await db.execute(
-        select(DashboardResult)
-        .where(
-            DashboardResult.user_id.is_(None),
-            DashboardResult.backscatter_json.is_not(None),
-        )
-        .order_by(DashboardResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    result = await local_folder_watcher.get_next_file_trace()
 
-    if record is None:
-        raise HTTPException(status_code=404, detail="Belum ada hasil auto-fetch")
+    if result is None:
+        raise HTTPException(status_code=404, detail="Folder data_incoming kosong, tidak ada file untuk diproses")
 
-    backscatter = json.loads(record.backscatter_json)
-    distance    = json.loads(record.distance_json) if record.distance_json else []
-    predictions = json.loads(record.predictions_json) if record.predictions_json else []
-
-    matching_confidences = [
-        p["confidence"] for p in predictions if p["prediction"].lower() == record.classification.lower()
-    ]
-    confidence = round(float(np.mean(matching_confidences)), 2) if matching_confidences else 0.0
-
-    return {
-        "success"       : True,
-        "backscatter"   : backscatter,
-        "distance"      : distance,
-        "predictions"   : predictions,
-        "total_windows" : record.total_windows,
-        "window_size"   : 80,
-        "stride"        : 40,
-        "total_points"  : record.total_points,
-        "filename"      : record.filename,
-        "classification": record.classification,
-        "status"        : record.status,
-        "confidence"    : confidence,
-        "history_id"    : record.id,
-        "metadata": {"columns": [], "rows": record.total_points, "loss_col": None, "distance_col": None}
-    }
+    result["history_id"] = None
+    return result
 
 
 @app.delete("/api/dashboard/history/{history_id}")

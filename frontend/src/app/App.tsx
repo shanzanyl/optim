@@ -227,12 +227,17 @@ export default function App() {
           </header>
 
           <main className="w-full animate-in fade-in duration-500">
-            {activeTab === 'main' && (
+            {/* MainDashboard SENGAJA selalu tetap ter-mount (disembunyikan lewat CSS,
+                bukan dihapus dari DOM) — supaya trace yang sedang main tidak "kabur"
+                atau loncat ke file lain kalau user pindah ke tab Detection/Admin
+                lalu balik lagi. State (data, currentPointIndex, isAutoMode, dst)
+                tetap utuh karena komponennya tidak pernah benar-benar di-unmount. */}
+            <div style={{ display: activeTab === 'main' ? 'block' : 'none' }}>
               <MainDashboard 
                 refreshTrigger={refreshTrigger}
                 onDataChange={handleDataChange}
               />
-            )}
+            </div>
             {activeTab === 'detection' && (
               <Detection 
                 refreshTrigger={refreshTrigger}
