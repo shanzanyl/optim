@@ -84,14 +84,20 @@ async def check_local_folder():
 
 def start_local_scheduler():
     """Dipanggil sekali dari lifespan main.py saat startup aplikasi."""
+    from datetime import datetime, timedelta
+
     scheduler = AsyncIOScheduler()
+    # PENTING: next_run_time=None membuat job TIDAK PERNAH jalan sama sekali
+    # (sudah diverifikasi lewat tes langsung) — beda dari asumsi awal "nunggu
+    # interval pertama". Yang benar: hitung eksplisit waktu run pertama.
+    first_run = datetime.now() + timedelta(minutes=POLL_INTERVAL_MIN)
     scheduler.add_job(
         check_local_folder,
         "interval",
         minutes=POLL_INTERVAL_MIN,
         id="local_folder_watcher_job",
-        next_run_time=None,  # jangan langsung jalan detik itu juga saat startup
+        next_run_time=first_run,
     )
     scheduler.start()
-    logger.info(f"[LOCAL_WATCHER] ✅ Scheduler aktif — cek folder tiap {POLL_INTERVAL_MIN} menit")
+    logger.info(f"[LOCAL_WATCHER] ✅ Scheduler aktif — cek pertama pada {first_run}, lalu tiap {POLL_INTERVAL_MIN} menit")
     return scheduler
