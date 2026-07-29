@@ -26,6 +26,7 @@ import tempfile
 
 from app import ml          # Model OTDR 
 from app import ml_sor      # Model SOR 
+from app import local_folder_watcher   # Auto-proses folder lokal tiap 15 menit
 from app.database import Base, engine, get_db, AsyncSessionLocal
 from app.models import User, OtdrResult, DashboardResult
 from app.schemas import (
@@ -376,8 +377,8 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(load_models_bg())
 
-    # 🔥 Auto-sync disabled - using manual sync only
-    logger.info("⚠️ Auto-sync disabled - using manual sync only")
+    # 🔥 Auto-proses file dari folder lokal tiap 15 menit
+    local_folder_watcher.start_local_scheduler()
     
     yield
     
@@ -1763,28 +1764,28 @@ async def detect_manual(
 # DASHBOARD - PROCESS SOR EXCEL FILE (BiGRU Feature Extractor + Stacking Classifier)
 # ============================================================
 
-@app.post("/api/dashboard/process-sor")
-async def process_sor_file(
-    file: UploadFile = File(...), # nerima file CSV atau Excel
-    db: AsyncSession = Depends(get_db), # koneksi database
-    current_user: User = Depends(get_current_user), # user yang sedang login
-):
+async def process_sor_core(
+    content: bytes,
+    filename: str,
+    user_id: int | None,
+    db: AsyncSession,
+) -> dict:
     """
-    Proses file SOR (CSV atau Excel) dengan sliding window dan klasifikasi BiGRU Feature Extractor + Stacking Classifier.
+    Logika inti pemrosesan file SOR — PERSIS SAMA seperti sebelumnya,
+    cuma sekarang menerima bytes+filename langsung (bukan UploadFile),
+    supaya bisa dipanggil baik dari endpoint upload manual MAUPUN dari
+    local_folder_watcher.py tanpa duplikasi kode.
     """
     # ── LOG: MAIN START ──
     logger.info("=" * 70)
-    logger.info("[SOR] ▶ ENTER PROCESS_SOR")
-    logger.info(f"[SOR]   user={current_user.email} (id={current_user.id})")
-    logger.info(f"[SOR]   filename={file.filename}, content_type={file.content_type}")
-
-    # ── LOG: AUTH SUCCESS ──
-    logger.info("[SOR] ✅ AUTH SUCCESS — token valid, user ditemukan")
+    logger.info("[SOR] ▶ ENTER PROCESS_SOR_CORE")
+    logger.info(f"[SOR]   user_id={user_id}")
+    logger.info(f"[SOR]   filename={filename}")
 
     # 1. Validasi file (support CSV + Excel)
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
-    if not file.filename.lower().endswith(ALLOWED_EXTENSIONS): # .lower() biar CSV atau csv dua-duanya kebaca
-        logger.warning(f"[SOR] ❌ FILE REJECTED: {file.filename}")
+    if not filename.lower().endswith(ALLOWED_EXTENSIONS): # .lower() biar CSV atau csv dua-duanya kebaca
+        logger.warning(f"[SOR] ❌ FILE REJECTED: {filename}")
         raise HTTPException(
             status_code=400, 
             detail=f"File harus berformat: {', '.join(ALLOWED_EXTENSIONS)}"
@@ -1793,10 +1794,9 @@ async def process_sor_file(
     # 2. Baca file (CSV atau Excel)
     logger.info("[SOR] ── STEP 1: READ FILE ──")
     try:
-        content = await file.read() # buka dan baca file
         logger.info(f"[SOR]   file size = {len(content)} bytes")
         
-        if file.filename.lower().endswith('.csv'): # cek ini file CSV atau Excel
+        if filename.lower().endswith('.csv'): # cek ini file CSV atau Excel
             df = pd.read_csv(io.BytesIO(content)) # jika CSV, baca dengan pd.read_csv, hasil masuk ke DataFrame
         else:
             df = pd.read_excel(io.BytesIO(content)) # jika Excel, baca dengan pd.read_excel, hasil masuk ke DataFrame
@@ -1943,8 +1943,8 @@ async def process_sor_file(
     logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
     try:
         db_record = DashboardResult(
-            user_id       = current_user.id,
-            filename      = file.filename,
+            user_id       = user_id,
+            filename      = filename,
             total_points  = len(backscatter_data),
             total_windows = len(predictions),
             classification= final_class,
@@ -1961,7 +1961,7 @@ async def process_sor_file(
     logger.info(f"[SOR] ── STEP 6: TELEGRAM — status={final_status} ──")
     try:
         if final_status != "Normal":
-            send_telegram_dashboard(final_class, final_status, file.filename)
+            send_telegram_dashboard(final_class, final_status, filename)
     except Exception as e:
         logger.error(f"[SOR] ❌ TELEGRAM FAILED: {e}", exc_info=True)
 
@@ -2002,7 +2002,7 @@ async def process_sor_file(
         "window_size"  : window_size,
         "stride"       : stride,
         "total_points" : len(backscatter_data),
-        "filename"     : file.filename,
+        "filename"     : filename,
         "classification": final_class,
         "status"       : final_status,
         "confidence"   : final_confidence,
@@ -2014,6 +2014,27 @@ async def process_sor_file(
         }
     }
 
+
+@app.post("/api/dashboard/process-sor")
+async def process_sor_file(
+    file: UploadFile = File(...), # nerima file CSV atau Excel
+    db: AsyncSession = Depends(get_db), # koneksi database
+    current_user: User = Depends(get_current_user), # user yang sedang login
+):
+    """
+    Endpoint upload manual — pembungkus tipis ke process_sor_core().
+    Logika pemrosesan sesungguhnya ada di process_sor_core(), dipakai
+    bersama oleh endpoint ini DAN local_folder_watcher.py.
+    """
+    logger.info(f"[SOR] Upload manual dari user={current_user.email} (id={current_user.id}), filename={file.filename}")
+    content = await file.read()
+    return await process_sor_core(
+        content=content,
+        filename=file.filename,
+        user_id=current_user.id,
+        db=db,
+    )
+
 # ── Dashboard: Classification History ──────────────────────────────────────────
 
 @app.get("/api/dashboard/history", response_model=list[DashboardResultResponse])
@@ -2021,11 +2042,14 @@ async def get_dashboard_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Kembalikan history klasifikasi SOR milik user, terbaru di atas."""
+    """Kembalikan history klasifikasi SOR milik user + hasil auto-proses folder lokal, terbaru di atas, maksimal 100 baris."""
     result = await db.execute(
         select(DashboardResult)
-        .where(DashboardResult.user_id == current_user.id)
+        .where(
+            (DashboardResult.user_id == current_user.id) | (DashboardResult.user_id.is_(None))
+        )
         .order_by(DashboardResult.created_at.desc())
+        .limit(100)
     )
     return result.scalars().all()
 
