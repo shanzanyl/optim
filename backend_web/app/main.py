@@ -342,24 +342,26 @@ def normalize_for_model(mode: str, cut_km: int, parsed_data: dict) -> dict:
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Setiap ALTER TABLE dijalankan di transaksi TERPISAH — supaya kalau satu
+    # gagal (misal kolom sudah ada), itu TIDAK merusak transaksi untuk
+    # perintah berikutnya. Ini perbaikan dari bug sebelumnya: menaruh banyak
+    # ALTER TABLE dalam 1 transaksi yang sama membuat semua perintah setelah
+    # yang gagal ikut ditolak oleh PostgreSQL, walau dibungkus try/except.
+    from sqlalchemy import text
+    for col_sql, label in [
+        ("ALTER TABLE otdr_results ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE;", "telegram_alert_sent"),
+        ("ALTER TABLE dashboard_results ADD COLUMN backscatter_json TEXT;", "backscatter_json"),
+        ("ALTER TABLE dashboard_results ADD COLUMN distance_json TEXT;", "distance_json"),
+        ("ALTER TABLE dashboard_results ADD COLUMN predictions_json TEXT;", "predictions_json"),
+    ]:
         try:
-            from sqlalchemy import text
-            await conn.execute(text("ALTER TABLE otdr_results ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE;"))
-            logger.info("✅ Database migration: added telegram_alert_sent column")
-        except Exception as mig_err:
-            logger.warning(f"⚠️ Migration check: {mig_err}")
-        for col_sql in [
-            "ALTER TABLE dashboard_results ADD COLUMN backscatter_json TEXT;",
-            "ALTER TABLE dashboard_results ADD COLUMN distance_json TEXT;",
-            "ALTER TABLE dashboard_results ADD COLUMN predictions_json TEXT;",
-        ]:
-            try:
-                from sqlalchemy import text
+            async with engine.begin() as conn:
                 await conn.execute(text(col_sql))
-                logger.info(f"✅ Database migration: {col_sql}")
-            except Exception as mig_err:
-                logger.warning(f"⚠️ Migration check ({col_sql}): {mig_err}")
-    
+            logger.info(f"✅ Database migration: added {label} column")
+        except Exception as mig_err:
+            logger.warning(f"⚠️ Migration check ({label}): {mig_err}")
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.email == ADMIN_EMAIL))
         admin = result.scalar_one_or_none()
