@@ -62,7 +62,7 @@ type ProcessedData = {
   // disimpan ke DB dan yang memicu notifikasi Telegram.
   classification: string;
   status: string;
-  // Rata-rata confidence model BiGRU+Stacking untuk kelas final (classification).
+  // Rata-rata confidence model CNN-BiGRU untuk kelas final (classification).
   // Dikirim backend sebagai top-level field, terpisah dari confidence per-window.
   confidence?: number;
   metadata: {
@@ -90,7 +90,7 @@ type DashboardHistoryItem = {
 const StatusBadge = ({ status, size = 'md' }: { status: string | null | undefined; size?: 'sm' | 'md' | 'lg' }) => {
   const cfg: Record<string, string> = {
     'Normal': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    'Warning': 'bg-amber-500/15 text-amber-500 border-amber-500/30',
+    'Warning': 'bg-amber-500/15 text-amber-400 border-amber-500/30',
     'Critical': 'bg-red-500/15 text-red-400 border-red-500/30',
     'Error': 'bg-red-500/15 text-red-400 border-red-500/30',
   };
@@ -157,6 +157,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const POINTS_PER_TICK = 1;
 
   // ── Normalisasi nama kelas untuk tampilan ──
+  // Label encoder mengeluarkan casing campur ('normal' huruf kecil, sisanya
+  // 'Air Gap' / 'Bad Splice' / 'Bending' / 'Dirty Connector'). DB juga masih
+  // menyimpan record lama dengan casing berbeda. Semua dinormalkan di sini agar
+  // tampil seragam dan agar pengelompokan tidak terpecah.
   const classKey = (s: string | null | undefined) =>
     (s || 'Unknown').trim().toLowerCase();
 
@@ -186,10 +190,34 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     }
   }, [API_URL]);
 
+  // ── Otomatis tampilkan trace hasil auto-fetch TERBARU saat halaman dibuka ──
+  // (tidak perlu klik apa pun — begitu ada hasil auto-fetch baru, langsung tampil)
+  const fetchLatestAutoTrace = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/dashboard/latest-auto-trace`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setData(result);
+        setStatus('ready');
+        setStatusMessage(`Ready! ${result.total_points} data points (auto-fetch: ${result.filename})`);
+        setCurrentPointIndex(-1);
+        setIsPlaying(false);
+      }
+      // Kalau 404 (belum ada hasil auto-fetch), diamkan saja — tidak perlu tampilkan error.
+    } catch (e) {
+      console.error('[DASHBOARD] fetchLatestAutoTrace error:', e);
+    }
+  }, [API_URL]);
+
   // ── Load history on mount ──
   useEffect(() => {
     fetchDbHistory();
-  }, [fetchDbHistory]);
+    fetchLatestAutoTrace();
+  }, [fetchDbHistory, fetchLatestAutoTrace]);
 
   // ── Handle Upload ──
   const handleUpload = useCallback(async (file: File) => {
@@ -510,6 +538,10 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   }), []);
 
   // ── Update sumbu X secara programatik via ref ──
+  // chartOptions sengaja tidak punya `max` (agar stabil / tidak dibuat ulang
+  // tiap tick → zoom plugin tidak terganggu). Sebagai gantinya, sumbu X
+  // di-update langsung lewat chartRef setiap currentPointIndex berubah.
+  // Kalau user sedang zoom (isZoomedOrPanned), update diskip agar zoom persist.
   useEffect(() => {
     if (!chartRef.current || !data || currentPointIndex < 0) return;
     const chart = chartRef.current;
@@ -563,8 +595,6 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     if (p.includes('cut') || p === 'fiber cut') return 'text-red-400 bg-red-500/20 border-red-500/30';
     if (p.includes('bend')) return 'text-amber-400 bg-amber-500/20 border-amber-500/30';
     if (p.includes('splice')) return 'text-orange-400 bg-orange-500/20 border-orange-500/30';
-    if (p.includes('dirty') || p.includes('airgap')) return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
-    if (p.includes('air gap')) return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
     return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
   };
 
@@ -572,7 +602,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const CLASS_COLORS: Record<string, string> = {
     normal: '#34d399',
     'fiber cut': '#f87171',
-    'bending': '#fbbf24',
+    bending: '#fbbf24',
     'bad splice': '#fb923c',
     'dirty connector': '#22d3ee',
     'air gap': '#a78bfa',
@@ -990,7 +1020,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
                     <tr key={i} className="border-t border-[#3b4f6e]/50 hover:bg-[#2a3d60]/30">
                       <td className="px-3 sm:px-4 py-2 font-mono text-sm text-white whitespace-nowrap">
                         {s.start !== null && s.end !== null
-                          ? `${s.start.toFixed(4)} – ${s.end.toFixed(4)} km`
+                          ? `${s.start.toFixed(3)} – ${s.end.toFixed(3)} km`
                           : '-'}
                       </td>
                       <td className="px-3 sm:px-4 py-2">
@@ -1033,7 +1063,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
           </div>
           <div className="flex-1 overflow-x-auto max-h-[480px] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#0f1e35] text-white/90 tracking-wide sticky top-0 z-10">
+              <thead className="bg-[#0f1e35] text-white/90 uppercase tracking-wide sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3 text-left w-12 text-sm font-semibold bg-[#0f1e35]">No</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold bg-[#0f1e35]">Time</th>

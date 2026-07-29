@@ -348,6 +348,17 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Database migration: added telegram_alert_sent column")
         except Exception as mig_err:
             logger.warning(f"⚠️ Migration check: {mig_err}")
+        for col_sql in [
+            "ALTER TABLE dashboard_results ADD COLUMN backscatter_json TEXT;",
+            "ALTER TABLE dashboard_results ADD COLUMN distance_json TEXT;",
+            "ALTER TABLE dashboard_results ADD COLUMN predictions_json TEXT;",
+        ]:
+            try:
+                from sqlalchemy import text
+                await conn.execute(text(col_sql))
+                logger.info(f"✅ Database migration: {col_sql}")
+            except Exception as mig_err:
+                logger.warning(f"⚠️ Migration check ({col_sql}): {mig_err}")
     
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.email == ADMIN_EMAIL))
@@ -1942,6 +1953,30 @@ async def process_sor_core(
     # 8. Simpan ke database
     logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
     try:
+        # Data mentah HANYA disimpan untuk hasil auto-fetch (user_id kosong),
+        # karena upload manual sudah bisa dilihat langsung saat itu juga tanpa
+        # perlu disimpan permanen — ini menghindari beban database dobel.
+        _is_auto_fetch = user_id is None
+        _backscatter_for_storage = None
+        _distance_for_storage_json = None
+        _predictions_for_storage_json = None
+
+        if _is_auto_fetch:
+            def _sanitize_for_json(val):
+                if val is None:
+                    return None
+                try:
+                    f = float(val)
+                    if f != f or f in (float('inf'), float('-inf')):
+                        return None
+                    return f
+                except Exception:
+                    return None
+
+            _backscatter_for_storage = json.dumps([_sanitize_for_json(v) for v in backscatter_data])
+            _distance_for_storage_json = json.dumps(distance_data)
+            _predictions_for_storage_json = json.dumps(predictions)
+
         db_record = DashboardResult(
             user_id       = user_id,
             filename      = filename,
@@ -1949,6 +1984,9 @@ async def process_sor_core(
             total_windows = len(predictions),
             classification= final_class,
             status        = final_status,
+            backscatter_json = _backscatter_for_storage,
+            distance_json    = _distance_for_storage_json,
+            predictions_json = _predictions_for_storage_json,
         )
         db.add(db_record)
         await db.commit()
@@ -2052,6 +2090,58 @@ async def get_dashboard_history(
         .limit(100)
     )
     return result.scalars().all()
+
+
+@app.get("/api/dashboard/latest-auto-trace")
+async def get_latest_auto_trace(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Ambil otomatis trace hasil auto-fetch TERBARU (user_id kosong), supaya
+    bisa langsung ditampilkan begitu halaman Dashboard dibuka — tanpa perlu
+    klik apa pun. Kalau belum ada hasil auto-fetch sama sekali, kembalikan
+    404 (frontend cukup diamkan, tidak perlu tampilkan error ke user).
+    """
+    result = await db.execute(
+        select(DashboardResult)
+        .where(
+            DashboardResult.user_id.is_(None),
+            DashboardResult.backscatter_json.is_not(None),
+        )
+        .order_by(DashboardResult.created_at.desc())
+        .limit(1)
+    )
+    record = result.scalar_one_or_none()
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Belum ada hasil auto-fetch")
+
+    backscatter = json.loads(record.backscatter_json)
+    distance    = json.loads(record.distance_json) if record.distance_json else []
+    predictions = json.loads(record.predictions_json) if record.predictions_json else []
+
+    matching_confidences = [
+        p["confidence"] for p in predictions if p["prediction"].lower() == record.classification.lower()
+    ]
+    confidence = round(float(np.mean(matching_confidences)), 2) if matching_confidences else 0.0
+
+    return {
+        "success"       : True,
+        "backscatter"   : backscatter,
+        "distance"      : distance,
+        "predictions"   : predictions,
+        "total_windows" : record.total_windows,
+        "window_size"   : 80,
+        "stride"        : 40,
+        "total_points"  : record.total_points,
+        "filename"      : record.filename,
+        "classification": record.classification,
+        "status"        : record.status,
+        "confidence"    : confidence,
+        "history_id"    : record.id,
+        "metadata": {"columns": [], "rows": record.total_points, "loss_col": None, "distance_col": None}
+    }
 
 
 @app.delete("/api/dashboard/history/{history_id}")

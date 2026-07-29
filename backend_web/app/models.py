@@ -90,4 +90,11 @@ class DashboardResult(Base):
     status         = Column(String(50), nullable=False)    # Normal / Warning / Critical
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Data mentah trace, disimpan sebagai JSON string supaya bisa ditampilkan ulang
+    # kapan saja tanpa upload ulang — dipakai juga oleh hasil auto-fetch, yang
+    # tidak pernah punya sesi browser aktif untuk menampilkan trace secara langsung.
+    backscatter_json = Column(Text, nullable=True)
+    distance_json    = Column(Text, nullable=True)
+    predictions_json = Column(Text, nullable=True)
+
     owner = relationship("User", backref="dashboard_results")
