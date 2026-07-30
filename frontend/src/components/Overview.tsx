@@ -118,16 +118,14 @@ const Overview = ({ onLogin }: OverviewProps) => {
       </div>
     </div>
 
-    {/* Hero Text - lebih kecil di HP */}
     <h2 className="text-lg md:text-3xl font-light leading-tight mb-2 md:mb-4 text-white text-center md:text-left">
-      Sistem Monitoring & Klasifikasi
+      Fiber Optic Fault
       <br />
-      Gangguan <span className="font-semibold text-blue-400">Fiber Optic</span>
+        <span className="font-semibold text-blue-400">Classification System</span>
     </h2>
     
     <p className="text-slate-100 text-sm md:text-base leading-relaxed max-w-md text-center md:text-left mx-auto md:mx-0">
-      Platform berbasis Machine Learning untuk mengklasifikasikan 
-      gangguan pada jaringan fiber optic secara akurat.
+      A machine learning-based platform for automatic fiber optic fault classification using OTDR measurement data.
     </p>
   </div>
 </div>
