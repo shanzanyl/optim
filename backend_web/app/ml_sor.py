@@ -104,26 +104,6 @@ def load_sor_models():
 
 
 def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int = 40) -> list:
-    """
-    BATCH PREDICT dengan BiGRU Feature Extractor + Stacking Classifier — window_size=80, stride=40.
-
-    Pipeline:
-    1. Sliding window pada data backscatter (kolom Loss dB)
-    2. Setiap window dinormalisasi secara independen dengan normalize_per_segment()
-       dari normalization.py (BUKAN StandardScaler/scaler.pkl)
-    3. Reshape ke (batch, window_size, 1)
-    4. Ekstrak fitur 64-dimensi lewat layer GRU BiGRU (sor_feature_extractor)
-    5. Fitur diklasifikasi oleh Stacking Classifier (RF + XGBoost -> Logistic Regression)
-    6. Decode label via label encoder
-
-    Args:
-        backscatter_data: list nilai Loss (dB) dari CSV/Excel
-        window_size: ukuran sliding window (default 80)
-        stride: pergeseran antar window (default 40)
-
-    Returns:
-        list of dict: [{start, end, prediction, confidence}, ...]
-    """
     if sor_feature_extractor is None:
         raise Exception("[ML_SOR] Feature extractor is None — model belum dimuat")
     if sor_stacking is None:

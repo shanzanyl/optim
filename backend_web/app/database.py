@@ -12,8 +12,25 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://optim_user:optim2026@localhost:5432/optim_db"
 )
 
-engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+# ============================================================
+# CONNECTION POOL YANG STABIL UNTUK PRODUCTION
+# ============================================================
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,                    # Matikan echo di production (bikin lambat)
+    pool_size=10,                  # Jumlah koneksi tetap di pool
+    max_overflow=20,               # Koneksi tambahan jika pool penuh
+    pool_timeout=30,               # Timeout menunggu koneksi (detik)
+    pool_recycle=1800,             # Refresh koneksi setiap 30 menit
+    pool_pre_ping=True,            # ⭐ CEK KONEKSI SEBELUM DIPAKAI
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
 
 Base = declarative_base()
 
