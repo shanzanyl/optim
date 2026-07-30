@@ -154,7 +154,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   // Animasi trace dipercepat: interval lebih pendek + beberapa titik per tick,
   // sehingga visualisasi selesai jauh lebih cepat namun tetap terlihat halus.
   const PLAYBACK_INTERVAL_MS = 50;
-  const POINTS_PER_TICK = 1;
+  const POINTS_PER_TICK = 13;
 
   // ── Normalisasi nama kelas untuk tampilan ──
   // Label encoder mengeluarkan casing campur ('normal' huruf kecil, sisanya
