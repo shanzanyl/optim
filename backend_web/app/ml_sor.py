@@ -34,9 +34,9 @@ SOR_LABEL_PATHS = [
     Path.cwd() / "models" / "sor" / "label_encoder.pkl",
 ]
 
-sor_model             = None   # model BiGRU penuh (dipakai untuk membangun feature extractor)
-sor_feature_extractor  = None   # sub-model: input -> output layer GRU (64-dim feature)
-sor_stacking           = None   # StackingClassifier (RF + XGB -> LogisticRegression)
+sor_model             = None   
+sor_feature_extractor  = None   
+sor_stacking           = None   
 sor_le                 = None
 
 
@@ -55,7 +55,7 @@ def load_sor_models():
             try:
                 import tensorflow as tf
                 sor_model = tf.keras.models.load_model(str(path))
-                logger.info(f"[ML_SOR] ✅ BiGRU model loaded: {path}")
+                logger.info(f"[ML_SOR]  BiGRU model loaded: {path}")
                 logger.info(f"[ML_SOR]   input_shape={sor_model.input_shape}, output_shape={sor_model.output_shape}")
 
                 # Bangun ulang sub-model sampai layer GRU saja (nama layer: 'gru_4').
@@ -68,7 +68,7 @@ def load_sor_models():
                     if layer.name == "gru_4":
                         break
                 sor_feature_extractor = tf.keras.Model(inputs=inp, outputs=x)
-                logger.info(f"[ML_SOR] ✅ Feature extractor built: output_shape={sor_feature_extractor.output_shape}")
+                logger.info(f"[ML_SOR]  Feature extractor built: output_shape={sor_feature_extractor.output_shape}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
@@ -79,7 +79,7 @@ def load_sor_models():
         if path.exists():
             try:
                 sor_stacking = joblib.load(path)
-                logger.info(f"[ML_SOR] ✅ Stacking classifier loaded: {path}")
+                logger.info(f"[ML_SOR]  Stacking classifier loaded: {path}")
                 logger.info(f"[ML_SOR]   n_features_in_={getattr(sor_stacking, 'n_features_in_', '?')}")
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
@@ -89,18 +89,18 @@ def load_sor_models():
         if path.exists():
             try:
                 sor_le = joblib.load(path)
-                logger.info(f"[ML_SOR] ✅ Label encoder loaded: {path}")
+                logger.info(f"[ML_SOR]  Label encoder loaded: {path}")
                 logger.info(f"[ML_SOR]   classes={sor_le.classes_.tolist()}")
                 break
             except Exception as e:
                 logger.warning(f"[ML_SOR] Failed to load {path}: {e}")
 
     if sor_feature_extractor is None:
-        logger.error("[ML_SOR] ❌ BiGRU feature extractor NOT loaded")
+        logger.error("[ML_SOR]  BiGRU feature extractor NOT loaded")
     if sor_stacking is None:
-        logger.error("[ML_SOR] ❌ Stacking classifier NOT loaded")
+        logger.error("[ML_SOR]  Stacking classifier NOT loaded")
     if sor_le is None:
-        logger.error("[ML_SOR] ❌ Label encoder NOT loaded")
+        logger.error("[ML_SOR]  Label encoder NOT loaded")
 
 
 def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int = 40) -> list:
@@ -119,13 +119,13 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
             f"[ML_SOR] Data hanya {n} titik, tidak cukup untuk window_size={window_size}"
         )
 
-    logger.info(f"[ML_SOR] 🔄 Building matrix {total_windows} × {window_size} (stride={stride})...")
+    logger.info(f"[ML_SOR]  Building matrix {total_windows} × {window_size} (stride={stride})...")
 
     arr = np.array(backscatter_data, dtype=np.float64)
 
     # Bersihkan NaN/Inf
     if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
-        logger.warning("[ML_SOR] ⚠️ Data mengandung NaN/Inf, dibersihkan dengan 0")
+        logger.warning("[ML_SOR]  Data mengandung NaN/Inf, dibersihkan dengan 0")
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Vectorized sliding window — shape: (total_windows, window_size)
@@ -133,25 +133,22 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
     strides = (arr.strides[0] * stride, arr.strides[0])
     X_all   = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides).copy()
 
-    logger.info(f"[ML_SOR] ✅ Matrix built: shape={X_all.shape}")
+    logger.info(f"[ML_SOR]  Matrix built: shape={X_all.shape}")
 
-    # ── Normalisasi per-segment (menggantikan StandardScaler) ─────────────────
-    # Setiap baris (window) dinormalisasi secara independen:
-    #   normalized = (window - mean) / (std + 1e-8)
     X_normalized = apply_normalization(X_all)  # shape: (total_windows, window_size)
 
-    logger.info(f"[ML_SOR] ✅ Per-segment normalization applied")
+    logger.info(f"[ML_SOR]  Per-segment normalization applied")
 
     # Reshape untuk BiGRU: (batch, timesteps, features) = (total_windows, window_size, 1)
     X_input = X_normalized.reshape(total_windows, window_size, 1)
 
-    logger.info(f"[ML_SOR] 🔄 Extracting {total_windows} window features via BiGRU...")
+    logger.info(f"[ML_SOR]  Extracting {total_windows} window features via BiGRU...")
 
     # Tahap 1: ekstraksi fitur 64-dimensi lewat layer GRU
     features = sor_feature_extractor.predict(X_input, batch_size=256, verbose=0)
     # features shape: (total_windows, 64)
 
-    logger.info(f"[ML_SOR] 🔄 Running Stacking Classifier on extracted features...")
+    logger.info(f"[ML_SOR]  Running Stacking Classifier on extracted features...")
 
     # Tahap 2: klasifikasi oleh Stacking Classifier
     proba_all = sor_stacking.predict_proba(features)
@@ -175,5 +172,5 @@ def predict_sor_batch(backscatter_data: list, window_size: int = 80, stride: int
             "confidence": round(float(confidences[i]) * 100, 2),
         })
 
-    logger.info(f"[ML_SOR] ✅ Done: {total_windows} windows predicted")
+    logger.info(f"[ML_SOR]  Done: {total_windows} windows predicted")
     return results

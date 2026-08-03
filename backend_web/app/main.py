@@ -1798,7 +1798,7 @@ async def process_sor_core(
 
     # 1. Validasi file (support CSV + Excel)
     ALLOWED_EXTENSIONS = ('.xlsx', '.xls', '.csv')
-    if not filename.lower().endswith(ALLOWED_EXTENSIONS): # .lower() biar CSV atau csv dua-duanya kebaca
+    if not filename.lower().endswith(ALLOWED_EXTENSIONS):
         logger.warning(f"[SOR] ❌ FILE REJECTED: {filename}")
         raise HTTPException(
             status_code=400, 
@@ -1810,10 +1810,10 @@ async def process_sor_core(
     try:
         logger.info(f"[SOR]   file size = {len(content)} bytes")
         
-        if filename.lower().endswith('.csv'): # cek ini file CSV atau Excel
-            df = pd.read_csv(io.BytesIO(content)) # jika CSV, baca dengan pd.read_csv, hasil masuk ke DataFrame
+        if filename.lower().endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
         else:
-            df = pd.read_excel(io.BytesIO(content)) # jika Excel, baca dengan pd.read_excel, hasil masuk ke DataFrame
+            df = pd.read_excel(io.BytesIO(content))
             
         logger.info(f"[SOR] ✅ READ EXCEL/CSV: {len(df)} rows × {len(df.columns)} columns")
         logger.info(f"[SOR]   columns = {df.columns.tolist()}")
@@ -1828,16 +1828,15 @@ async def process_sor_core(
     # Cari kolom Loss (dB)
     loss_col = None
     possible_loss = ['loss (db)', 'loss(db)', 'loss_db', 'loss']
-    for col in df.columns: # lihat semua kolom di DataFrame
+    for col in df.columns:
         if col.lower().strip().replace(' ', '') in [p.replace(' ', '') for p in possible_loss]:
             loss_col = col
             break
     if loss_col is None:
-        # Fallback: cari yang mengandung 'loss'
         for col in df.columns:
             if 'loss' in col.lower():
                 loss_col = col
-                break # kalau ketemu, langsung break
+                break
 
     if loss_col is None:
         logger.error(f"[SOR] ❌ LOSS COLUMN NOT FOUND. Available: {df.columns.tolist()}")
@@ -1860,10 +1859,26 @@ async def process_sor_core(
     distance_data = pd.to_numeric(df[distance_col], errors='coerce').fillna(0).values.tolist() if distance_col else []
     logger.info(f"[SOR]   total data points = {len(loss_data)}")
 
-    # Alias untuk kompatibilitas kode di bawah
-    backscatter_data = loss_data # alias: data ini adalah Loss (dB), nama historis "backscatter"
+    # 🔥 VALIDASI: Cek konsistensi distance data
+    if distance_data:
+        if len(distance_data) != len(loss_data):
+            logger.warning(f"[SOR] ⚠️ Distance length ({len(distance_data)}) != Loss length ({len(loss_data)})")
+            # Coba gunakan distance yang ada, fallback ke indeks jika tidak cukup
+            if len(distance_data) < len(loss_data):
+                logger.warning(f"[SOR] ⚠️ Distance lebih pendek, akan di-pad dengan indeks")
+        else:
+            # Cek apakah distance valid (ada nilai > 0)
+            valid_distances = [d for d in distance_data if d > 0]
+            if valid_distances:
+                logger.info(f"[SOR] ✅ Distance data valid: min={min(valid_distances):.3f}, max={max(valid_distances):.3f} km")
+            else:
+                logger.warning(f"[SOR] ⚠️ Distance data semua 0, akan gunakan indeks sebagai fallback")
+                distance_data = []
 
-    if len(backscatter_data) < 80: # minimal 80 titik diperlukan untuk sliding window
+    # Alias untuk kompatibilitas kode di bawah
+    backscatter_data = loss_data
+
+    if len(backscatter_data) < 80:
         raise HTTPException(
             status_code=400,
             detail=f"Data Loss (dB) hanya {len(backscatter_data)} titik. Minimal 80 titik diperlukan."
@@ -1883,16 +1898,16 @@ async def process_sor_core(
     logger.info(f"[SOR]   normalization: per-segment (normalization.py)")
     logger.info(f"[SOR]   label encoder = {ml_sor.sor_le is not None}")
 
-   # 6. BATCH PREDICT — window_size=80, stride=40 (BiGRU Feature Extractor + Stacking Classifier)
-    window_size  = 80
-    stride       = 40
+    # 6. BATCH PREDICT — window_size=80, stride=40
+    window_size = 80
+    stride = 40
     total_windows = max(0, (len(backscatter_data) - window_size) // stride + 1)
 
     logger.info(f"[SOR] ── STEP 4: BATCH PREDICT ──")
     logger.info(f"[SOR]   window_size={window_size}, stride={stride}, total_windows={total_windows}")
 
     try:
-        predictions = await asyncio.to_thread( # klasifikasi semua window sekaligus dalam satu panggilan ke model (lebih cepat daripada memanggil model per window)
+        predictions = await asyncio.to_thread(
             ml_sor.predict_sor_batch,
             backscatter_data,
             window_size,
@@ -1904,11 +1919,52 @@ async def process_sor_core(
 
     logger.info(f"[SOR] ✅ PREDICTION SUCCESS: {len(predictions)} windows selesai")
 
-    # 7. Klasifikasi final — SATU KELAS PER FILE, MURNI DARI KELUARAN MODEL
-         # Kumpulin prediksi semua window → buang yang Normal → kalau nggak ada gangguan tersisa = Normal,
-         # kalau ada = ambil gangguan terbanyak → tentukan status (Cut=Critical, lain=Warning).
+    # 🔥 TAMBAHKAN: Mapping index → distance untuk predictions
+    # Ini adalah perbaikan utama — predictions sekarang punya start_km/end_km
+    logger.info("[SOR] ── STEP 4b: MAPPING INDEX → DISTANCE ──")
+    
+    # Siapkan distance array untuk mapping
+    if distance_data and len(distance_data) == len(backscatter_data):
+        # Cek apakah distance_data valid (ada nilai > 0)
+        if any(d > 0 for d in distance_data):
+            dist_arr = np.array(distance_data, dtype=np.float64)
+            logger.info(f"[SOR] ✅ Distance array siap: len={len(dist_arr)}, min={np.min(dist_arr[distance_data > 0]) if any(d > 0 for d in distance_data) else 0:.3f} km")
+        else:
+            # Distance semua 0, fallback ke indeks
+            logger.warning("[SOR] ⚠️ Distance data semua 0, gunakan indeks sebagai fallback")
+            dist_arr = np.arange(len(backscatter_data), dtype=np.float64)
+    else:
+        # Distance tidak tersedia atau panjang tidak sama, fallback ke indeks
+        logger.warning(f"[SOR] ⚠️ Distance tidak valid (len={len(distance_data) if distance_data else 0}), gunakan indeks sebagai fallback")
+        dist_arr = np.arange(len(backscatter_data), dtype=np.float64)
+
+    def get_distance(idx: int) -> float:
+        """Mengembalikan distance dalam km dari index."""
+        idx_clamped = min(max(idx, 0), len(dist_arr) - 1)
+        return float(dist_arr[idx_clamped])
+
+    # Map predictions: ubah start/end dari index menjadi distance
+    mapped_predictions = []
+    for p in predictions:
+        # Log untuk verifikasi mapping (hanya beberapa window pertama)
+        if p["start"] < 200:  # Log untuk 5 window pertama
+            logger.info(f"[SOR] 📍 Window: index {p['start']}-{p['end']} → distance {get_distance(p['start']):.3f}-{get_distance(p['end']):.3f} km, pred={p['prediction']}")
+        
+        mapped_predictions.append({
+            "start_km": get_distance(p["start"]),
+            "end_km": get_distance(p["end"]),
+            "start_idx": p["start"],
+            "end_idx": p["end"],
+            "prediction": p["prediction"],
+            "confidence": p["confidence"],
+        })
+    
+    logger.info(f"[SOR] ✅ Mapped {len(mapped_predictions)} predictions to distance")
+
+    # 7. Klasifikasi final — SATU KELAS PER FILE
     from collections import Counter
 
+    # Gunakan predictions asli (bukan mapped) untuk klasifikasi
     class_counts: dict = Counter(p["prediction"] for p in predictions)
     logger.info(f"[SOR]   class_counts={dict(class_counts)}")
 
@@ -1925,7 +1981,6 @@ async def process_sor_core(
         if len(tied) == 1:
             final_class = tied[0]
         else:
-            # Ada tie — menangkan kelas dengan rata-rata confidence tertinggi
             avg_conf = {
                 cls: np.mean([p["confidence"] for p in predictions if p["prediction"] == cls])
                 for cls in tied
@@ -1956,9 +2011,6 @@ async def process_sor_core(
     # 8. Simpan ke database
     logger.info("[SOR] ── STEP 5: SAVE TO DB ──")
     try:
-        # Data mentah HANYA disimpan untuk hasil auto-fetch (user_id kosong),
-        # karena upload manual sudah bisa dilihat langsung saat itu juga tanpa
-        # perlu disimpan permanen — ini menghindari beban database dobel.
         _is_auto_fetch = user_id is None
         _backscatter_for_storage = None
         _distance_for_storage_json = None
@@ -1978,7 +2030,8 @@ async def process_sor_core(
 
             _backscatter_for_storage = json.dumps([_sanitize_for_json(v) for v in backscatter_data])
             _distance_for_storage_json = json.dumps(distance_data)
-            _predictions_for_storage_json = json.dumps(predictions)
+            # Simpan mapped_predictions, bukan predictions asli
+            _predictions_for_storage_json = json.dumps(mapped_predictions)
 
         db_record = DashboardResult(
             user_id       = user_id,
@@ -2034,11 +2087,12 @@ async def process_sor_core(
     else:
         final_confidence = 0.0
 
+    # 🔥 PERUBAHAN: Return menggunakan mapped_predictions
     return {
         "success"      : True,
-        "backscatter"  : clean_backscatter,   # Loss (dB) — untuk grafik Y
-        "distance"     : distance_data,        # Distance — untuk grafik X
-        "predictions"  : predictions,
+        "backscatter"  : clean_backscatter,
+        "distance"     : distance_data,
+        "predictions"  : mapped_predictions,  # ← PERUBAHAN: pakai mapped_predictions
         "total_windows": len(predictions),
         "window_size"  : window_size,
         "stride"       : stride,
@@ -2058,9 +2112,9 @@ async def process_sor_core(
 
 @app.post("/api/dashboard/process-sor")
 async def process_sor_file(
-    file: UploadFile = File(...), # nerima file CSV atau Excel
-    db: AsyncSession = Depends(get_db), # koneksi database
-    current_user: User = Depends(get_current_user), # user yang sedang login
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Endpoint upload manual — pembungkus tipis ke process_sor_core().

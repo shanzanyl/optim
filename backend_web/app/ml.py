@@ -33,7 +33,6 @@ OTDR_SCALER_PATHS  = _candidates("scaler.pkl")
 
 
 def _load_any(path: Path):
-    """Muat artefak .pkl, baik yang disimpan via joblib maupun pickle."""
     try:
         return joblib.load(path)
     except Exception:
@@ -66,18 +65,8 @@ scaler          = _load_first(OTDR_SCALER_PATHS,  "Scaler")
 if feature_columns is not None:
     feature_columns = [str(col).strip() for col in feature_columns]
 else:
-    # Tidak ada daftar fitur cadangan. Menebak urutan fitur berarti menghasilkan
-    # prediksi yang salah tanpa ketahuan, sehingga lebih baik gagal di sini.
     logger.error("❌ feature_order.pkl tidak ditemukan — prediksi model dinonaktifkan")
 
-
-# ══════════════════════════════════════════════════════════════════
-# VALIDASI KECOCOKAN ARTEFAK
-# ══════════════════════════════════════════════════════════════════
-# Model, scaler, dan feature_order harus berasal dari proses pelatihan yang
-# sama. Bila tidak cocok, prediksi tetap berjalan tetapi hasilnya salah secara
-# diam-diam — jauh lebih berbahaya daripada gagal terang-terangan. Pemeriksaan
-# ini mencetak peringatan saat startup agar ketidakcocokan langsung terlihat.
 
 def _validate_artifacts():
     if feature_columns is None:

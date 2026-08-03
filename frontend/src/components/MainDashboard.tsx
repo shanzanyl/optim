@@ -40,9 +40,12 @@ ChartJS.register(
 // TIPE DATA
 // ─────────────────────────────────────────────────────────────
 
+// 🔥 PERBAIKAN: PredictionResult sekarang menggunakan start_km/end_km dari backend
 type PredictionResult = {
-  start: number;
-  end: number;
+  start_km: number;     // distance dalam km untuk start window
+  end_km: number;       // distance dalam km untuk end window
+  start_idx: number;    // index asli di array backscatter
+  end_idx: number;      // index asli di array backscatter
   prediction: string;
   confidence: number;
 };
@@ -424,7 +427,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     };
   }, [isPlaying, data]);
 
-  // ── Chart Data — Loss (dB) trace, sumbu X = Distance (km) ──
+  // 🔥 PERBAIKAN: Chart Data — dengan fallback yang lebih baik
   const chartData = useMemo(() => {
     if (!data || currentPointIndex < 0) return null;
 
@@ -434,16 +437,18 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     const distArr = data.distance ?? [];
     const hasDistance =
       distArr.length === data.backscatter.length &&
-      distArr.some(v => v !== null && v !== undefined);
+      distArr.some(v => v !== null && v !== undefined && Number(v) > 0);
 
     // Format {x, y}: x = Distance (km), y = Loss (dB)
     const points = displayedData.map((val, i) => {
       const d = distArr[i];
+      // Gunakan distance jika valid, fallback ke index
+      const x = hasDistance && d !== null && d !== undefined ? Number(d) : i;
       return {
-        x: hasDistance && d !== null && d !== undefined ? Number(d) : i,
+        x: x,
         y: val !== null && val !== undefined ? Number(val) : null,
       };
-    }).filter(p => p.y !== null);
+    }).filter(p => p.y !== null && p.y !== undefined && !isNaN(p.y));
 
     return {
       datasets: [
@@ -565,7 +570,7 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     const distArr = data.distance ?? [];
     const hasDistance =
       distArr.length === data.backscatter.length &&
-      distArr.some(v => v !== null && v !== undefined);
+      distArr.some(v => v !== null && v !== undefined && Number(v) > 0);
 
     let newMax: number | undefined;
     if (hasDistance) {
@@ -591,13 +596,13 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
   const verdictClass = data ? formatClassName(data.classification) : null;
   const verdictStatus = data?.status || null;
 
-  // ── Posisi Distance yang sedang diproses (mengikuti sumbu X chart) ──
+  // 🔥 PERBAIKAN: Posisi Distance yang sedang diproses
   const currentDistance = useMemo(() => {
     if (!data || currentPointIndex < 0) return null;
     const distArr = data.distance ?? [];
     const hasDistance =
       distArr.length === data.backscatter.length &&
-      distArr.some(v => v !== null && v !== undefined);
+      distArr.some(v => v !== null && v !== undefined && Number(v) > 0);
     if (!hasDistance) return null;
     const d = distArr[currentPointIndex];
     return d !== null && d !== undefined ? Number(d) : null;
@@ -689,58 +694,42 @@ const MainDashboard = ({ refreshTrigger, onDataChange }: MainDashboardProps) => 
     },
   }), [faultDistribution]);
 
-  // ── Trace Segments — seluruh window, digabung per kelas ──
-  // Window berurutan yang kelasnya sama digabung jadi satu segmen. Tidak ada
-  // window yang disaring atau disembunyikan: penggabungan hanya menyatukan label
-  // yang identik, jadi seluruh 313 window tetap terwakili. Jarak diambil dari
-  // kolom Distance file, memakai indeks start/end tiap window.
+  // 🔥 PERBAIKAN: Trace Segments — sekarang menggunakan start_km/end_km dari backend
   const segments = useMemo(() => {
     if (!data || !data.predictions?.length) return [];
 
-    const distArr = data.distance ?? [];
-    const hasDistance =
-      distArr.length === data.backscatter.length &&
-      distArr.some(v => v !== null && v !== undefined);
-
-    const raw: { cls: string; startIdx: number; endIdx: number; confidences: number[] }[] = [];
+    // Gabungkan window berurutan dengan kelas yang sama
+    const raw: { cls: string; startKm: number; endKm: number; confidences: number[] }[] = [];
+    
     data.predictions.forEach(p => {
       const cls = formatClassName(p.prediction);
       const last = raw[raw.length - 1];
       if (last && last.cls === cls) {
-        last.endIdx = p.end;
+        // Perpanjang segmen yang sama
+        last.endKm = p.end_km;
         last.confidences.push(p.confidence);
       } else {
-        raw.push({ cls, startIdx: p.start, endIdx: p.end, confidences: [p.confidence] });
+        // Mulai segmen baru
+        raw.push({ 
+          cls, 
+          startKm: p.start_km, 
+          endKm: p.end_km,
+          confidences: [p.confidence] 
+        });
       }
     });
 
-    const at = (i: number) => {
-      const idx = Math.min(Math.max(i, 0), distArr.length - 1);
-      const v = distArr[idx];
-      return v !== null && v !== undefined ? Number(v) : null;
-    };
-
-    // Window saling menimpa (stride < window_size), jadi batas segmen diambil
-    // dari titik awal tiap window agar rentangnya bersambung rapi tanpa
-    // tumpang tindih dan tetap menutup seluruh panjang fiber.
-    return raw.map((s, i) => {
-      const endIdx =
-        i + 1 < raw.length ? raw[i + 1].startIdx - 1 : data.total_points - 1;
-      const avgConfidence =
-        s.confidences.reduce((a, b) => a + b, 0) / s.confidences.length;
-      // Status per segmen mengikuti aturan sama seperti verdict final di
-      // backend: Normal → Normal, mengandung "cut" → Critical, gangguan
-      // lain → Warning.
+    // Konversi ke output
+    return raw.map((s) => {
+      const avgConfidence = s.confidences.reduce((a, b) => a + b, 0) / s.confidences.length;
       const clsLower = s.cls.toLowerCase();
-      const segStatus =
-        clsLower === 'normal' ? 'Normal' :
-        clsLower.includes('cut') ? 'Critical' :
-        'Warning';
+      const segStatus = clsLower === 'normal' ? 'Normal' :
+                        clsLower.includes('cut') ? 'Critical' : 'Warning';
       return {
         cls: s.cls,
         status: segStatus,
-        start: hasDistance ? at(s.startIdx) : null,
-        end: hasDistance ? at(endIdx) : null,
+        start: s.startKm,
+        end: s.endKm,
         confidence: avgConfidence,
       };
     });
