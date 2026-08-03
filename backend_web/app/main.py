@@ -1924,11 +1924,17 @@ async def process_sor_core(
     logger.info("[SOR] ── STEP 4b: MAPPING INDEX → DISTANCE ──")
     
     # Siapkan distance array untuk mapping
+    # 🔥 PERBAIKAN: Gunakan numpy array untuk operasi filter, bukan list
     if distance_data and len(distance_data) == len(backscatter_data):
-        # Cek apakah distance_data valid (ada nilai > 0)
-        if any(d > 0 for d in distance_data):
-            dist_arr = np.array(distance_data, dtype=np.float64)
-            logger.info(f"[SOR] ✅ Distance array siap: len={len(dist_arr)}, min={np.min(dist_arr[distance_data > 0]) if any(d > 0 for d in distance_data) else 0:.3f} km")
+        # Konversi ke numpy array untuk filtering
+        dist_arr_np = np.array(distance_data, dtype=np.float64)
+        valid_distances = dist_arr_np[dist_arr_np > 0]
+        
+        if len(valid_distances) > 0:
+            dist_arr = dist_arr_np
+            min_dist = np.min(valid_distances)
+            max_dist = np.max(valid_distances)
+            logger.info(f"[SOR] ✅ Distance array siap: len={len(dist_arr)}, min={min_dist:.3f}, max={max_dist:.3f} km")
         else:
             # Distance semua 0, fallback ke indeks
             logger.warning("[SOR] ⚠️ Distance data semua 0, gunakan indeks sebagai fallback")
